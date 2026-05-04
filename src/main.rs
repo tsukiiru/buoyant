@@ -1,3 +1,7 @@
+use iced::{
+    Element, Task, debug,
+    widget::{button, column, container, scrollable, text},
+};
 use path::PathControl;
 use std::{
     env::home_dir,
@@ -19,7 +23,7 @@ impl Program {
         }
     }
 
-    fn open(&mut self, new_path: PathBuf) -> Result<(), Box<dyn Error>> {
+    fn open(&mut self, new_path: PathBuf) {
         if new_path.is_dir() {
             self.path = new_path;
             // if its a folder
@@ -35,8 +39,6 @@ impl Program {
             // try to open with default program
             // if not, errors
         }
-
-        Ok(())
     }
 
     fn relative_nav(&mut self, dir: PathControl) {
@@ -57,10 +59,11 @@ impl Program {
             }
         }
 
-        println!("new path is at: {}", self.path.display());
+        // println!("new path is at: {}", self.path.display());
     }
 }
 
+#[cfg(debug_assertions)]
 fn show(path: &PathBuf) -> Result<(), Box<dyn Error>> {
     println!("displaying children for path: {}", path.display());
     println!("");
@@ -72,18 +75,74 @@ fn show(path: &PathBuf) -> Result<(), Box<dyn Error>> {
     Ok(())
 }
 
-fn main() -> Result<(), Box<dyn Error>> {
-    let mut program = Program::init(home_dir().unwrap());
+#[derive(Clone, Debug)]
+enum Message {
+    Open(PathBuf),
+    Navigate(PathControl),
+}
 
-    // lets try moving a path
-    path::move_dir(
-        vec![
-            PathBuf::from("/home/dew/img.png"),
-            PathBuf::from("/home/dew/img.png"),
-            PathBuf::from("/home/dew/img.png"),
-        ],
-        PathBuf::from("/home/dew/target/"),
-    )?;
+struct Application {
+    program: Program,
+}
 
-    Ok(())
+impl Application {
+    fn new() -> Self {
+        Application {
+            program: Program::init(home_dir().unwrap()),
+        }
+    }
+
+    fn update(&mut self, message: Message) -> Task<Message> {
+        match message {
+            Message::Open(path) => {
+                self.program.open(path);
+
+                Task::none()
+            }
+            Message::Navigate(to) => {
+                match to {
+                    PathControl::Backward => {
+                        self.program.relative_nav(PathControl::Backward);
+                    }
+                    PathControl::Forward => {
+                        self.program.relative_nav(PathControl::Forward);
+                    }
+                }
+                Task::none()
+            }
+        }
+    }
+
+    fn view(&self) -> Element<'_, Message> {
+        let files = path::read_dir(&self.program.path).unwrap();
+        let buttons: Element<Message> =
+            column!(button(text("...")).on_press(Message::Navigate(PathControl::Backward).into()))
+                .extend(
+                    files
+                        .iter()
+                        .map(|f| {
+                            let name = f.file_name().unwrap().to_str().unwrap().to_string();
+                            button(text(name))
+                                .on_press(Message::Open(f.to_path_buf()))
+                                .into()
+                        })
+                        .collect::<Vec<_>>(),
+                )
+                .spacing(10)
+                .into();
+
+        let explorer_scroll = scrollable(buttons);
+        let content: Element<Message> = column![explorer_scroll].into();
+        container(content).into()
+    }
+}
+
+impl Default for Application {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+fn main() -> iced::Result {
+    iced::application(Application::new, Application::update, Application::view).run()
 }
