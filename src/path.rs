@@ -1,4 +1,4 @@
-use std::{error::Error, fs, io, path::PathBuf, process::Command};
+use std::{error::Error, fs, io, path::PathBuf, process::Command, time::SystemTime};
 
 #[derive(Clone, Debug)]
 pub enum PathControl {
@@ -134,6 +134,49 @@ fn get_filename(path: &PathBuf) -> String {
     name
 }
 
+// file name but with extension
+fn get_filenameext(path: &PathBuf) -> String {
+    path.file_name().unwrap().to_str().unwrap().to_string()
+}
+
+const UNIX_EPOCH: SystemTime = SystemTime::UNIX_EPOCH;
+
+pub fn get_fileaccessed(path: &PathBuf) -> i64 {
+    match path.metadata() {
+        Ok(res) => res
+            .accessed()
+            .unwrap_or(UNIX_EPOCH)
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_secs()
+            .try_into()
+            .unwrap(),
+        // bring the file back to the prehistoric time period if cannot find the last accessed time
+        // okay ima actually kms for real with this horrendous shit :sob:
+        Err(_e) => 0, // i'll probably add permission issues someday
+    }
+}
+
+pub fn get_filecreated(path: &PathBuf) -> i64 {
+    match path.metadata() {
+        Ok(res) => res
+            .created()
+            .unwrap_or(UNIX_EPOCH)
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_secs()
+            .try_into()
+            .unwrap(),
+        // bring the file back to the prehistoric time period if cannot find the last accessed time
+        Err(_e) => 0,
+    }
+}
+
+pub fn is_hidden(path: &PathBuf) -> bool {
+    // basically check if theres a dot at the start
+    get_filenameext(path).starts_with(".")
+}
+
 fn get_fileextension(path: &PathBuf) -> String {
     let ext = path.extension();
     let mut result = String::from("");
@@ -145,11 +188,6 @@ fn get_fileextension(path: &PathBuf) -> String {
     }
 
     result
-}
-
-pub fn is_hidden(path: &PathBuf) -> bool {
-    let name = path.file_name().unwrap();
-    name.to_str().unwrap().chars().nth(0) == Some('.')
 }
 
 // for checking if theres existing files at destination,

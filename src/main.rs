@@ -1,11 +1,12 @@
+use chrono::DateTime;
+use file::PathControl;
 use iced::{
-    Element, Task, debug,
-    widget::{button, column, container, scrollable, text},
+    Element, Task,
+    widget::{button, column, container, row, scrollable, text},
 };
-use path::PathControl;
+use path as file;
 use std::{
     env::home_dir,
-    error::Error,
     path::PathBuf,
     process::{Command, Stdio},
 };
@@ -47,7 +48,7 @@ impl Program {
                 let cur_path = &self.path;
 
                 if cur_path.iter().count() <= 1 {
-                    println!("current path is already at root!, {}", cur_path.display());
+                    //println!("current path is already at root!, {}", cur_path.display());
                     return;
                 }
 
@@ -63,41 +64,44 @@ impl Program {
     }
 }
 
-#[cfg(debug_assertions)]
-fn show(path: &PathBuf) -> Result<(), Box<dyn Error>> {
-    println!("displaying children for path: {}", path.display());
-    println!("");
-    path::read_dir(path)?
-        .iter()
-        .for_each(|v| println!("{}", v.file_name().unwrap().display()));
-
-    println!("--------------");
-    Ok(())
-}
-
 #[derive(Clone, Debug)]
 enum Message {
     Open(PathBuf),
     Navigate(PathControl),
+    UpdateEntries,
+}
+
+struct Entry {
+    name: String,
+    path: PathBuf,
+    accessed: i64,
+    created: i64,
+    hidden: bool,
 }
 
 struct Application {
     program: Program,
+    entries: Vec<Entry>,
+    view_hidden: bool,
 }
 
 impl Application {
-    fn new() -> Self {
-        Application {
-            program: Program::init(home_dir().unwrap()),
-        }
+    fn new() -> (Self, Task<Message>) {
+        (
+            Application {
+                program: Program::init(home_dir().unwrap()),
+                entries: vec![],
+                view_hidden: false,
+            },
+            Task::done(Message::UpdateEntries),
+        )
     }
 
     fn update(&mut self, message: Message) -> Task<Message> {
         match message {
             Message::Open(path) => {
                 self.program.open(path);
-
-                Task::none()
+                Task::done(Message::UpdateEntries)
             }
             Message::Navigate(to) => {
                 match to {
@@ -108,23 +112,57 @@ impl Application {
                         self.program.relative_nav(PathControl::Forward);
                     }
                 }
+                Task::done(Message::UpdateEntries)
+            }
+            Message::UpdateEntries => {
+                self.entries.clear();
+
+                let cur_paths = file::read_dir(&self.program.path).unwrap();
+                for path in cur_paths {
+                    self.entries.push(Entry {
+                        name: path.file_name().unwrap().to_str().unwrap().to_string(),
+                        path: path.clone(),
+                        created: file::get_filecreated(&path),
+                        accessed: file::get_fileaccessed(&path),
+                        hidden: file::is_hidden(&path),
+                    })
+                }
+
+                if !self.view_hidden {
+                    self.entries.retain(|entry| !entry.hidden);
+                }
+
                 Task::none()
             }
         }
     }
 
     fn view(&self) -> Element<'_, Message> {
-        let files = path::read_dir(&self.program.path).unwrap();
+        let entries = &self.entries;
         let buttons: Element<Message> =
             column!(button(text("...")).on_press(Message::Navigate(PathControl::Backward).into()))
                 .extend(
-                    files
+                    entries
                         .iter()
-                        .map(|f| {
-                            let name = f.file_name().unwrap().to_str().unwrap().to_string();
-                            button(text(name))
-                                .on_press(Message::Open(f.to_path_buf()))
-                                .into()
+                        .map(|e| {
+                            button(
+                                row![
+                                    text(e.name.clone()),
+                                    text(
+                                        DateTime::from_timestamp_secs(e.created)
+                                            .unwrap()
+                                            .to_string()
+                                    ),
+                                    text(
+                                        DateTime::from_timestamp_secs(e.accessed)
+                                            .unwrap()
+                                            .to_string()
+                                    )
+                                ]
+                                .spacing(5),
+                            )
+                            .on_press(Message::Open(e.path.clone()))
+                            .into()
                         })
                         .collect::<Vec<_>>(),
                 )
@@ -139,7 +177,7 @@ impl Application {
 
 impl Default for Application {
     fn default() -> Self {
-        Self::new()
+        Self::new().0
     }
 }
 
