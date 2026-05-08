@@ -1,8 +1,8 @@
 use chrono::DateTime;
 use file::PathControl;
 use iced::{
-    Element, Task,
-    widget::{button, column, container, row, scrollable, text},
+    Element, Length, Subscription, Task, alignment, keyboard,
+    widget::{MouseArea, button, column, container, row, scrollable, text},
 };
 use path as file;
 use std::{
@@ -66,9 +66,14 @@ impl Program {
 
 #[derive(Clone, Debug)]
 enum Message {
+    None,
+    // The blank message, does nothing
     Open(PathBuf),
     Navigate(PathControl),
     UpdateEntries,
+    Select(PathBuf),
+    ResetSelection,
+    UpdateControlKey(bool),
 }
 
 struct Entry {
@@ -83,6 +88,8 @@ struct Application {
     program: Program,
     entries: Vec<Entry>,
     view_hidden: bool,
+    selected: Vec<PathBuf>,
+    holding_ctrl: bool,
 }
 
 impl Application {
@@ -92,6 +99,8 @@ impl Application {
                 program: Program::init(home_dir().unwrap()),
                 entries: vec![],
                 view_hidden: false,
+                selected: vec![],
+                holding_ctrl: false,
             },
             Task::done(Message::UpdateEntries),
         )
@@ -116,6 +125,7 @@ impl Application {
             }
             Message::UpdateEntries => {
                 self.entries.clear();
+                self.selected.clear();
 
                 let cur_paths = file::read_dir(&self.program.path).unwrap();
                 for path in cur_paths {
@@ -134,6 +144,24 @@ impl Application {
 
                 Task::none()
             }
+            Message::UpdateControlKey(state) => {
+                self.holding_ctrl = state;
+                Task::none()
+            }
+            Message::Select(path) => {
+                if !self.holding_ctrl {
+                    self.selected.clear();
+                }
+
+                self.selected.push(path);
+
+                Task::none()
+            }
+            Message::ResetSelection => {
+                self.selected.clear();
+                Task::none()
+            }
+            Message::None => Task::none(),
         }
     }
 
@@ -145,33 +173,72 @@ impl Application {
                     entries
                         .iter()
                         .map(|e| {
-                            button(
-                                row![
-                                    text(e.name.clone()),
-                                    text(
-                                        DateTime::from_timestamp_secs(e.created)
-                                            .unwrap()
-                                            .to_string()
-                                    ),
-                                    text(
-                                        DateTime::from_timestamp_secs(e.accessed)
-                                            .unwrap()
-                                            .to_string()
-                                    )
-                                ]
-                                .spacing(5),
+                            container(
+                                MouseArea::new(
+                                    row![
+                                        text(e.name.clone())
+                                            .width(400)
+                                            .align_x(alignment::Horizontal::Left),
+                                        text(
+                                            DateTime::from_timestamp_secs(e.created)
+                                                .unwrap()
+                                                .to_string()
+                                        )
+                                        .width(200)
+                                        .align_x(alignment::Horizontal::Left),
+                                        text(
+                                            DateTime::from_timestamp_secs(e.accessed)
+                                                .unwrap()
+                                                .to_string()
+                                        )
+                                        .width(Length::FillPortion(3))
+                                        .align_x(alignment::Horizontal::Left)
+                                    ]
+                                    .spacing(5),
+                                )
+                                .on_double_click(Message::Open(e.path.clone()))
+                                .on_press(Message::Select(e.path.clone())),
                             )
-                            .on_press(Message::Open(e.path.clone()))
+                            .style(if self.selected.contains(&e.path) {
+                                container::danger
+                            } else {
+                                container::transparent
+                            })
+                            .padding(5)
                             .into()
                         })
                         .collect::<Vec<_>>(),
                 )
                 .spacing(10)
+                .padding(20)
+                .width(Length::Fill)
                 .into();
 
-        let explorer_scroll = scrollable(buttons);
-        let content: Element<Message> = column![explorer_scroll].into();
-        container(content).into()
+        let explorer_scroll = scrollable(buttons).width(Length::Fill).height(Length::Fill);
+        let explorer_select = container(MouseArea::new(explorer_scroll).on_press(
+            if !self.holding_ctrl {
+                Message::ResetSelection
+            } else {
+                Message::None
+            },
+        ))
+        .width(Length::Fill)
+        .height(Length::Fill);
+        let content: Element<Message> = column![explorer_select]
+            .width(Length::Fill)
+            .height(Length::Fill)
+            .into();
+        container(content)
+            .width(Length::Fill)
+            .height(Length::Fill)
+            .into()
+    }
+
+    fn subscription(&self) -> Subscription<Message> {
+        keyboard::listen().filter_map(|e| match e {
+            keyboard::Event::ModifiersChanged(m) => Some(Message::UpdateControlKey(m.control())),
+            _ => None,
+        })
     }
 }
 
@@ -182,5 +249,8 @@ impl Default for Application {
 }
 
 fn main() -> iced::Result {
-    iced::application(Application::new, Application::update, Application::view).run()
+    iced::application(Application::new, Application::update, Application::view)
+        .subscription(Application::subscription)
+        .title("buoyant")
+        .run()
 }

@@ -122,7 +122,7 @@ pub fn read_dir(path: &PathBuf) -> Result<Vec<PathBuf>, Box<dyn Error>> {
 } // returns a vec of children of a directory
 
 // get file name but stripped the extension
-fn get_filename(path: &PathBuf) -> String {
+pub fn get_filename(path: &PathBuf) -> String {
     let mut name = path.file_name().unwrap().to_str().unwrap().to_string();
     if path.is_dir() {
         return name;
