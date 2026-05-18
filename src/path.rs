@@ -42,6 +42,11 @@ fn operation_recursion(dest: &PathBuf, prevs: &mut Vec<String>, path: &PathBuf, 
             move_file(path, &new_path, is_cut);
         }
         OperationChoice::Merge => {
+            if final_path == *dest {
+                return;
+                // does nothing if trying to merge with the same destination as start
+            }
+
             if !final_path.is_file() {
                 // if is not folder
                 println!("selected file is not a folder");
@@ -55,9 +60,9 @@ fn operation_recursion(dest: &PathBuf, prevs: &mut Vec<String>, path: &PathBuf, 
     }
 }
 
-pub fn move_dir(old_files: Vec<PathBuf>, dest: PathBuf) -> Result<(), Box<dyn Error>> {
+pub fn move_dir(old_files: Vec<PathBuf>, dest: PathBuf) {
     if !dest.exists() || !dest.is_dir() {
-        return Ok(());
+        return;
         // check if path not exists and is not a folder
     }
 
@@ -71,21 +76,17 @@ pub fn move_dir(old_files: Vec<PathBuf>, dest: PathBuf) -> Result<(), Box<dyn Er
     old_files
         .iter()
         .for_each(|p| operation_recursion(&dest, &mut vec![], &p, true));
-
-    Ok(())
 }
 
-pub fn copy_dir(old_files: Vec<PathBuf>, dest: PathBuf) -> Result<(), Box<dyn Error>> {
+pub fn copy_dir(old_files: Vec<PathBuf>, dest: PathBuf) {
     if !dest.exists() || !dest.is_dir() {
-        return Ok(());
+        return;
         // check if path not exists and is not a folder
     }
 
     old_files
         .iter()
         .for_each(|p| operation_recursion(&dest, &mut vec![], &p, false));
-
-    Ok(())
 }
 
 fn move_file(old_path: &PathBuf, new_path: &PathBuf, is_cut: bool) {

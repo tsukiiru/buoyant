@@ -1,7 +1,11 @@
 use chrono::DateTime;
 use file::PathControl;
 use iced::{
-    Element, Length, Subscription, Task, alignment, keyboard,
+    Element, Length, Subscription, Task, alignment,
+    keyboard::{
+        self,
+        key::{self, Code},
+    },
     widget::{MouseArea, button, column, container, row, scrollable, text},
 };
 use path as file;
@@ -65,15 +69,32 @@ impl Program {
 }
 
 #[derive(Clone, Debug)]
+enum ClipboardType {
+    Copy,
+    Cut,
+}
+
+#[derive(Clone, Debug)]
+enum Direction {
+    Up,
+    Down,
+}
+
+#[derive(Clone, Debug)]
 enum Message {
     None,
     // The blank message, does nothing
     Open(PathBuf),
     Navigate(PathControl),
     UpdateEntries,
-    Select(PathBuf),
+    Select(usize),
     ResetSelection,
+    DeleteSelection,
+    NavigateSelection(Direction),
+    OpenSelection,
     UpdateControlKey(bool),
+    AddClipboard(ClipboardType),
+    PasteClipboard,
 }
 
 struct Entry {
@@ -81,15 +102,17 @@ struct Entry {
     path: PathBuf,
     accessed: i64,
     created: i64,
-    hidden: bool,
+    index: usize,
 }
 
 struct Application {
     program: Program,
     entries: Vec<Entry>,
     view_hidden: bool,
-    selected: Vec<PathBuf>,
+    selected: Vec<usize>,
     holding_ctrl: bool,
+    clipboard: Vec<PathBuf>,
+    clipboard_type: ClipboardType,
 }
 
 impl Application {
@@ -101,6 +124,8 @@ impl Application {
                 view_hidden: false,
                 selected: vec![],
                 holding_ctrl: false,
+                clipboard: vec![],
+                clipboard_type: ClipboardType::Copy,
             },
             Task::done(Message::UpdateEntries),
         )
@@ -128,18 +153,20 @@ impl Application {
                 self.selected.clear();
 
                 let cur_paths = file::read_dir(&self.program.path).unwrap();
+                let mut i: usize = 0;
                 for path in cur_paths {
+                    if !self.view_hidden && file::is_hidden(&path) {
+                        continue;
+                    }
+
                     self.entries.push(Entry {
                         name: path.file_name().unwrap().to_str().unwrap().to_string(),
                         path: path.clone(),
                         created: file::get_filecreated(&path),
                         accessed: file::get_fileaccessed(&path),
-                        hidden: file::is_hidden(&path),
-                    })
-                }
-
-                if !self.view_hidden {
-                    self.entries.retain(|entry| !entry.hidden);
+                        index: i,
+                    });
+                    i += 1;
                 }
 
                 Task::none()
@@ -148,12 +175,12 @@ impl Application {
                 self.holding_ctrl = state;
                 Task::none()
             }
-            Message::Select(path) => {
+            Message::Select(index) => {
                 if !self.holding_ctrl {
                     self.selected.clear();
                 }
 
-                self.selected.push(path);
+                self.selected.push(index);
 
                 Task::none()
             }
@@ -161,7 +188,86 @@ impl Application {
                 self.selected.clear();
                 Task::none()
             }
+            Message::DeleteSelection => Task::none(),
             Message::None => Task::none(),
+            Message::AddClipboard(t) => {
+                if !self.selected.is_empty() {
+                    let mut new_vec: Vec<PathBuf> = vec![];
+
+                    self.selected
+                        .iter()
+                        .for_each(|i| new_vec.push(self.entries[*i].path.clone()));
+
+                    self.clipboard = new_vec;
+                    self.clipboard_type = t;
+                }
+                Task::none()
+            }
+            Message::PasteClipboard => {
+                if self.clipboard.is_empty() {
+                    return Task::none();
+                }
+
+                match self.clipboard_type {
+                    ClipboardType::Copy => {
+                        file::copy_dir(self.clipboard.clone(), self.program.path.clone());
+                    }
+                    ClipboardType::Cut => {
+                        file::move_dir(self.clipboard.clone(), self.program.path.clone());
+                        self.clipboard.clear();
+                    }
+                }
+                Task::done(Message::UpdateEntries)
+            }
+            Message::NavigateSelection(direction) => {
+                let index_opt = self.selected.get(self.selected.len() - 1);
+                let mut current_index: usize = 0;
+                let mut exists = true;
+
+                if let Some(thing) = index_opt {
+                    current_index = thing.clone();
+                } else {
+                    exists = false;
+                    // im sorry.
+                }
+
+                let new_index: usize;
+                // get the last selected index OR the first index if no selection
+                match direction {
+                    Direction::Down => {
+                        new_index = if current_index >= self.entries.len() - 1 {
+                            current_index
+                        } else if !exists {
+                            0
+                        } else {
+                            current_index + 1
+                        };
+                    }
+                    Direction::Up => {
+                        new_index = if current_index == 0 {
+                            current_index
+                        } else {
+                            current_index - 1
+                        };
+                    }
+                }
+                self.selected = vec![new_index];
+                // TODO: update position of view following the selection index
+                Task::none()
+            }
+            Message::OpenSelection => {
+                let index_opt = self.selected.get(self.selected.len() - 1);
+                let cur_index: usize;
+
+                if let Some(thing) = index_opt {
+                    cur_index = *thing;
+                } else {
+                    return Task::none();
+                }
+
+                let path = self.entries.get(cur_index).unwrap().path.clone();
+                Task::done(Message::Open(path))
+            }
         }
     }
 
@@ -197,9 +303,9 @@ impl Application {
                                     .spacing(5),
                                 )
                                 .on_double_click(Message::Open(e.path.clone()))
-                                .on_press(Message::Select(e.path.clone())),
+                                .on_press(Message::Select(e.index.clone())),
                             )
-                            .style(if self.selected.contains(&e.path) {
+                            .style(if self.selected.contains(&e.index) {
                                 container::danger
                             } else {
                                 container::transparent
@@ -224,10 +330,27 @@ impl Application {
         ))
         .width(Length::Fill)
         .height(Length::Fill);
-        let content: Element<Message> = column![explorer_select]
+
+        let clipboard_type = match self.clipboard_type {
+            ClipboardType::Copy => "Copy",
+            ClipboardType::Cut => "Cut",
+        };
+        let clipboard_entries = &self.clipboard;
+        let clipboard: Element<Message> = column![text(format!("type: {}", clipboard_type))]
+            .extend(
+                clipboard_entries
+                    .iter()
+                    .map(|e| text(e.display().to_string()).into()),
+            )
+            .spacing(10)
+            .padding(20)
+            .into();
+
+        let content: Element<Message> = row![explorer_select, clipboard]
             .width(Length::Fill)
             .height(Length::Fill)
             .into();
+
         container(content)
             .width(Length::Fill)
             .height(Length::Fill)
@@ -237,6 +360,30 @@ impl Application {
     fn subscription(&self) -> Subscription<Message> {
         keyboard::listen().filter_map(|e| match e {
             keyboard::Event::ModifiersChanged(m) => Some(Message::UpdateControlKey(m.control())),
+            keyboard::Event::KeyPressed {
+                physical_key,
+                modifiers,
+                ..
+            } => match (physical_key, modifiers) {
+                (key::Physical::Code(Code::KeyC), keyboard::Modifiers::CTRL) => {
+                    Some(Message::AddClipboard(ClipboardType::Copy))
+                }
+                (key::Physical::Code(Code::KeyX), keyboard::Modifiers::CTRL) => {
+                    Some(Message::AddClipboard(ClipboardType::Cut))
+                }
+                (key::Physical::Code(Code::KeyV), keyboard::Modifiers::CTRL) => {
+                    Some(Message::PasteClipboard)
+                }
+                (key::Physical::Code(Code::Delete), _) => Some(Message::DeleteSelection),
+                (key::Physical::Code(Code::ArrowDown), _) => {
+                    Some(Message::NavigateSelection(Direction::Down))
+                }
+                (key::Physical::Code(Code::ArrowUp), _) => {
+                    Some(Message::NavigateSelection(Direction::Up))
+                }
+                (key::Physical::Code(Code::Enter), _) => Some(Message::OpenSelection),
+                _ => None,
+            },
             _ => None,
         })
     }
