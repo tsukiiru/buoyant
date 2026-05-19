@@ -1,12 +1,14 @@
 use chrono::DateTime;
 use file::PathControl;
+use iced::Background;
+use iced::widget::container;
 use iced::{
-    Element, Length, Subscription, Task, alignment,
+    Color, Element, Length, Subscription, Task, alignment,
     keyboard::{
         self,
         key::{self, Code},
     },
-    widget::{MouseArea, button, column, container, row, scrollable, text},
+    widget::{MouseArea, button, column, float, row, scrollable, stack, text},
 };
 use path as file;
 use std::{
@@ -28,9 +30,9 @@ impl Program {
         }
     }
 
-    fn open(&mut self, new_path: PathBuf) {
+    fn open(&mut self, new_path: &PathBuf) {
         if new_path.is_dir() {
-            self.path = new_path;
+            self.path = new_path.clone();
             // if its a folder
         } else {
             let cmd = Command::new("xdg-open")
@@ -83,7 +85,6 @@ enum Direction {
 #[derive(Clone, Debug)]
 enum Message {
     None,
-    // The blank message, does nothing
     Open(PathBuf),
     Navigate(PathControl),
     UpdateEntries,
@@ -134,7 +135,12 @@ impl Application {
     fn update(&mut self, message: Message) -> Task<Message> {
         match message {
             Message::Open(path) => {
-                self.program.open(path);
+                self.program.open(&path);
+
+                if path.is_file() {
+                    return Task::none();
+                }
+
                 Task::done(Message::UpdateEntries)
             }
             Message::Navigate(to) => {
@@ -344,6 +350,7 @@ impl Application {
             )
             .spacing(10)
             .padding(20)
+            .width(500)
             .into();
 
         let content: Element<Message> = row![explorer_select, clipboard]
@@ -351,7 +358,27 @@ impl Application {
             .height(Length::Fill)
             .into();
 
-        container(content)
+        let style = container::Style {
+            background: Some(Background::Color(Color::from_rgba(1.0, 1.0, 0.5, 0.6))),
+            ..Default::default()
+        };
+
+        let fl = float(
+            container(
+                text("hello world!")
+                    .size(25)
+                    .align_x(alignment::Horizontal::Center)
+                    .align_y(alignment::Vertical::Center)
+                    .width(200)
+                    .height(50)
+                    .center(),
+            )
+            .width(Length::Fill)
+            .height(Length::Fill)
+            .style(move |_theme| style),
+        );
+
+        stack![content, fl]
             .width(Length::Fill)
             .height(Length::Fill)
             .into()
@@ -381,7 +408,10 @@ impl Application {
                 (key::Physical::Code(Code::ArrowUp), _) => {
                     Some(Message::NavigateSelection(Direction::Up))
                 }
-                (key::Physical::Code(Code::Enter), _) => Some(Message::OpenSelection),
+                (key::Physical::Code(Code::ArrowLeft), _) => {
+                    Some(Message::Navigate(PathControl::Backward))
+                }
+                (key::Physical::Code(Code::ArrowRight), _) => Some(Message::OpenSelection),
                 _ => None,
             },
             _ => None,
