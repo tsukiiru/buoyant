@@ -1,14 +1,17 @@
 use chrono::DateTime;
 use file::PathControl;
-use iced::Background;
-use iced::widget::container;
+use iced::advanced::Widget;
+use iced::event::Status;
+use iced::widget::text_input::State;
+use iced::widget::{container, mouse_area, opaque, text_input};
+use iced::{Background, Event, event};
 use iced::{
     Color, Element, Length, Subscription, Task, alignment,
     keyboard::{
         self,
         key::{self, Code},
     },
-    widget::{MouseArea, button, column, float, row, scrollable, stack, text},
+    widget::{button, column, float, row, scrollable, stack, text},
 };
 use path as file;
 use std::{
@@ -92,10 +95,13 @@ enum Message {
     ResetSelection,
     DeleteSelection,
     NavigateSelection(Direction),
+    RenameSelection,
     OpenSelection,
     UpdateControlKey(bool),
     AddClipboard(ClipboardType),
     PasteClipboard,
+    Rename,
+    UpdateRenameModal(String),
 }
 
 struct Entry {
@@ -106,6 +112,11 @@ struct Entry {
     index: usize,
 }
 
+struct RenameModal {
+    path: PathBuf,
+    content: String,
+}
+
 struct Application {
     program: Program,
     entries: Vec<Entry>,
@@ -114,6 +125,7 @@ struct Application {
     holding_ctrl: bool,
     clipboard: Vec<PathBuf>,
     clipboard_type: ClipboardType,
+    rename_modal: Option<RenameModal>,
 }
 
 impl Application {
@@ -127,6 +139,7 @@ impl Application {
                 holding_ctrl: false,
                 clipboard: vec![],
                 clipboard_type: ClipboardType::Copy,
+                rename_modal: None,
             },
             Task::done(Message::UpdateEntries),
         )
@@ -195,6 +208,19 @@ impl Application {
                 Task::none()
             }
             Message::DeleteSelection => Task::none(),
+            Message::RenameSelection => {
+                let selection = self.selected.get(self.selected.len() - 1);
+
+                if let Some(thing) = selection {
+                    let selected = self.entries.get(thing.clone()).unwrap();
+                    self.rename_modal = Some(RenameModal {
+                        path: selected.path.clone(),
+                        content: selected.name.clone(),
+                    })
+                }
+
+                Task::none()
+            }
             Message::None => Task::none(),
             Message::AddClipboard(t) => {
                 if !self.selected.is_empty() {
@@ -274,6 +300,25 @@ impl Application {
                 let path = self.entries.get(cur_index).unwrap().path.clone();
                 Task::done(Message::Open(path))
             }
+            Message::Rename => {
+                let overlay = self.rename_modal.as_mut().unwrap();
+
+                println!(
+                    "trying to rename {} to {}",
+                    file::get_filename(&overlay.path),
+                    overlay.content
+                );
+
+                self.rename_modal = None;
+
+                Task::none()
+            }
+            Message::UpdateRenameModal(content) => {
+                let overlay = self.rename_modal.as_mut().unwrap();
+                overlay.content = content;
+
+                Task::none()
+            }
         }
     }
 
@@ -286,7 +331,7 @@ impl Application {
                         .iter()
                         .map(|e| {
                             container(
-                                MouseArea::new(
+                                mouse_area(
                                     row![
                                         text(e.name.clone())
                                             .width(400)
@@ -327,15 +372,14 @@ impl Application {
                 .into();
 
         let explorer_scroll = scrollable(buttons).width(Length::Fill).height(Length::Fill);
-        let explorer_select = container(MouseArea::new(explorer_scroll).on_press(
-            if !self.holding_ctrl {
+        let explorer_select =
+            container(mouse_area(explorer_scroll).on_press(if !self.holding_ctrl {
                 Message::ResetSelection
             } else {
                 Message::None
-            },
-        ))
-        .width(Length::Fill)
-        .height(Length::Fill);
+            }))
+            .width(Length::Fill)
+            .height(Length::Fill);
 
         let clipboard_type = match self.clipboard_type {
             ClipboardType::Copy => "Copy",
@@ -353,68 +397,75 @@ impl Application {
             .width(500)
             .into();
 
-        let content: Element<Message> = row![explorer_select, clipboard]
+        let content = row![explorer_select, clipboard]
             .width(Length::Fill)
-            .height(Length::Fill)
-            .into();
+            .height(Length::Fill);
 
-        let style = container::Style {
-            background: Some(Background::Color(Color::from_rgba(1.0, 1.0, 0.5, 0.6))),
-            ..Default::default()
-        };
+        let stack = stack![content].width(Length::Fill).height(Length::Fill);
 
-        let fl = float(
-            container(
-                text("hello world!")
-                    .size(25)
-                    .align_x(alignment::Horizontal::Center)
-                    .align_y(alignment::Vertical::Center)
-                    .width(200)
-                    .height(50)
-                    .center(),
-            )
-            .width(Length::Fill)
-            .height(Length::Fill)
-            .style(move |_theme| style),
-        );
+        if let Some(thing) = &self.rename_modal {
+            let input = text_input("input the new name here :3", &thing.content)
+                .on_input(Message::UpdateRenameModal)
+                .on_submit(Message::Rename);
 
-        stack![content, fl]
-            .width(Length::Fill)
-            .height(Length::Fill)
-            .into()
+            let overlay = opaque(float(
+                container(
+                    column![
+                        text(format!("you are renaming, {}", thing.path.display())),
+                        input
+                    ]
+                    .width(500),
+                )
+                .style(move |_t| style())
+                .center(Length::Fill),
+            ));
+
+            stack.push(overlay).into()
+        } else {
+            stack.into()
+        }
     }
 
     fn subscription(&self) -> Subscription<Message> {
-        keyboard::listen().filter_map(|e| match e {
-            keyboard::Event::ModifiersChanged(m) => Some(Message::UpdateControlKey(m.control())),
-            keyboard::Event::KeyPressed {
-                physical_key,
-                modifiers,
-                ..
-            } => match (physical_key, modifiers) {
-                (key::Physical::Code(Code::KeyC), keyboard::Modifiers::CTRL) => {
-                    Some(Message::AddClipboard(ClipboardType::Copy))
+        event::listen_with(|event, status, _id| {
+            if status == Status::Captured {
+                return None;
+            }
+            match event {
+                Event::Keyboard(keyboard::Event::ModifiersChanged(m)) => {
+                    Some(Message::UpdateControlKey(m.control()))
                 }
-                (key::Physical::Code(Code::KeyX), keyboard::Modifiers::CTRL) => {
-                    Some(Message::AddClipboard(ClipboardType::Cut))
-                }
-                (key::Physical::Code(Code::KeyV), keyboard::Modifiers::CTRL) => {
-                    Some(Message::PasteClipboard)
-                }
-                (key::Physical::Code(Code::Delete), _) => Some(Message::DeleteSelection),
-                (key::Physical::Code(Code::ArrowDown), _) => {
-                    Some(Message::NavigateSelection(Direction::Down))
-                }
-                (key::Physical::Code(Code::ArrowUp), _) => {
-                    Some(Message::NavigateSelection(Direction::Up))
-                }
-                (key::Physical::Code(Code::ArrowLeft), _) => {
-                    Some(Message::Navigate(PathControl::Backward))
-                }
-                (key::Physical::Code(Code::ArrowRight), _) => Some(Message::OpenSelection),
+
+                Event::Keyboard(keyboard::Event::KeyPressed {
+                    physical_key,
+                    modifiers,
+                    ..
+                }) => match (physical_key, modifiers) {
+                    (key::Physical::Code(Code::KeyC), keyboard::Modifiers::CTRL) => {
+                        Some(Message::AddClipboard(ClipboardType::Copy))
+                    }
+                    (key::Physical::Code(Code::KeyX), keyboard::Modifiers::CTRL) => {
+                        Some(Message::AddClipboard(ClipboardType::Cut))
+                    }
+                    (key::Physical::Code(Code::KeyV), keyboard::Modifiers::CTRL) => {
+                        Some(Message::PasteClipboard)
+                    }
+                    (key::Physical::Code(Code::Delete), _) => Some(Message::DeleteSelection),
+                    (key::Physical::Code(Code::ArrowDown), _) => {
+                        Some(Message::NavigateSelection(Direction::Down))
+                    }
+                    (key::Physical::Code(Code::ArrowUp), _) => {
+                        Some(Message::NavigateSelection(Direction::Up))
+                    }
+                    (key::Physical::Code(Code::ArrowLeft), _) => {
+                        Some(Message::Navigate(PathControl::Backward))
+                    }
+                    (key::Physical::Code(Code::ArrowRight), _) => Some(Message::OpenSelection),
+                    (key::Physical::Code(Code::F2), _) => Some(Message::RenameSelection),
+                    _ => None,
+                },
                 _ => None,
-            },
-            _ => None,
+            }
         })
     }
 }
@@ -422,6 +473,13 @@ impl Application {
 impl Default for Application {
     fn default() -> Self {
         Self::new().0
+    }
+}
+
+fn style() -> container::Style {
+    container::Style {
+        background: Some(Background::Color(Color::from_rgba(1.0, 1.0, 1.0, 0.6))),
+        ..Default::default()
     }
 }
 
