@@ -1,9 +1,7 @@
 use chrono::DateTime;
 use file::PathControl;
-use iced::advanced::Widget;
 use iced::event::Status;
-use iced::widget::text_input::State;
-use iced::widget::{container, mouse_area, opaque, text_input};
+use iced::widget::{Id, container, mouse_area, opaque, operation, text_input};
 use iced::{Background, Event, event};
 use iced::{
     Color, Element, Length, Subscription, Task, alignment,
@@ -90,18 +88,20 @@ enum Message {
     None,
     Open(PathBuf),
     Navigate(PathControl),
-    UpdateEntries,
+    UpdateEntries(Option<PathBuf>),
     Select(usize),
     ResetSelection,
     DeleteSelection,
     NavigateSelection(Direction),
-    RenameSelection,
     OpenSelection,
     UpdateControlKey(bool),
     AddClipboard(ClipboardType),
     PasteClipboard,
     Rename,
     UpdateRenameModal(String),
+    CloseRenameModal,
+    OpenRenameModal,
+    CheckRenameModal,
 }
 
 struct Entry {
@@ -141,7 +141,7 @@ impl Application {
                 clipboard_type: ClipboardType::Copy,
                 rename_modal: None,
             },
-            Task::done(Message::UpdateEntries),
+            Task::done(Message::UpdateEntries(None)),
         )
     }
 
@@ -154,22 +154,25 @@ impl Application {
                     return Task::none();
                 }
 
-                Task::done(Message::UpdateEntries)
+                Task::done(Message::UpdateEntries(None))
             }
             Message::Navigate(to) => {
+                let mut path: Option<PathBuf> = None;
+
                 match to {
                     PathControl::Backward => {
+                        path = Some(self.program.path.clone());
                         self.program.relative_nav(PathControl::Backward);
                     }
                     PathControl::Forward => {
                         self.program.relative_nav(PathControl::Forward);
                     }
                 }
-                Task::done(Message::UpdateEntries)
+
+                Task::done(Message::UpdateEntries(path))
             }
-            Message::UpdateEntries => {
+            Message::UpdateEntries(prev_path) => {
                 self.entries.clear();
-                self.selected.clear();
 
                 let cur_paths = file::read_dir(&self.program.path).unwrap();
                 let mut i: usize = 0;
@@ -186,6 +189,16 @@ impl Application {
                         index: i,
                     });
                     i += 1;
+                }
+
+                if let Some(index) = prev_path {
+                    for entry in self.entries.iter() {
+                        if entry.path == index {
+                            self.selected = vec![entry.index];
+                        }
+                    }
+                } else {
+                    self.selected.clear();
                 }
 
                 Task::none()
@@ -208,19 +221,6 @@ impl Application {
                 Task::none()
             }
             Message::DeleteSelection => Task::none(),
-            Message::RenameSelection => {
-                let selection = self.selected.get(self.selected.len() - 1);
-
-                if let Some(thing) = selection {
-                    let selected = self.entries.get(thing.clone()).unwrap();
-                    self.rename_modal = Some(RenameModal {
-                        path: selected.path.clone(),
-                        content: selected.name.clone(),
-                    })
-                }
-
-                Task::none()
-            }
             Message::None => Task::none(),
             Message::AddClipboard(t) => {
                 if !self.selected.is_empty() {
@@ -249,7 +249,7 @@ impl Application {
                         self.clipboard.clear();
                     }
                 }
-                Task::done(Message::UpdateEntries)
+                Task::done(Message::UpdateEntries(None))
             }
             Message::NavigateSelection(direction) => {
                 let index_opt = self.selected.get(self.selected.len() - 1);
@@ -283,7 +283,13 @@ impl Application {
                         };
                     }
                 }
-                self.selected = vec![new_index];
+
+                if self.holding_ctrl {
+                    self.selected.push(new_index);
+                } else {
+                    self.selected = vec![new_index];
+                }
+
                 // TODO: update position of view following the selection index
                 Task::none()
             }
@@ -297,28 +303,53 @@ impl Application {
                     return Task::none();
                 }
 
-                let path = self.entries.get(cur_index).unwrap().path.clone();
-                Task::done(Message::Open(path))
+                if let Some(path) = self.entries.get(cur_index) {
+                    Task::done(Message::Open(path.path.clone()))
+                } else {
+                    Task::none()
+                }
             }
             Message::Rename => {
                 let overlay = self.rename_modal.as_mut().unwrap();
 
                 println!(
-                    "trying to rename {} to {}",
+                    "attempting to rename {} to {}",
                     file::get_filename(&overlay.path),
                     overlay.content
                 );
+                // TODO: make the renaming logic actually works
 
+                Task::done(Message::CloseRenameModal)
+            }
+            Message::OpenRenameModal => {
+                let selection = self.selected.get(self.selected.len() - 1);
+
+                if let Some(thing) = selection {
+                    let selected = self.entries.get(thing.clone()).unwrap();
+                    self.rename_modal = Some(RenameModal {
+                        path: selected.path.clone(),
+                        content: selected.name.clone(),
+                    })
+                }
+
+                Task::batch(vec![operation::focus(Id::new("rename"))])
+            }
+            Message::CloseRenameModal => {
                 self.rename_modal = None;
-
                 Task::none()
             }
             Message::UpdateRenameModal(content) => {
                 let overlay = self.rename_modal.as_mut().unwrap();
                 overlay.content = content;
-
                 Task::none()
             }
+            Message::CheckRenameModal => operation::is_focused(Id::new("rename")).then(|o| {
+                if !o {
+                    Task::done(Message::CloseRenameModal)
+                } else {
+                    Task::none()
+                }
+            }),
         }
     }
 
@@ -406,7 +437,8 @@ impl Application {
         if let Some(thing) = &self.rename_modal {
             let input = text_input("input the new name here :3", &thing.content)
                 .on_input(Message::UpdateRenameModal)
-                .on_submit(Message::Rename);
+                .on_submit(Message::Rename)
+                .id("rename");
 
             let overlay = opaque(float(
                 container(
@@ -429,8 +461,9 @@ impl Application {
     fn subscription(&self) -> Subscription<Message> {
         event::listen_with(|event, status, _id| {
             if status == Status::Captured {
-                return None;
+                return Some(Message::CheckRenameModal);
             }
+
             match event {
                 Event::Keyboard(keyboard::Event::ModifiersChanged(m)) => {
                     Some(Message::UpdateControlKey(m.control()))
@@ -461,7 +494,7 @@ impl Application {
                         Some(Message::Navigate(PathControl::Backward))
                     }
                     (key::Physical::Code(Code::ArrowRight), _) => Some(Message::OpenSelection),
-                    (key::Physical::Code(Code::F2), _) => Some(Message::RenameSelection),
+                    (key::Physical::Code(Code::F2), _) => Some(Message::OpenRenameModal),
                     _ => None,
                 },
                 _ => None,
