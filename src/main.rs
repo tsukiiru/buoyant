@@ -1,7 +1,10 @@
 use chrono::DateTime;
 use file::PathControl;
 use iced::event::Status;
-use iced::widget::{Id, container, mouse_area, opaque, operation, text_input};
+use iced::widget::{
+    Id, button, column, container, float, mouse_area, opaque, operation, row, scrollable, stack,
+    text, text_input,
+};
 use iced::{Background, Event, event};
 use iced::{
     Color, Element, Length, Subscription, Task, alignment,
@@ -9,7 +12,6 @@ use iced::{
         self,
         key::{self, Code},
     },
-    widget::{button, column, float, row, scrollable, stack, text},
 };
 use path as file;
 use std::{
@@ -52,13 +54,6 @@ impl Program {
     fn relative_nav(&mut self, dir: PathControl) {
         match dir {
             PathControl::Backward => {
-                let cur_path = &self.path;
-
-                if cur_path.iter().count() <= 1 {
-                    //println!("current path is already at root!, {}", cur_path.display());
-                    return;
-                }
-
                 self.path.pop();
             }
             PathControl::Forward => {
@@ -96,12 +91,15 @@ enum Message {
     OpenSelection,
     UpdateControlKey(bool),
     AddClipboard(ClipboardType),
-    PasteClipboard,
+    PasteClipboard(file::OperationChoice),
     Rename,
+
+    CheckModals,
     UpdateRenameModal(String),
     CloseRenameModal,
     OpenRenameModal,
-    CheckRenameModal,
+    OpenOperationModal,
+    CloseOperationModal,
 }
 
 struct Entry {
@@ -115,6 +113,7 @@ struct Entry {
 struct RenameModal {
     path: PathBuf,
     content: String,
+    error: Option<String>,
 }
 
 struct Application {
@@ -126,7 +125,11 @@ struct Application {
     clipboard: Vec<PathBuf>,
     clipboard_type: ClipboardType,
     rename_modal: Option<RenameModal>,
+    operation_modal: Option<bool>,
+    modal_opened: bool,
 }
+
+const NONO_CHARACTERS: [&str; 10] = ["\0", "\\", "\"", "/", ":", "*", "?", "<", ">", "|"];
 
 impl Application {
     fn new() -> (Self, Task<Message>) {
@@ -140,6 +143,8 @@ impl Application {
                 clipboard: vec![],
                 clipboard_type: ClipboardType::Copy,
                 rename_modal: None,
+                operation_modal: None,
+                modal_opened: false,
             },
             Task::done(Message::UpdateEntries(None)),
         )
@@ -157,6 +162,10 @@ impl Application {
                 Task::done(Message::UpdateEntries(None))
             }
             Message::Navigate(to) => {
+                if self.modal_opened {
+                    return Task::none();
+                }
+
                 let mut path: Option<PathBuf> = None;
 
                 match to {
@@ -223,6 +232,10 @@ impl Application {
             Message::DeleteSelection => Task::none(),
             Message::None => Task::none(),
             Message::AddClipboard(t) => {
+                if self.modal_opened {
+                    return Task::none();
+                }
+
                 if !self.selected.is_empty() {
                     let mut new_vec: Vec<PathBuf> = vec![];
 
@@ -235,23 +248,32 @@ impl Application {
                 }
                 Task::none()
             }
-            Message::PasteClipboard => {
+            Message::PasteClipboard(opp) => {
+                if self.modal_opened {
+                    return Task::none();
+                }
+
                 if self.clipboard.is_empty() {
                     return Task::none();
                 }
 
                 match self.clipboard_type {
                     ClipboardType::Copy => {
-                        file::copy_dir(self.clipboard.clone(), self.program.path.clone());
+                        file::copy_dir(self.clipboard.clone(), self.program.path.clone(), &opp);
                     }
                     ClipboardType::Cut => {
-                        file::move_dir(self.clipboard.clone(), self.program.path.clone());
+                        file::move_dir(self.clipboard.clone(), self.program.path.clone(), &opp);
                         self.clipboard.clear();
                     }
                 }
-                Task::done(Message::UpdateEntries(None))
+                Task::done(Message::CloseOperationModal)
+                    .chain(Task::done(Message::UpdateEntries(None)))
             }
             Message::NavigateSelection(direction) => {
+                if self.modal_opened {
+                    return Task::none();
+                }
+
                 let index_opt = self.selected.get(self.selected.len() - 1);
                 let mut current_index: usize = 0;
                 let mut exists = true;
@@ -294,6 +316,10 @@ impl Application {
                 Task::none()
             }
             Message::OpenSelection => {
+                if self.modal_opened {
+                    return Task::none();
+                }
+
                 let index_opt = self.selected.get(self.selected.len() - 1);
                 let cur_index: usize;
 
@@ -311,17 +337,41 @@ impl Application {
             }
             Message::Rename => {
                 let overlay = self.rename_modal.as_mut().unwrap();
+                let name = &overlay.content.clone().trim().to_string();
 
-                println!(
-                    "attempting to rename {} to {}",
-                    file::get_filename(&overlay.path),
-                    overlay.content
-                );
-                // TODO: make the renaming logic actually works
+                if name.is_empty() {
+                    return Task::none();
+                }
 
+                // checking if the new name is valid?
+                for char in NONO_CHARACTERS {
+                    if name.contains(char) {
+                        overlay.error =
+                            Some(String::from(format!("ERROR: name cannot contain {}", char)));
+                        return Task::none();
+                    }
+                }
+
+                let mut test_path = overlay.path.clone();
+                test_path.set_file_name(name);
+
+                // check if already exists in destination
+                if test_path.exists() {
+                    overlay.error = Some(String::from(
+                        "ERROR: file with the same name already exists",
+                    ));
+                    return Task::none();
+                }
+
+                file::rename(&mut overlay.path, name.clone());
                 Task::done(Message::CloseRenameModal)
+                    .chain(Task::done(Message::UpdateEntries(None)))
             }
             Message::OpenRenameModal => {
+                if self.modal_opened {
+                    return Task::none();
+                }
+
                 let selection = self.selected.get(self.selected.len() - 1);
 
                 if let Some(thing) = selection {
@@ -329,27 +379,42 @@ impl Application {
                     self.rename_modal = Some(RenameModal {
                         path: selected.path.clone(),
                         content: selected.name.clone(),
+                        error: None,
                     })
                 }
+
+                self.modal_opened = true;
 
                 Task::batch(vec![operation::focus(Id::new("rename"))])
             }
             Message::CloseRenameModal => {
                 self.rename_modal = None;
+                self.modal_opened = false;
                 Task::none()
             }
             Message::UpdateRenameModal(content) => {
                 let overlay = self.rename_modal.as_mut().unwrap();
                 overlay.content = content;
+
                 Task::none()
             }
-            Message::CheckRenameModal => operation::is_focused(Id::new("rename")).then(|o| {
+            Message::CheckModals => operation::is_focused(Id::new("rename")).then(|o| {
                 if !o {
                     Task::done(Message::CloseRenameModal)
                 } else {
                     Task::none()
                 }
             }),
+            Message::OpenOperationModal => {
+                self.operation_modal = Some(true);
+                self.modal_opened = true;
+                Task::none()
+            }
+            Message::CloseOperationModal => {
+                self.operation_modal = None;
+                self.modal_opened = false;
+                Task::none()
+            }
         }
     }
 
@@ -432,36 +497,64 @@ impl Application {
             .width(Length::Fill)
             .height(Length::Fill);
 
-        let stack = stack![content].width(Length::Fill).height(Length::Fill);
+        let mut stack = stack![content].width(Length::Fill).height(Length::Fill);
 
         if let Some(thing) = &self.rename_modal {
             let input = text_input("input the new name here :3", &thing.content)
                 .on_input(Message::UpdateRenameModal)
                 .on_submit(Message::Rename)
+                .padding(7)
                 .id("rename");
 
+            let mut col = column![
+                text(format!("you are renaming, {}", thing.path.display())),
+                input,
+            ]
+            .width(497)
+            .spacing(7);
+
+            if let Some(th) = &thing.error {
+                col = col.push(
+                    text(th)
+                        .color(Color::from_rgba(1.0, 105.0 / 255.0, 97.0 / 255.0, 1.0))
+                        .size(13),
+                );
+            }
+
             let overlay = opaque(float(
-                container(
-                    column![
-                        text(format!("you are renaming, {}", thing.path.display())),
-                        input
-                    ]
-                    .width(500),
-                )
-                .style(move |_t| style())
-                .center(Length::Fill),
+                container(col).style(move |_t| style()).center(Length::Fill),
             ));
 
-            stack.push(overlay).into()
-        } else {
-            stack.into()
+            stack = stack.push(overlay);
         }
+
+        if let Some(_thing) = self.operation_modal {
+            let row = row![
+                button(text("replace"))
+                    .on_press(Message::PasteClipboard(file::OperationChoice::Merge))
+                    .padding(7),
+                button(text("duplicate"))
+                    .on_press(Message::PasteClipboard(file::OperationChoice::Duplicate))
+                    .padding(7)
+            ]
+            .spacing(10);
+
+            let overlay = opaque(float(
+                container(column![text("choose an operation type"), row])
+                    .style(move |_t| style())
+                    .center(Length::Fill),
+            ));
+
+            stack = stack.push(overlay);
+        }
+
+        stack.into()
     }
 
     fn subscription(&self) -> Subscription<Message> {
         event::listen_with(|event, status, _id| {
             if status == Status::Captured {
-                return Some(Message::CheckRenameModal);
+                return Some(Message::CheckModals);
             }
 
             match event {
@@ -481,7 +574,7 @@ impl Application {
                         Some(Message::AddClipboard(ClipboardType::Cut))
                     }
                     (key::Physical::Code(Code::KeyV), keyboard::Modifiers::CTRL) => {
-                        Some(Message::PasteClipboard)
+                        Some(Message::OpenOperationModal)
                     }
                     (key::Physical::Code(Code::Delete), _) => Some(Message::DeleteSelection),
                     (key::Physical::Code(Code::ArrowDown), _) => {
@@ -495,6 +588,7 @@ impl Application {
                     }
                     (key::Physical::Code(Code::ArrowRight), _) => Some(Message::OpenSelection),
                     (key::Physical::Code(Code::F2), _) => Some(Message::OpenRenameModal),
+                    (key::Physical::Code(Code::Escape), _) => Some(Message::CloseOperationModal),
                     _ => None,
                 },
                 _ => None,
@@ -511,7 +605,7 @@ impl Default for Application {
 
 fn style() -> container::Style {
     container::Style {
-        background: Some(Background::Color(Color::from_rgba(1.0, 1.0, 1.0, 0.6))),
+        background: Some(Background::Color(Color::from_rgba(1.0, 1.0, 1.0, 0.95))),
         ..Default::default()
     }
 }

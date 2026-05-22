@@ -6,35 +6,48 @@ pub enum PathControl {
     Forward,
 }
 
+#[derive(Clone, Debug)]
 pub enum OperationChoice {
     Merge,
     Duplicate,
 }
 
 pub fn rename(path: &mut PathBuf, name: String) {
-    path.set_file_name(name);
+    let mut new_path = path.clone();
+    new_path.set_file_name(name);
+
+    let command = Command::new("mv").arg(path).arg(new_path).output();
+
+    if let Err(err) = command {
+        println!("{}", err);
+    }
 }
 
-fn operation_recursion(dest: &PathBuf, prevs: &mut Vec<String>, path: &PathBuf, is_cut: bool) {
+fn operation_recursion(
+    dest: &PathBuf,
+    prevs: &mut Vec<String>,
+    operation: &OperationChoice,
+    path: &PathBuf,
+    is_cut: bool,
+) {
     let file_name = path.file_name().unwrap().to_str().unwrap().to_string();
-    println!("{}", file_name);
+    // println!("{}", file_name);
     let mut final_path = dest.clone();
     prevs.iter().for_each(|prev| final_path.push(prev));
 
     let joined = &final_path.join(&file_name);
-    println!("{}", joined.display());
+    // println!("{}", joined.display());
     // check if not exists in the destination
     if !joined.exists() {
-        println!("selected doesnt exist in destination");
+        //       println!("selected doesnt exist in destination");
         move_file(path, joined, is_cut);
         return;
     }
 
     // TODO: prompt to choose between replace or duplicate
     // assuming choice here for now
-    let choice = OperationChoice::Merge;
 
-    match choice {
+    match operation {
         OperationChoice::Duplicate => {
             // since both file/folder has the same outcome for choosing duplicate
             let new_path =
@@ -49,18 +62,18 @@ fn operation_recursion(dest: &PathBuf, prevs: &mut Vec<String>, path: &PathBuf, 
 
             if !final_path.is_file() {
                 // if is not folder
-                println!("selected file is not a folder");
+                //               println!("selected file is not a folder");
                 replace_file(path, &final_path.join(&file_name), is_cut);
             } else {
-                println!("folder");
+                // println!("folder");
                 prevs.push(file_name);
-                operation_recursion(dest, prevs, path, is_cut);
+                operation_recursion(dest, prevs, operation, path, is_cut);
             }
         }
     }
 }
 
-pub fn move_dir(old_files: Vec<PathBuf>, dest: PathBuf) {
+pub fn move_dir(old_files: Vec<PathBuf>, dest: PathBuf, operation: &OperationChoice) {
     if !dest.exists() || !dest.is_dir() {
         return;
         // check if path not exists and is not a folder
@@ -75,10 +88,10 @@ pub fn move_dir(old_files: Vec<PathBuf>, dest: PathBuf) {
 
     old_files
         .iter()
-        .for_each(|p| operation_recursion(&dest, &mut vec![], &p, true));
+        .for_each(|p| operation_recursion(&dest, &mut vec![], operation, &p, true));
 }
 
-pub fn copy_dir(old_files: Vec<PathBuf>, dest: PathBuf) {
+pub fn copy_dir(old_files: Vec<PathBuf>, dest: PathBuf, operation: &OperationChoice) {
     if !dest.exists() || !dest.is_dir() {
         return;
         // check if path not exists and is not a folder
@@ -86,7 +99,7 @@ pub fn copy_dir(old_files: Vec<PathBuf>, dest: PathBuf) {
 
     old_files
         .iter()
-        .for_each(|p| operation_recursion(&dest, &mut vec![], &p, false));
+        .for_each(|p| operation_recursion(&dest, &mut vec![], operation, &p, false));
 }
 
 fn move_file(old_path: &PathBuf, new_path: &PathBuf, is_cut: bool) {
@@ -183,7 +196,7 @@ fn get_fileextension(path: &PathBuf) -> String {
     let mut result = String::from("");
 
     if let Some(e) = ext {
-        println!("this is in extension");
+        // println!("this is in extension");
         result.push_str(".");
         result.push_str(e.to_str().unwrap());
     }
