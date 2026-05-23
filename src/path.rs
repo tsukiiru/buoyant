@@ -1,3 +1,4 @@
+use file_type::{self, FileType};
 use std::{error::Error, fs, io, path::PathBuf, process::Command, time::SystemTime};
 
 #[derive(Clone, Debug)]
@@ -50,8 +51,11 @@ fn operation_recursion(
     match operation {
         OperationChoice::Duplicate => {
             // since both file/folder has the same outcome for choosing duplicate
-            let new_path =
-                increment_suffix(get_filename(path), get_fileextension(path), &final_path);
+            let new_path = increment_suffix(
+                get_filename(path),
+                format!(".{}", get_fileextension(path)),
+                &final_path,
+            );
             move_file(path, &new_path, is_cut);
         }
         OperationChoice::Merge => {
@@ -153,6 +157,22 @@ fn get_filenameext(path: &PathBuf) -> String {
     path.file_name().unwrap().to_str().unwrap().to_string()
 }
 
+pub fn get_filetype(path: &PathBuf) -> String {
+    if path.is_dir() {
+        return String::from("Folder");
+    }
+
+    let ext = get_fileextension(path);
+    let opt_type = FileType::from_extension(ext).first();
+
+    if let Some(thing) = opt_type {
+        thing.name().to_string()
+    } else {
+        String::from("unknown")
+    }
+    // i'll try to get a more accurate file type later
+}
+
 const UNIX_EPOCH: SystemTime = SystemTime::UNIX_EPOCH;
 
 pub fn get_fileaccessed(path: &PathBuf) -> i64 {
@@ -193,15 +213,13 @@ pub fn is_hidden(path: &PathBuf) -> bool {
 
 fn get_fileextension(path: &PathBuf) -> String {
     let ext = path.extension();
-    let mut result = String::from("");
 
     if let Some(e) = ext {
         // println!("this is in extension");
-        result.push_str(".");
-        result.push_str(e.to_str().unwrap());
+        e.to_str().unwrap().to_string()
+    } else {
+        String::from("")
     }
-
-    result
 }
 
 // for checking if theres existing files at destination,

@@ -1,26 +1,27 @@
-use chrono::DateTime;
-use file::PathControl;
-use iced::event::Status;
-use iced::widget::{
-    Id, button, column, container, float, mouse_area, opaque, operation, row, scrollable, stack,
-    text, text_input,
-};
-use iced::{Background, Event, event};
-use iced::{
-    Color, Element, Length, Subscription, Task, alignment,
-    keyboard::{
-        self,
-        key::{self, Code},
-    },
-};
-use path as file;
 use std::{
     env::home_dir,
     path::PathBuf,
     process::{Command, Stdio},
 };
 
+use chrono::DateTime;
+
+use iced::{
+    Background, Color, Element, Event, Length, Subscription, Task, alignment, event,
+    event::Status,
+    keyboard::{
+        self,
+        key::{self, Code},
+    },
+    widget::{
+        Id, button, column, container, float, mouse_area, opaque, operation, row, scrollable,
+        stack, text, text_input,
+    },
+};
+
 mod path;
+use file::PathControl;
+use path as file;
 
 struct Program {
     path: PathBuf,
@@ -83,16 +84,23 @@ enum Message {
     None,
     Open(PathBuf),
     Navigate(PathControl),
+
     UpdateEntries(Option<PathBuf>),
+    ToggleHiddenView,
     Select(usize),
+    HoverEntry(usize, bool),
+
     ResetSelection,
     DeleteSelection,
     NavigateSelection(Direction),
     OpenSelection,
+
     UpdateControlKey(bool),
+
+    Rename,
+
     AddClipboard(ClipboardType),
     PasteClipboard(file::OperationChoice),
-    Rename,
 
     CheckModals,
     UpdateRenameModal(String),
@@ -108,6 +116,8 @@ struct Entry {
     accessed: i64,
     created: i64,
     index: usize,
+    hovered: bool,
+    filetype: String,
 }
 
 struct RenameModal {
@@ -152,6 +162,7 @@ impl Application {
 
     fn update(&mut self, message: Message) -> Task<Message> {
         match message {
+            Message::None => Task::none(),
             Message::Open(path) => {
                 self.program.open(&path);
 
@@ -196,6 +207,8 @@ impl Application {
                         created: file::get_filecreated(&path),
                         accessed: file::get_fileaccessed(&path),
                         index: i,
+                        hovered: false,
+                        filetype: file::get_filetype(&path),
                     });
                     i += 1;
                 }
@@ -209,6 +222,12 @@ impl Application {
                 } else {
                     self.selected.clear();
                 }
+
+                Task::none()
+            }
+            Message::HoverEntry(id, state) => {
+                let entry = self.entries.get_mut(id).unwrap();
+                entry.hovered = state;
 
                 Task::none()
             }
@@ -230,7 +249,6 @@ impl Application {
                 Task::none()
             }
             Message::DeleteSelection => Task::none(),
-            Message::None => Task::none(),
             Message::AddClipboard(t) => {
                 if self.modal_opened {
                     return Task::none();
@@ -415,6 +433,10 @@ impl Application {
                 self.modal_opened = false;
                 Task::none()
             }
+            Message::ToggleHiddenView => {
+                self.view_hidden = !self.view_hidden;
+                Task::done(Message::UpdateEntries(None))
+            }
         }
     }
 
@@ -430,7 +452,10 @@ impl Application {
                                 mouse_area(
                                     row![
                                         text(e.name.clone())
-                                            .width(400)
+                                            .width(300)
+                                            .align_x(alignment::Horizontal::Left),
+                                        text(e.filetype.clone())
+                                            .width(150)
                                             .align_x(alignment::Horizontal::Left),
                                         text(
                                             DateTime::from_timestamp_secs(e.created)
@@ -447,17 +472,21 @@ impl Application {
                                         .width(Length::FillPortion(3))
                                         .align_x(alignment::Horizontal::Left)
                                     ]
-                                    .spacing(5),
+                                    .spacing(5)
+                                    .padding(5),
                                 )
                                 .on_double_click(Message::Open(e.path.clone()))
-                                .on_press(Message::Select(e.index.clone())),
+                                .on_press(Message::Select(e.index.clone()))
+                                .on_enter(Message::HoverEntry(e.index.clone(), true))
+                                .on_exit(Message::HoverEntry(e.index.clone(), false)),
                             )
                             .style(if self.selected.contains(&e.index) {
+                                container::success
+                            } else if e.hovered && !self.selected.contains(&e.index) {
                                 container::danger
                             } else {
                                 container::transparent
                             })
-                            .padding(5)
                             .into()
                         })
                         .collect::<Vec<_>>(),
@@ -467,7 +496,11 @@ impl Application {
                 .width(Length::Fill)
                 .into();
 
-        let explorer_scroll = scrollable(buttons).width(Length::Fill).height(Length::Fill);
+        let explorer_scroll = scrollable(buttons)
+            .id("scrollable")
+            .width(Length::Fill)
+            .height(Length::Fill);
+
         let explorer_select =
             container(mouse_area(explorer_scroll).on_press(if !self.holding_ctrl {
                 Message::ResetSelection
@@ -481,6 +514,7 @@ impl Application {
             ClipboardType::Copy => "Copy",
             ClipboardType::Cut => "Cut",
         };
+
         let clipboard_entries = &self.clipboard;
         let clipboard: Element<Message> = column![text(format!("type: {}", clipboard_type))]
             .extend(
@@ -489,11 +523,24 @@ impl Application {
                     .map(|e| text(e.display().to_string()).into()),
             )
             .spacing(10)
-            .padding(20)
-            .width(500)
+            .width(Length::Fill)
+            .height(Length::Fill)
             .into();
 
-        let content = row![explorer_select, clipboard]
+        let left_col = column![
+            text(format!(
+                "showing hidden files: {}",
+                if self.view_hidden { "yes" } else { "nah bro" }
+            ))
+            .height(20)
+            .width(Length::Fill),
+            clipboard
+        ]
+        .width(300)
+        .padding(20)
+        .spacing(10);
+
+        let content = row![explorer_select, left_col]
             .width(Length::Fill)
             .height(Length::Fill);
 
@@ -530,17 +577,19 @@ impl Application {
 
         if let Some(_thing) = self.operation_modal {
             let row = row![
-                button(text("replace"))
+                button(text("Replace \nreplace file if name is matched"))
                     .on_press(Message::PasteClipboard(file::OperationChoice::Merge))
                     .padding(7),
-                button(text("duplicate"))
-                    .on_press(Message::PasteClipboard(file::OperationChoice::Duplicate))
-                    .padding(7)
+                button(text(
+                    "Duplicate \nadd (n) to the end of file name if name is matched"
+                ))
+                .on_press(Message::PasteClipboard(file::OperationChoice::Duplicate))
+                .padding(7)
             ]
             .spacing(10);
 
             let overlay = opaque(float(
-                container(column![text("choose an operation type"), row])
+                container(column![text("choose an operation type"), row].spacing(10))
                     .style(move |_t| style())
                     .center(Length::Fill),
             ));
@@ -589,6 +638,9 @@ impl Application {
                     (key::Physical::Code(Code::ArrowRight), _) => Some(Message::OpenSelection),
                     (key::Physical::Code(Code::F2), _) => Some(Message::OpenRenameModal),
                     (key::Physical::Code(Code::Escape), _) => Some(Message::CloseOperationModal),
+                    (key::Physical::Code(Code::KeyH), keyboard::Modifiers::CTRL) => {
+                        Some(Message::ToggleHiddenView)
+                    }
                     _ => None,
                 },
                 _ => None,
