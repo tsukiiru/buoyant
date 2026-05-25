@@ -13,7 +13,19 @@ pub enum OperationChoice {
     Duplicate,
 }
 
-pub fn rename(path: &mut PathBuf, name: String) {
+pub fn delete(path: &PathBuf) {
+    if !path.exists() {
+        return;
+    }
+
+    let command = Command::new("rm").arg("-rf").arg(path).output();
+
+    if let Err(e) = command {
+        println!("{}", e);
+    }
+}
+
+pub fn rename(path: &PathBuf, name: String) {
     let mut new_path = path.clone();
     new_path.set_file_name(name);
 
@@ -32,21 +44,15 @@ fn operation_recursion(
     is_cut: bool,
 ) {
     let file_name = path.file_name().unwrap().to_str().unwrap().to_string();
-    // println!("{}", file_name);
     let mut final_path = dest.clone();
     prevs.iter().for_each(|prev| final_path.push(prev));
 
     let joined = &final_path.join(&file_name);
-    // println!("{}", joined.display());
     // check if not exists in the destination
     if !joined.exists() {
-        //       println!("selected doesnt exist in destination");
         move_file(path, joined, is_cut);
         return;
     }
-
-    // TODO: prompt to choose between replace or duplicate
-    // assuming choice here for now
 
     match operation {
         OperationChoice::Duplicate => {
@@ -133,10 +139,17 @@ fn replace_file(old_path: &PathBuf, new_path: &PathBuf, is_cut: bool) {
 }
 
 // helper functions
-pub fn read_dir(path: &PathBuf) -> Result<Vec<PathBuf>, Box<dyn Error>> {
-    Ok(fs::read_dir(path)?
-        .map(|r| r.map(|e| e.path()))
-        .collect::<Result<Vec<_>, io::Error>>()?)
+pub fn read_dir(path: &PathBuf) -> Vec<PathBuf> {
+    let read_results = fs::read_dir(path);
+
+    if let Err(hi) = &read_results {
+        eprintln!("{}", hi);
+    }
+
+    read_results
+        .unwrap()
+        .map(|r| r.map(|e| e.path()).unwrap())
+        .collect::<Vec<_>>()
 } // returns a vec of children of a directory
 
 // get file name but stripped the extension
@@ -145,10 +158,13 @@ pub fn get_filename(path: &PathBuf) -> String {
     if path.is_dir() {
         return name;
     }
-    let i = name.rfind(".").unwrap();
+
+    let i = name.rfind(".");
     // trim the extension off
 
-    name.truncate(i);
+    if let Some(size) = i {
+        name.truncate(size);
+    }
     name
 }
 

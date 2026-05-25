@@ -95,7 +95,7 @@ enum Message {
     NavigateSelection(Direction),
     OpenSelection,
 
-    UpdateControlKey(bool),
+    UpdateModifiersState(bool, bool),
 
     Rename,
 
@@ -108,6 +108,9 @@ enum Message {
     OpenRenameModal,
     OpenOperationModal,
     CloseOperationModal,
+    OpenDeleteModal,
+    CloseDeleteModal,
+    CloseModals,
 }
 
 struct Entry {
@@ -127,15 +130,18 @@ struct RenameModal {
 }
 
 struct Application {
+    current_index: usize,
     program: Program,
     entries: Vec<Entry>,
     view_hidden: bool,
     selected: Vec<usize>,
     holding_ctrl: bool,
+    holding_shift: bool,
     clipboard: Vec<PathBuf>,
     clipboard_type: ClipboardType,
     rename_modal: Option<RenameModal>,
     operation_modal: Option<bool>,
+    delete_modal: Option<bool>,
     modal_opened: bool,
 }
 
@@ -145,15 +151,18 @@ impl Application {
     fn new() -> (Self, Task<Message>) {
         (
             Application {
+                current_index: 0,
                 program: Program::init(home_dir().unwrap()),
                 entries: vec![],
                 view_hidden: false,
                 selected: vec![],
                 holding_ctrl: false,
+                holding_shift: false,
                 clipboard: vec![],
                 clipboard_type: ClipboardType::Copy,
                 rename_modal: None,
                 operation_modal: None,
+                delete_modal: None,
                 modal_opened: false,
             },
             Task::done(Message::UpdateEntries(None)),
@@ -194,7 +203,7 @@ impl Application {
             Message::UpdateEntries(prev_path) => {
                 self.entries.clear();
 
-                let cur_paths = file::read_dir(&self.program.path).unwrap();
+                let cur_paths = file::read_dir(&self.program.path);
                 let mut i: usize = 0;
                 for path in cur_paths {
                     if !self.view_hidden && file::is_hidden(&path) {
@@ -213,6 +222,10 @@ impl Application {
                     i += 1;
                 }
 
+                if let Some(thing) = self.selected.get(self.selected.len()) {
+                    self.current_index = thing.clone();
+                }
+
                 if let Some(index) = prev_path {
                     for entry in self.entries.iter() {
                         if entry.path == index {
@@ -226,13 +239,17 @@ impl Application {
                 Task::none()
             }
             Message::HoverEntry(id, state) => {
-                let entry = self.entries.get_mut(id).unwrap();
-                entry.hovered = state;
+                let entry = self.entries.get_mut(id);
+
+                if let Some(e) = entry {
+                    e.hovered = state;
+                }
 
                 Task::none()
             }
-            Message::UpdateControlKey(state) => {
-                self.holding_ctrl = state;
+            Message::UpdateModifiersState(ctrl_state, shift_state) => {
+                self.holding_ctrl = ctrl_state;
+                self.holding_shift = shift_state;
                 Task::none()
             }
             Message::Select(index) => {
@@ -248,29 +265,30 @@ impl Application {
                 self.selected.clear();
                 Task::none()
             }
-            Message::DeleteSelection => Task::none(),
+            Message::DeleteSelection => {
+                for index in &self.selected {
+                    file::delete(&self.entries[*index].path);
+                }
+
+                Task::done(Message::CloseDeleteModal)
+                    .chain(Task::done(Message::UpdateEntries(None)))
+            }
             Message::AddClipboard(t) => {
-                if self.modal_opened {
+                if self.modal_opened || self.selected.is_empty() {
                     return Task::none();
                 }
 
-                if !self.selected.is_empty() {
-                    let mut new_vec: Vec<PathBuf> = vec![];
+                self.clipboard.clear();
 
-                    self.selected
-                        .iter()
-                        .for_each(|i| new_vec.push(self.entries[*i].path.clone()));
+                self.selected
+                    .iter()
+                    .for_each(|i| self.clipboard.push(self.entries[*i].path.clone()));
 
-                    self.clipboard = new_vec;
-                    self.clipboard_type = t;
-                }
+                self.clipboard_type = t;
+
                 Task::none()
             }
             Message::PasteClipboard(opp) => {
-                if self.modal_opened {
-                    return Task::none();
-                }
-
                 if self.clipboard.is_empty() {
                     return Task::none();
                 }
@@ -284,6 +302,7 @@ impl Application {
                         self.clipboard.clear();
                     }
                 }
+
                 Task::done(Message::CloseOperationModal)
                     .chain(Task::done(Message::UpdateEntries(None)))
             }
@@ -301,6 +320,7 @@ impl Application {
                 } else {
                     exists = false;
                     // im sorry.
+                    // someone help me with this please ;-;
                 }
 
                 let new_index: usize;
@@ -324,7 +344,9 @@ impl Application {
                     }
                 }
 
-                if self.holding_ctrl {
+                self.current_index = new_index.clone();
+
+                if self.holding_shift {
                     self.selected.push(new_index);
                 } else {
                     self.selected = vec![new_index];
@@ -347,15 +369,15 @@ impl Application {
                     return Task::none();
                 }
 
-                if let Some(path) = self.entries.get(cur_index) {
-                    Task::done(Message::Open(path.path.clone()))
+                if let Some(entry) = self.entries.get(cur_index) {
+                    Task::done(Message::Open(entry.path.clone()))
                 } else {
                     Task::none()
                 }
             }
             Message::Rename => {
                 let overlay = self.rename_modal.as_mut().unwrap();
-                let name = &overlay.content.clone().trim().to_string();
+                let name = &overlay.content;
 
                 if name.is_empty() {
                     return Task::none();
@@ -393,7 +415,7 @@ impl Application {
                 let selection = self.selected.get(self.selected.len() - 1);
 
                 if let Some(thing) = selection {
-                    let selected = self.entries.get(thing.clone()).unwrap();
+                    let selected = self.entries.get(*thing).unwrap();
                     self.rename_modal = Some(RenameModal {
                         path: selected.path.clone(),
                         content: selected.name.clone(),
@@ -437,6 +459,18 @@ impl Application {
                 self.view_hidden = !self.view_hidden;
                 Task::done(Message::UpdateEntries(None))
             }
+            Message::OpenDeleteModal => {
+                self.delete_modal = Some(true);
+                self.modal_opened = true;
+                Task::none()
+            }
+            Message::CloseDeleteModal => {
+                self.delete_modal = None;
+                self.modal_opened = false;
+                Task::none()
+            }
+            Message::CloseModals => Task::done(Message::CloseDeleteModal)
+                .chain(Task::done(Message::CloseOperationModal)),
         }
     }
 
@@ -481,9 +515,17 @@ impl Application {
                                 .on_exit(Message::HoverEntry(e.index.clone(), false)),
                             )
                             .style(if self.selected.contains(&e.index) {
-                                container::success
+                                if self.current_index == e.index {
+                                    container::bordered_box
+                                } else {
+                                    container::success
+                                }
                             } else if e.hovered && !self.selected.contains(&e.index) {
-                                container::danger
+                                if self.current_index == e.index {
+                                    container::bordered_box
+                                } else {
+                                    container::primary
+                                }
                             } else {
                                 container::transparent
                             })
@@ -597,6 +639,24 @@ impl Application {
             stack = stack.push(overlay);
         }
 
+        if let Some(_thing) = self.delete_modal {
+            let overlay = opaque(float(
+                container(
+                    column![
+                        text("you gonna delete the selections?"),
+                        button(text("yeah :3"))
+                            .padding(7)
+                            .on_press(Message::DeleteSelection)
+                    ]
+                    .spacing(10),
+                )
+                .style(move |_t| style())
+                .center(Length::Fill),
+            ));
+
+            stack = stack.push(overlay);
+        }
+
         stack.into()
     }
 
@@ -608,7 +668,7 @@ impl Application {
 
             match event {
                 Event::Keyboard(keyboard::Event::ModifiersChanged(m)) => {
-                    Some(Message::UpdateControlKey(m.control()))
+                    Some(Message::UpdateModifiersState(m.control(), m.shift()))
                 }
 
                 Event::Keyboard(keyboard::Event::KeyPressed {
@@ -625,7 +685,7 @@ impl Application {
                     (key::Physical::Code(Code::KeyV), keyboard::Modifiers::CTRL) => {
                         Some(Message::OpenOperationModal)
                     }
-                    (key::Physical::Code(Code::Delete), _) => Some(Message::DeleteSelection),
+                    (key::Physical::Code(Code::Delete), _) => Some(Message::OpenDeleteModal),
                     (key::Physical::Code(Code::ArrowDown), _) => {
                         Some(Message::NavigateSelection(Direction::Down))
                     }
@@ -637,7 +697,7 @@ impl Application {
                     }
                     (key::Physical::Code(Code::ArrowRight), _) => Some(Message::OpenSelection),
                     (key::Physical::Code(Code::F2), _) => Some(Message::OpenRenameModal),
-                    (key::Physical::Code(Code::Escape), _) => Some(Message::CloseOperationModal),
+                    (key::Physical::Code(Code::Escape), _) => Some(Message::CloseModals),
                     (key::Physical::Code(Code::KeyH), keyboard::Modifiers::CTRL) => {
                         Some(Message::ToggleHiddenView)
                     }
