@@ -1,5 +1,5 @@
 use std::{
-    env::home_dir,
+    env::{args, home_dir},
     path::PathBuf,
     process::{Command, Stdio},
 };
@@ -7,8 +7,9 @@ use std::{
 use chrono::DateTime;
 
 use iced::{
-    Background, Color, Element, Event, Length, Subscription, Task, alignment, event,
-    event::Status,
+    Background, Border, Color, Element, Event, Length, Subscription, Task, alignment,
+    border::Radius,
+    event::{self, Status},
     keyboard::{
         self,
         key::{self, Code},
@@ -20,7 +21,6 @@ use iced::{
 };
 
 mod path;
-use file::PathControl;
 use path as file;
 
 struct Program {
@@ -37,7 +37,6 @@ impl Program {
     fn open(&mut self, new_path: &PathBuf) {
         if new_path.is_dir() {
             self.path = new_path.clone();
-            // if its a folder
         } else {
             let cmd = Command::new("xdg-open")
                 .arg(new_path)
@@ -47,23 +46,11 @@ impl Program {
             if let Err(e) = cmd {
                 println!("{}", e);
             }
-            // try to open with default program
-            // if not, errors
         }
     }
 
-    fn relative_nav(&mut self, dir: PathControl) {
-        match dir {
-            PathControl::Backward => {
-                self.path.pop();
-            }
-            PathControl::Forward => {
-                // probaly not yet, cuz theres no history for now
-                // isnt this just going to the previous path??
-            }
-        }
-
-        // println!("new path is at: {}", self.path.display());
+    fn navigate_back(&mut self) {
+        self.path.pop();
     }
 }
 
@@ -83,7 +70,7 @@ enum Direction {
 enum Message {
     None,
     Open(PathBuf),
-    Navigate(PathControl),
+    Return,
 
     UpdateEntries(Option<PathBuf>),
     ToggleHiddenView,
@@ -130,7 +117,7 @@ struct RenameModal {
 }
 
 struct Application {
-    current_index: usize,
+    current_index: Option<usize>,
     program: Program,
     entries: Vec<Entry>,
     view_hidden: bool,
@@ -148,11 +135,20 @@ struct Application {
 const NONO_CHARACTERS: [&str; 10] = ["\0", "\\", "\"", "/", ":", "*", "?", "<", ">", "|"];
 
 impl Application {
-    fn new() -> (Self, Task<Message>) {
+    fn new(input: String) -> (Self, Task<Message>) {
+        let path_conversion = PathBuf::from(input);
+        let path: PathBuf;
+
+        if !path_conversion.exists() {
+            path = home_dir().unwrap();
+        } else {
+            path = path_conversion;
+        }
+
         (
             Application {
-                current_index: 0,
-                program: Program::init(home_dir().unwrap()),
+                current_index: None,
+                program: Program::init(path),
                 entries: vec![],
                 view_hidden: false,
                 selected: vec![],
@@ -179,24 +175,16 @@ impl Application {
                     return Task::none();
                 }
 
+                self.current_index = None;
                 Task::done(Message::UpdateEntries(None))
             }
-            Message::Navigate(to) => {
+            Message::Return => {
                 if self.modal_opened {
                     return Task::none();
                 }
 
-                let mut path: Option<PathBuf> = None;
-
-                match to {
-                    PathControl::Backward => {
-                        path = Some(self.program.path.clone());
-                        self.program.relative_nav(PathControl::Backward);
-                    }
-                    PathControl::Forward => {
-                        self.program.relative_nav(PathControl::Forward);
-                    }
-                }
+                let path = Some(self.program.path.clone());
+                self.program.navigate_back();
 
                 Task::done(Message::UpdateEntries(path))
             }
@@ -222,16 +210,12 @@ impl Application {
                     i += 1;
                 }
 
-                if let Some(thing) = self.selected.get(self.selected.len()) {
-                    self.current_index = thing.clone();
-                }
-
-                if let Some(index) = prev_path {
-                    for entry in self.entries.iter() {
-                        if entry.path == index {
-                            self.selected = vec![entry.index];
+                if let Some(path) = prev_path {
+                    self.entries.iter().for_each(|entry| {
+                        if entry.path == path {
+                            self.current_index = Some(entry.index);
                         }
-                    }
+                    });
                 } else {
                     self.selected.clear();
                 }
@@ -257,6 +241,7 @@ impl Application {
                     self.selected.clear();
                 }
 
+                self.current_index = Some(index.clone());
                 self.selected.push(index);
 
                 Task::none()
@@ -311,45 +296,27 @@ impl Application {
                     return Task::none();
                 }
 
-                let index_opt = self.selected.get(self.selected.len() - 1);
-                let mut current_index: usize = 0;
-                let mut exists = true;
+                let mut current_index: usize = *self.current_index.as_mut().unwrap_or(&mut 0);
 
-                if let Some(thing) = index_opt {
-                    current_index = thing.clone();
-                } else {
-                    exists = false;
-                    // im sorry.
-                    // someone help me with this please ;-;
-                }
-
-                let new_index: usize;
-                // get the last selected index OR the first index if no selection
                 match direction {
                     Direction::Down => {
-                        new_index = if current_index >= self.entries.len() - 1 {
-                            current_index
-                        } else if !exists {
-                            0
-                        } else {
-                            current_index + 1
+                        if current_index < self.entries.len() - 1 {
+                            current_index += 1;
                         };
                     }
                     Direction::Up => {
-                        new_index = if current_index == 0 {
-                            current_index
-                        } else {
-                            current_index - 1
-                        };
+                        if !(current_index == 0) {
+                            current_index -= 1;
+                        }
                     }
                 }
 
-                self.current_index = new_index.clone();
+                self.current_index = Some(current_index.clone());
 
                 if self.holding_shift {
-                    self.selected.push(new_index);
+                    self.selected.push(current_index);
                 } else {
-                    self.selected = vec![new_index];
+                    self.selected = vec![current_index];
                 }
 
                 // TODO: update position of view following the selection index
@@ -360,16 +327,16 @@ impl Application {
                     return Task::none();
                 }
 
-                let index_opt = self.selected.get(self.selected.len() - 1);
-                let cur_index: usize;
+                let current_index = self.current_index;
+                let temp_index: usize;
 
-                if let Some(thing) = index_opt {
-                    cur_index = *thing;
+                if let Some(index) = &current_index {
+                    temp_index = *index;
                 } else {
                     return Task::none();
                 }
 
-                if let Some(entry) = self.entries.get(cur_index) {
+                if let Some(entry) = self.entries.get(temp_index) {
                     Task::done(Message::Open(entry.path.clone()))
                 } else {
                     Task::none()
@@ -412,10 +379,11 @@ impl Application {
                     return Task::none();
                 }
 
-                let selection = self.selected.get(self.selected.len() - 1);
+                let current_index = self.current_index;
 
-                if let Some(thing) = selection {
-                    let selected = self.entries.get(*thing).unwrap();
+                if let Some(index) = current_index {
+                    let selected = self.entries.get(index).unwrap();
+
                     self.rename_modal = Some(RenameModal {
                         path: selected.path.clone(),
                         content: selected.name.clone(),
@@ -476,67 +444,75 @@ impl Application {
 
     fn view(&self) -> Element<'_, Message> {
         let entries = &self.entries;
-        let buttons: Element<Message> =
-            column!(button(text("...")).on_press(Message::Navigate(PathControl::Backward).into()))
-                .extend(
-                    entries
-                        .iter()
-                        .map(|e| {
-                            container(
-                                mouse_area(
-                                    row![
-                                        text(e.name.clone())
-                                            .width(300)
-                                            .align_x(alignment::Horizontal::Left),
-                                        text(e.filetype.clone())
-                                            .width(150)
-                                            .align_x(alignment::Horizontal::Left),
-                                        text(
-                                            DateTime::from_timestamp_secs(e.created)
-                                                .unwrap()
-                                                .to_string()
-                                        )
-                                        .width(200)
+        let buttons: Element<Message> = column!()
+            .extend(
+                entries
+                    .iter()
+                    .map(|e| {
+                        container(
+                            mouse_area(
+                                row![
+                                    text(e.name.clone())
+                                        .width(300)
                                         .align_x(alignment::Horizontal::Left),
-                                        text(
-                                            DateTime::from_timestamp_secs(e.accessed)
-                                                .unwrap()
-                                                .to_string()
-                                        )
-                                        .width(Length::FillPortion(3))
-                                        .align_x(alignment::Horizontal::Left)
-                                    ]
-                                    .spacing(5)
-                                    .padding(5),
-                                )
-                                .on_double_click(Message::Open(e.path.clone()))
-                                .on_press(Message::Select(e.index.clone()))
-                                .on_enter(Message::HoverEntry(e.index.clone(), true))
-                                .on_exit(Message::HoverEntry(e.index.clone(), false)),
+                                    text(e.filetype.clone())
+                                        .width(150)
+                                        .align_x(alignment::Horizontal::Left),
+                                    text(
+                                        DateTime::from_timestamp_secs(e.created)
+                                            .unwrap()
+                                            .to_string()
+                                    )
+                                    .width(200)
+                                    .align_x(alignment::Horizontal::Left),
+                                    text(
+                                        DateTime::from_timestamp_secs(e.accessed)
+                                            .unwrap()
+                                            .to_string()
+                                    )
+                                    .width(Length::FillPortion(3))
+                                    .align_x(alignment::Horizontal::Left)
+                                ]
+                                .spacing(5)
+                                .padding(5),
                             )
-                            .style(if self.selected.contains(&e.index) {
-                                if self.current_index == e.index {
-                                    container::bordered_box
-                                } else {
-                                    container::success
-                                }
-                            } else if e.hovered && !self.selected.contains(&e.index) {
-                                if self.current_index == e.index {
-                                    container::bordered_box
-                                } else {
-                                    container::primary
-                                }
-                            } else {
-                                container::transparent
-                            })
-                            .into()
+                            .on_double_click(Message::Open(e.path.clone()))
+                            .on_press(Message::Select(e.index.clone()))
+                            .on_enter(Message::HoverEntry(e.index.clone(), true))
+                            .on_exit(Message::HoverEntry(e.index.clone(), false)),
+                        )
+                        .style(|_theme| {
+                            let mut style = container::Style::default();
+
+                            if let Some(cur_index) = self.current_index
+                                && cur_index == e.index
+                            {
+                                style.border = Border {
+                                    color: Color::from_rgba(0.0, 0.0, 0.0, 0.5),
+                                    width: 2.0,
+                                    radius: Radius::new(4.0),
+                                };
+                            }
+
+                            if e.hovered {
+                                style.background =
+                                    Some(Background::Color(Color::from_rgba(0.4, 0.4, 0.4, 0.1)));
+                            }
+
+                            if self.selected.contains(&e.index) {
+                                style.background =
+                                    Some(Background::Color(Color::from_rgba(0.4, 0.4, 0.4, 0.3)));
+                            }
+                            style
                         })
-                        .collect::<Vec<_>>(),
-                )
-                .spacing(10)
-                .padding(20)
-                .width(Length::Fill)
-                .into();
+                        .into()
+                    })
+                    .collect::<Vec<_>>(),
+            )
+            .spacing(10)
+            .padding(20)
+            .width(Length::Fill)
+            .into();
 
         let explorer_scroll = scrollable(buttons)
             .id("scrollable")
@@ -570,6 +546,30 @@ impl Application {
             .into();
 
         let left_col = column![
+            row![
+                button(text("....")).on_press(Message::Return),
+                container(text(format!("{}", self.program.path.display())))
+                    .style(|_theme| {
+                        container::Style::default()
+                            .background(Background::Color(Color::from_rgba(0.8, 0.8, 0.8, 0.8)))
+                    })
+                    .center_y(30)
+                    .center_x(Length::Fill)
+                    .height(30)
+                    .padding(5),
+            ],
+            explorer_select
+        ]
+        .spacing(10)
+        .height(Length::Fill)
+        .width(Length::Fill);
+
+        let right_col = column![
+            container(text("explorer info"))
+                .height(30)
+                .center_y(30)
+                .center_x(Length::Fill)
+                .padding(5),
             text(format!(
                 "showing hidden files: {}",
                 if self.view_hidden { "yes" } else { "nah bro" }
@@ -579,12 +579,13 @@ impl Application {
             clipboard
         ]
         .width(300)
-        .padding(20)
         .spacing(10);
 
-        let content = row![explorer_select, left_col]
+        let content = row![left_col, right_col]
             .width(Length::Fill)
-            .height(Length::Fill);
+            .height(Length::Fill)
+            .padding(30)
+            .spacing(10);
 
         let mut stack = stack![content].width(Length::Fill).height(Length::Fill);
 
@@ -692,9 +693,7 @@ impl Application {
                     (key::Physical::Code(Code::ArrowUp), _) => {
                         Some(Message::NavigateSelection(Direction::Up))
                     }
-                    (key::Physical::Code(Code::ArrowLeft), _) => {
-                        Some(Message::Navigate(PathControl::Backward))
-                    }
+                    (key::Physical::Code(Code::ArrowLeft), _) => Some(Message::Return),
                     (key::Physical::Code(Code::ArrowRight), _) => Some(Message::OpenSelection),
                     (key::Physical::Code(Code::F2), _) => Some(Message::OpenRenameModal),
                     (key::Physical::Code(Code::Escape), _) => Some(Message::CloseModals),
@@ -709,12 +708,6 @@ impl Application {
     }
 }
 
-impl Default for Application {
-    fn default() -> Self {
-        Self::new().0
-    }
-}
-
 fn style() -> container::Style {
     container::Style {
         background: Some(Background::Color(Color::from_rgba(1.0, 1.0, 1.0, 0.95))),
@@ -723,8 +716,14 @@ fn style() -> container::Style {
 }
 
 fn main() -> iced::Result {
-    iced::application(Application::new, Application::update, Application::view)
-        .subscription(Application::subscription)
-        .title("buoyant")
-        .run()
+    let input = args().nth(1).unwrap_or_default();
+
+    iced::application(
+        move || Application::new(input.clone()),
+        Application::update,
+        Application::view,
+    )
+    .subscription(Application::subscription)
+    .title("buoyant")
+    .run()
 }

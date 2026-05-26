@@ -1,11 +1,5 @@
 use file_type::{self, FileType};
-use std::{error::Error, fs, io, path::PathBuf, process::Command, time::SystemTime};
-
-#[derive(Clone, Debug)]
-pub enum PathControl {
-    Backward,
-    Forward,
-}
+use std::{fs, path::PathBuf, process::Command, time::SystemTime};
 
 #[derive(Clone, Debug)]
 pub enum OperationChoice {
