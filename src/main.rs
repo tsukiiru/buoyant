@@ -11,8 +11,8 @@ use iced::{
     border::Radius,
     event::{self, Status},
     keyboard::{
-        self,
-        key::{self, Code},
+        self, Modifiers,
+        key::{self, Code, Physical},
     },
     widget::{
         button, column, container, float, mouse_area, opaque, operation, row, scrollable, stack,
@@ -20,6 +20,7 @@ use iced::{
     },
 };
 
+mod config;
 mod path;
 use path as file;
 
@@ -71,6 +72,8 @@ enum Message {
     None,
     Open(PathBuf),
     Return,
+
+    KeyPressed(Physical, Modifiers),
 
     UpdateEntries(Option<PathBuf>),
     HoverEntry(usize, bool),
@@ -153,6 +156,8 @@ enum ModalMessage {
 
 struct Application {
     view_hidden: bool,
+    config: config::Config,
+
     program: Program,
 
     current_index: Option<usize>,
@@ -165,7 +170,7 @@ struct Application {
 }
 
 impl Application {
-    fn new(input: String) -> (Self, Task<Message>) {
+    fn new(input: String, config: config::Config) -> (Self, Task<Message>) {
         let path_conversion = PathBuf::from(input);
         let path: PathBuf;
 
@@ -178,6 +183,8 @@ impl Application {
         (
             Application {
                 view_hidden: false,
+                config,
+
                 program: Program::init(path),
 
                 current_index: None,
@@ -227,6 +234,22 @@ impl Application {
                 self.program.navigate_back();
 
                 Task::done(Message::UpdateEntries(path))
+            }
+
+            Message::KeyPressed(physical_key, _modifiers) => {
+                let keybinds_config = &self.config.keybinds;
+
+                if physical_key == keybinds_config.navigate_backward {
+                    return Task::done(Message::Return);
+                } else if physical_key == keybinds_config.navigate_forward {
+                    return Task::done(Message::OpenSelection);
+                } else if physical_key == keybinds_config.navigate_down {
+                    return Task::done(Message::NavigateSelection(Direction::Down));
+                } else if physical_key == keybinds_config.navigate_up {
+                    return Task::done(Message::NavigateSelection(Direction::Up));
+                }
+
+                Task::none()
             }
 
             Message::UpdateEntries(prev_path) => {
@@ -937,7 +960,7 @@ impl Application {
     }
 
     fn subscription(&self) -> Subscription<Message> {
-        event::listen_with(|event, status, _id| {
+        event::listen_with(move |event, status, _| {
             if status == Status::Captured {
                 return Some(Message::CheckModals);
             }
@@ -951,42 +974,36 @@ impl Application {
                     physical_key,
                     modifiers,
                     ..
-                }) => match (physical_key, modifiers) {
-                    (key::Physical::Code(Code::KeyC), keyboard::Modifiers::CTRL) => {
-                        Some(Message::AddClipboard(ClipboardMode::Copy))
+                }) => {
+                    match (physical_key, modifiers) {
+                        (key::Physical::Code(Code::KeyC), keyboard::Modifiers::CTRL) => {
+                            Some(Message::AddClipboard(ClipboardMode::Copy))
+                        }
+                        (key::Physical::Code(Code::KeyX), keyboard::Modifiers::CTRL) => {
+                            Some(Message::AddClipboard(ClipboardMode::Cut))
+                        }
+                        (key::Physical::Code(Code::KeyV), keyboard::Modifiers::CTRL) => Some(
+                            Message::UpdateModal(ModalType::Operation, ModalMessage::Open),
+                        ),
+                        (key::Physical::Code(Code::Delete), _) => {
+                            Some(Message::UpdateModal(ModalType::Delete, ModalMessage::Open))
+                        }
+                        (key::Physical::Code(Code::F2), _) => {
+                            Some(Message::UpdateModal(ModalType::Rename, ModalMessage::Open))
+                        }
+                        (key::Physical::Code(Code::Escape), _) => Some(Message::CloseModals),
+                        (key::Physical::Code(Code::KeyH), keyboard::Modifiers::CTRL) => {
+                            Some(Message::ToggleHiddenView)
+                        }
+                        (key::Physical::Code(Code::KeyN), keyboard::Modifiers::CTRL) => Some(
+                            Message::UpdateModal(ModalType::CreateFile, ModalMessage::Open),
+                        ), // create file
+                        (key::Physical::Code(Code::KeyN), keyboard::Modifiers::ALT) => Some(
+                            Message::UpdateModal(ModalType::CreateFolder, ModalMessage::Open),
+                        ), // create folder
+                        _ => Some(Message::KeyPressed(physical_key, modifiers)),
                     }
-                    (key::Physical::Code(Code::KeyX), keyboard::Modifiers::CTRL) => {
-                        Some(Message::AddClipboard(ClipboardMode::Cut))
-                    }
-                    (key::Physical::Code(Code::KeyV), keyboard::Modifiers::CTRL) => Some(
-                        Message::UpdateModal(ModalType::Operation, ModalMessage::Open),
-                    ),
-                    (key::Physical::Code(Code::Delete), _) => {
-                        Some(Message::UpdateModal(ModalType::Delete, ModalMessage::Open))
-                    }
-                    (key::Physical::Code(Code::ArrowDown), _) => {
-                        Some(Message::NavigateSelection(Direction::Down))
-                    }
-                    (key::Physical::Code(Code::ArrowUp), _) => {
-                        Some(Message::NavigateSelection(Direction::Up))
-                    }
-                    (key::Physical::Code(Code::ArrowLeft), _) => Some(Message::Return),
-                    (key::Physical::Code(Code::ArrowRight), _) => Some(Message::OpenSelection),
-                    (key::Physical::Code(Code::F2), _) => {
-                        Some(Message::UpdateModal(ModalType::Rename, ModalMessage::Open))
-                    }
-                    (key::Physical::Code(Code::Escape), _) => Some(Message::CloseModals),
-                    (key::Physical::Code(Code::KeyH), keyboard::Modifiers::CTRL) => {
-                        Some(Message::ToggleHiddenView)
-                    }
-                    (key::Physical::Code(Code::KeyN), keyboard::Modifiers::CTRL) => Some(
-                        Message::UpdateModal(ModalType::CreateFile, ModalMessage::Open),
-                    ), // create file
-                    (key::Physical::Code(Code::KeyN), keyboard::Modifiers::ALT) => Some(
-                        Message::UpdateModal(ModalType::CreateFolder, ModalMessage::Open),
-                    ), // create folder
-                    _ => None,
-                },
+                }
                 _ => None,
             }
         })
@@ -1004,7 +1021,7 @@ fn main() -> iced::Result {
     let input = args().nth(1).unwrap_or_default();
 
     iced::application(
-        move || Application::new(input.clone()),
+        move || Application::new(input.clone(), config::get_keybinds()),
         Application::update,
         Application::view,
     )
