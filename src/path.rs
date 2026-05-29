@@ -1,6 +1,8 @@
 use file_type::{self, FileType};
 use std::{fs, path::PathBuf, process::Command, time::SystemTime};
 
+pub const NONO_CHARACTERS: [&str; 3] = ["\0", "\"", "/"];
+
 #[derive(Clone, Debug)]
 pub enum OperationChoice {
     Merge,
@@ -28,6 +30,46 @@ pub fn rename(path: &PathBuf, name: String) {
     if let Err(err) = command {
         println!("{}", err);
     }
+}
+
+pub fn create(current_path: &PathBuf, new_path: PathBuf, last_is_file: bool) -> Option<String> {
+    let layers: Vec<_> = new_path.components().collect();
+    if layers.len() == 0 {
+        return None;
+    }
+
+    let mut clean_path: PathBuf = current_path.clone();
+    for layer in layers {
+        let name = layer.as_os_str().to_str().unwrap();
+        for c in NONO_CHARACTERS {
+            if name.contains(c) {
+                return Some(String::from("invalid characters"));
+            }
+        }
+        clean_path.push(layer);
+    }
+
+    let mut path_without_last = clean_path.clone();
+    path_without_last.pop();
+
+    let try_create = fs::create_dir_all(path_without_last);
+    if let Err(err) = try_create {
+        println!("{}", err);
+    }
+
+    if last_is_file {
+        let command = Command::new("touch").arg(clean_path).output();
+        if let Err(err) = command {
+            println!("{}", err);
+        }
+    } else {
+        let try_create = fs::create_dir(clean_path);
+        if let Err(err) = try_create {
+            println!("{}", err);
+        }
+    }
+
+    None
 }
 
 fn operation_recursion(

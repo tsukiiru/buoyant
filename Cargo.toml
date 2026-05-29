@@ -6,4 +6,4 @@ edition = "2024"
 [dependencies]
 chrono = "0.4.44"
 file_type = "0.8.11"
-iced = {version="0.14.0", features=["advanced", "tiny-skia"]}
+iced = { version = "0.14.0", features = ["advanced", "tiny-skia"] }
