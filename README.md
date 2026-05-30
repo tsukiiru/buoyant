@@ -25,7 +25,7 @@ heavily in development state and experimental, not like theres gonna be many bre
 
 #### creating file or folder
 you can input a whole long path into it, for example:  
-`hello/hi/my/name/is/markiplier`
+`hello/hi/my/name/is/markiplier`  
 lets say im creating a new file then in the current directory, we will have this:  
 `📁 youarehere` > `📁 hello` > `📁 hi` > `📁 my` > `📁 name` > `📁 is` > `🐐 markiplier`  
 
