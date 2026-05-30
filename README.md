@@ -48,7 +48,13 @@ for example: `"Ctrl + Shift + H"`
 > KEY, MODIFIERS, and each MODIFIER is separated by `+`  
 > oh and they have to be strings too btw *(coated in double quotes "")*
 
-**Possible Keys:**
+**Keys List:** a, b, c, d, e, f, g, h, j, k, l, m, n, o, p, q, r, t, u, v, w, y, z, arrowup, arrowdown, arrowright, arrowleft, `, [, ], ,, =, -, ., ', ;, /, backspace, enter, space, tab, delete, end, home, insert, pagedown, pageup, numpadextract, escape, printscreen,  pausebreak, numpad0, numpad1, numpad2, numpad3, numpad4, numpad5, numpad6, numpad7, numpad8, numpad9, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, f1, f2, f3, f4, f5, f6, f7, f8, f9, f10, f11, f12,...to f35  
+
+**Modifiers List:** ctrl, shift, alt  
+
+they arent case-sensitive, put whatever you want in, just make sure they look correctly  
+
+**Options:**
 |Key|Default|Description|
 |---|---|---|
 |navigate_up|arrowup|for navigating up|

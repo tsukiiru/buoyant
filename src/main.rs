@@ -378,7 +378,7 @@ impl Application {
             }
 
             Message::Select(index) => {
-                if !self.modifiers_state.shift && !self.visual_mode {
+                if !self.modifiers_state.shift && !self.visual_mode && !self.modifiers_state.ctrl {
                     self.selected.clear();
                 }
 
