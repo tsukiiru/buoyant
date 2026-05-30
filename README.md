@@ -43,7 +43,7 @@ buoyant uses toml as the configuration language, please search it up if you want
 for example: `"Ctrl + Shift + H"`
     or like: `"Alt + P"`
 
->![note]
+> [!NOTE]
 > there can only be **1** KEY, can be as many modifiers as you want,  
 > KEY, MODIFIERS, and each MODIFIER is separated by `+`  
 > oh and they have to be strings too btw *(coated in double quotes "")*
