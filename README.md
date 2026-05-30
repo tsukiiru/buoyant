@@ -37,8 +37,9 @@ basically it lets you select multiple files when its on
 
 ### config 
 buoyant uses toml as the configuration language, please search it up if you want to know about the syntax!  
+its located at `~/.config/buoyant/buoyant.toml`  
 
-#### keybinds 
+#### [[keybinds]]  
 **Value syntax:** `"[MODIFIERS] + [KEY]"`
 for example: `"Ctrl + Shift + H"`
     or like: `"Alt + P"`
