@@ -79,7 +79,7 @@ enum Message {
     HoverEntry(usize, bool),
 
     ToggleHiddenView,
-    UpdateModifiersState(bool, bool),
+    UpdateModifiersState(bool, bool, bool),
 
     Select(usize),
     ResetSelection,
@@ -127,6 +127,7 @@ struct Clipboard {
 struct ModifiersState {
     ctrl: bool,
     shift: bool,
+    alt: bool,
 }
 
 struct ModalsState {
@@ -194,6 +195,7 @@ impl Application {
                 modifiers_state: ModifiersState {
                     ctrl: false,
                     shift: false,
+                    alt: false,
                 },
                 clipboard: Clipboard {
                     entries: vec![],
@@ -236,17 +238,77 @@ impl Application {
                 Task::done(Message::UpdateEntries(path))
             }
 
-            Message::KeyPressed(physical_key, _modifiers) => {
-                let keybinds_config = &self.config.keybinds;
+            Message::KeyPressed(physical_key, modifiers) => {
+                let keybinds = &self.config.keybinds;
 
-                if physical_key == keybinds_config.navigate_backward {
+                if physical_key == keybinds.navigate_backward.key
+                    && modifiers == keybinds.navigate_backward.modifiers
+                {
                     return Task::done(Message::Return);
-                } else if physical_key == keybinds_config.navigate_forward {
+                }
+                if physical_key == keybinds.navigate_forward.key
+                    && modifiers == keybinds.navigate_forward.modifiers
+                {
                     return Task::done(Message::OpenSelection);
-                } else if physical_key == keybinds_config.navigate_down {
+                }
+                if physical_key == keybinds.navigate_down.key
+                    && modifiers == keybinds.navigate_down.modifiers
+                {
                     return Task::done(Message::NavigateSelection(Direction::Down));
-                } else if physical_key == keybinds_config.navigate_up {
+                }
+                if physical_key == keybinds.navigate_up.key
+                    && modifiers == keybinds.navigate_up.modifiers
+                {
                     return Task::done(Message::NavigateSelection(Direction::Up));
+                }
+                if physical_key == keybinds.copy_to_clipboard.key
+                    && modifiers == keybinds.copy_to_clipboard.modifiers
+                {
+                    return Task::done(Message::AddClipboard(ClipboardMode::Copy));
+                }
+                if physical_key == keybinds.cut_to_clipboard.key
+                    && modifiers == keybinds.cut_to_clipboard.modifiers
+                {
+                    return Task::done(Message::AddClipboard(ClipboardMode::Cut));
+                }
+                if physical_key == keybinds.paste_from_clipboard.key
+                    && modifiers == keybinds.paste_from_clipboard.modifiers
+                {
+                    return Task::done(Message::UpdateModal(
+                        ModalType::Operation,
+                        ModalMessage::Open,
+                    ));
+                }
+                if physical_key == keybinds.delete_selections.key
+                    && modifiers == keybinds.delete_selections.modifiers
+                {
+                    return Task::done(Message::UpdateModal(ModalType::Delete, ModalMessage::Open));
+                }
+                if physical_key == keybinds.rename_file.key
+                    && modifiers == keybinds.rename_file.modifiers
+                {
+                    return Task::done(Message::UpdateModal(ModalType::Rename, ModalMessage::Open));
+                }
+                if physical_key == keybinds.toggle_hidden_view.key
+                    && modifiers == keybinds.toggle_hidden_view.modifiers
+                {
+                    return Task::done(Message::ToggleHiddenView);
+                }
+                if physical_key == keybinds.create_file_path.key
+                    && modifiers == keybinds.create_file_path.modifiers
+                {
+                    return Task::done(Message::UpdateModal(
+                        ModalType::CreateFile,
+                        ModalMessage::Open,
+                    ));
+                }
+                if physical_key == keybinds.create_folder_path.key
+                    && modifiers == keybinds.create_folder_path.modifiers
+                {
+                    return Task::done(Message::UpdateModal(
+                        ModalType::CreateFolder,
+                        ModalMessage::Open,
+                    ));
                 }
 
                 Task::none()
@@ -300,11 +362,12 @@ impl Application {
                 self.view_hidden = !self.view_hidden;
                 Task::done(Message::UpdateEntries(None))
             }
-            Message::UpdateModifiersState(ctrl_state, shift_state) => {
+            Message::UpdateModifiersState(ctrl_state, shift_state, alt_state) => {
                 let modifiers_state = &mut self.modifiers_state;
 
                 modifiers_state.ctrl = ctrl_state;
                 modifiers_state.shift = shift_state;
+                modifiers_state.alt = alt_state;
                 Task::none()
             }
 
@@ -966,44 +1029,18 @@ impl Application {
             }
 
             match event {
-                Event::Keyboard(keyboard::Event::ModifiersChanged(m)) => {
-                    Some(Message::UpdateModifiersState(m.control(), m.shift()))
-                }
+                Event::Keyboard(keyboard::Event::ModifiersChanged(state)) => Some(
+                    Message::UpdateModifiersState(state.control(), state.shift(), state.alt()),
+                ),
 
                 Event::Keyboard(keyboard::Event::KeyPressed {
                     physical_key,
                     modifiers,
                     ..
-                }) => {
-                    match (physical_key, modifiers) {
-                        (key::Physical::Code(Code::KeyC), keyboard::Modifiers::CTRL) => {
-                            Some(Message::AddClipboard(ClipboardMode::Copy))
-                        }
-                        (key::Physical::Code(Code::KeyX), keyboard::Modifiers::CTRL) => {
-                            Some(Message::AddClipboard(ClipboardMode::Cut))
-                        }
-                        (key::Physical::Code(Code::KeyV), keyboard::Modifiers::CTRL) => Some(
-                            Message::UpdateModal(ModalType::Operation, ModalMessage::Open),
-                        ),
-                        (key::Physical::Code(Code::Delete), _) => {
-                            Some(Message::UpdateModal(ModalType::Delete, ModalMessage::Open))
-                        }
-                        (key::Physical::Code(Code::F2), _) => {
-                            Some(Message::UpdateModal(ModalType::Rename, ModalMessage::Open))
-                        }
-                        (key::Physical::Code(Code::Escape), _) => Some(Message::CloseModals),
-                        (key::Physical::Code(Code::KeyH), keyboard::Modifiers::CTRL) => {
-                            Some(Message::ToggleHiddenView)
-                        }
-                        (key::Physical::Code(Code::KeyN), keyboard::Modifiers::CTRL) => Some(
-                            Message::UpdateModal(ModalType::CreateFile, ModalMessage::Open),
-                        ), // create file
-                        (key::Physical::Code(Code::KeyN), keyboard::Modifiers::ALT) => Some(
-                            Message::UpdateModal(ModalType::CreateFolder, ModalMessage::Open),
-                        ), // create folder
-                        _ => Some(Message::KeyPressed(physical_key, modifiers)),
-                    }
-                }
+                }) => match (physical_key, modifiers) {
+                    (key::Physical::Code(Code::Escape), _) => Some(Message::CloseModals),
+                    _ => Some(Message::KeyPressed(physical_key, modifiers)),
+                },
                 _ => None,
             }
         })
