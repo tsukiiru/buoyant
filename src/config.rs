@@ -24,6 +24,7 @@ pub struct KeybindsConfig {
     pub toggle_hidden_view: KeybindEntry,
     pub create_file_path: KeybindEntry,
     pub create_folder_path: KeybindEntry,
+    pub toggle_visual_mode: KeybindEntry,
 }
 
 pub struct KeybindEntry {
@@ -73,7 +74,7 @@ pub fn get_keybinds() -> Config {
             },
             toggle_hidden_view: KeybindEntry {
                 key: Physical::Code(Code::KeyH),
-                modifiers: Modifiers::NONE,
+                modifiers: Modifiers::CTRL,
             },
             create_file_path: KeybindEntry {
                 key: Physical::Code(Code::KeyN),
@@ -83,6 +84,10 @@ pub fn get_keybinds() -> Config {
                 key: Physical::Code(Code::KeyN),
                 modifiers: Modifiers::ALT,
             },
+            toggle_visual_mode: KeybindEntry {
+                key: Physical::Code(Code::KeyV),
+                modifiers: Modifiers::NONE,
+            },
         },
     };
 
@@ -90,7 +95,7 @@ pub fn get_keybinds() -> Config {
 
     if home.is_none() {
         println!("cannot get home directory!");
-        println!("please check HOME env and set it properly");
+        println!("please check HOME environment variable and set it properly");
     }
 
     let config_dir = home.unwrap().join(".config/buoyant/");
@@ -115,6 +120,7 @@ struct RawKeybindsConfig {
     navigate_up: Option<String>,
     navigate_down: Option<String>,
     navigate_forward: Option<String>,
+    navigate_backward: Option<String>,
     copy_to_clipboard: Option<String>,
     cut_to_clipboard: Option<String>,
     paste_from_clipboard: Option<String>,
@@ -123,7 +129,7 @@ struct RawKeybindsConfig {
     toggle_hidden_view: Option<String>,
     create_file_path: Option<String>,
     create_folder_path: Option<String>,
-    navigate_backward: Option<String>,
+    toggle_visual_mode: Option<String>,
 }
 
 fn process_rawconfig(raw_config: RawConfig, config: &mut Config) {
@@ -175,10 +181,10 @@ fn match_key(raw_key: String) -> Option<KeybindEntry> {
         "y" => Physical::Code(Code::KeyY),
         "w" => Physical::Code(Code::KeyW),
         "z" => Physical::Code(Code::KeyZ),
-        "arrow_up" => Physical::Code(Code::ArrowUp),
-        "arrow_down" => Physical::Code(Code::ArrowDown),
-        "arrow_right" => Physical::Code(Code::ArrowRight),
-        "arrow_left" => Physical::Code(Code::ArrowLeft),
+        "arrowup" => Physical::Code(Code::ArrowUp),
+        "arrowdown" => Physical::Code(Code::ArrowDown),
+        "arrowright" => Physical::Code(Code::ArrowRight),
+        "arrowleft" => Physical::Code(Code::ArrowLeft),
         "`" => Physical::Code(Code::Backquote),
         "[" => Physical::Code(Code::BracketLeft),
         "]" => Physical::Code(Code::BracketRight),
@@ -355,5 +361,11 @@ fn process_keybinds(raw_keybinds: RawKeybindsConfig, keybinds: &mut KeybindsConf
         && let Some(fresh_key) = match_key(key_str)
     {
         keybinds.create_folder_path = fresh_key;
+    }
+
+    if let Some(key_str) = raw_keybinds.toggle_visual_mode
+        && let Some(fresh_key) = match_key(key_str)
+    {
+        keybinds.toggle_visual_mode = fresh_key;
     }
 }

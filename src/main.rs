@@ -79,6 +79,7 @@ enum Message {
     HoverEntry(usize, bool),
 
     ToggleHiddenView,
+    ToggleVisualMode,
     UpdateModifiersState(bool, bool, bool),
 
     Select(usize),
@@ -168,6 +169,8 @@ struct Application {
     modifiers_state: ModifiersState,
     clipboard: Clipboard,
     modals_state: ModalsState,
+
+    visual_mode: bool,
 }
 
 impl Application {
@@ -209,6 +212,8 @@ impl Application {
                     create_file: None,
                     create_folder: None,
                 },
+
+                visual_mode: false,
             },
             Task::done(Message::UpdateEntries(None)),
         )
@@ -245,70 +250,64 @@ impl Application {
                     && modifiers == keybinds.navigate_backward.modifiers
                 {
                     return Task::done(Message::Return);
-                }
-                if physical_key == keybinds.navigate_forward.key
+                } else if physical_key == keybinds.navigate_forward.key
                     && modifiers == keybinds.navigate_forward.modifiers
                 {
                     return Task::done(Message::OpenSelection);
-                }
-                if physical_key == keybinds.navigate_down.key
+                } else if physical_key == keybinds.navigate_down.key
                     && modifiers == keybinds.navigate_down.modifiers
                 {
                     return Task::done(Message::NavigateSelection(Direction::Down));
-                }
-                if physical_key == keybinds.navigate_up.key
+                } else if physical_key == keybinds.navigate_up.key
                     && modifiers == keybinds.navigate_up.modifiers
                 {
                     return Task::done(Message::NavigateSelection(Direction::Up));
-                }
-                if physical_key == keybinds.copy_to_clipboard.key
+                } else if physical_key == keybinds.copy_to_clipboard.key
                     && modifiers == keybinds.copy_to_clipboard.modifiers
                 {
                     return Task::done(Message::AddClipboard(ClipboardMode::Copy));
-                }
-                if physical_key == keybinds.cut_to_clipboard.key
+                } else if physical_key == keybinds.cut_to_clipboard.key
                     && modifiers == keybinds.cut_to_clipboard.modifiers
                 {
                     return Task::done(Message::AddClipboard(ClipboardMode::Cut));
-                }
-                if physical_key == keybinds.paste_from_clipboard.key
+                } else if physical_key == keybinds.paste_from_clipboard.key
                     && modifiers == keybinds.paste_from_clipboard.modifiers
                 {
                     return Task::done(Message::UpdateModal(
                         ModalType::Operation,
                         ModalMessage::Open,
                     ));
-                }
-                if physical_key == keybinds.delete_selections.key
+                } else if physical_key == keybinds.delete_selections.key
                     && modifiers == keybinds.delete_selections.modifiers
                 {
                     return Task::done(Message::UpdateModal(ModalType::Delete, ModalMessage::Open));
-                }
-                if physical_key == keybinds.rename_file.key
+                } else if physical_key == keybinds.rename_file.key
                     && modifiers == keybinds.rename_file.modifiers
                 {
                     return Task::done(Message::UpdateModal(ModalType::Rename, ModalMessage::Open));
-                }
-                if physical_key == keybinds.toggle_hidden_view.key
+                } else if physical_key == keybinds.toggle_hidden_view.key
                     && modifiers == keybinds.toggle_hidden_view.modifiers
                 {
                     return Task::done(Message::ToggleHiddenView);
-                }
-                if physical_key == keybinds.create_file_path.key
+                } else if physical_key == keybinds.create_file_path.key
                     && modifiers == keybinds.create_file_path.modifiers
                 {
                     return Task::done(Message::UpdateModal(
                         ModalType::CreateFile,
                         ModalMessage::Open,
                     ));
-                }
-                if physical_key == keybinds.create_folder_path.key
+                } else if physical_key == keybinds.create_folder_path.key
                     && modifiers == keybinds.create_folder_path.modifiers
                 {
                     return Task::done(Message::UpdateModal(
                         ModalType::CreateFolder,
                         ModalMessage::Open,
                     ));
+                }
+                if physical_key == keybinds.toggle_visual_mode.key
+                    && modifiers == keybinds.toggle_visual_mode.modifiers
+                {
+                    return Task::done(Message::ToggleVisualMode);
                 }
 
                 Task::none()
@@ -362,22 +361,29 @@ impl Application {
                 self.view_hidden = !self.view_hidden;
                 Task::done(Message::UpdateEntries(None))
             }
+            Message::ToggleVisualMode => {
+                self.visual_mode = !self.visual_mode;
+                Task::none()
+            }
+
             Message::UpdateModifiersState(ctrl_state, shift_state, alt_state) => {
                 let modifiers_state = &mut self.modifiers_state;
 
                 modifiers_state.ctrl = ctrl_state;
                 modifiers_state.shift = shift_state;
                 modifiers_state.alt = alt_state;
+
+                //println!("current state: {:#?}", modifiers_state);
                 Task::none()
             }
 
             Message::Select(index) => {
-                if !self.modifiers_state.shift {
+                if !self.modifiers_state.shift && !self.visual_mode {
                     self.selected.clear();
                 }
 
                 let end_index = if let Some(i) = self.current_index
-                    && self.modifiers_state.shift
+                    && (self.modifiers_state.shift || self.visual_mode)
                 {
                     i
                 } else {
@@ -826,7 +832,7 @@ impl Application {
             .height(Length::Fill);
 
         let explorer_select = container(mouse_area(explorer_scroll).on_press(
-            if !self.modifiers_state.ctrl {
+            if !self.modifiers_state.ctrl || !self.visual_mode {
                 Message::ResetSelection
             } else {
                 Message::None
@@ -871,22 +877,29 @@ impl Application {
         .height(Length::Fill)
         .width(Length::Fill);
 
-        let right_col = column![
+        let mut right_col = column![
             container(text("explorer info"))
                 .height(30)
                 .center_y(30)
                 .center_x(Length::Fill)
                 .padding(5),
-            text(format!(
-                "showing hidden files: {}",
-                if self.view_hidden { "yes" } else { "no" }
-            ))
-            .height(20)
-            .width(Length::Fill),
-            clipboard
         ]
         .width(300)
         .spacing(10);
+
+        if self.visual_mode {
+            right_col = right_col.push(text("VISUAL MODE").height(20).width(Length::Fill));
+        }
+
+        if self.view_hidden {
+            right_col = right_col.push(
+                text(format!("showing hidden files",))
+                    .height(20)
+                    .width(Length::Fill),
+            );
+        }
+
+        right_col = right_col.push(clipboard);
 
         let content = row![left_col, right_col]
             .width(Length::Fill)
