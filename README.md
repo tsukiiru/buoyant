@@ -56,9 +56,11 @@ for example: `"Ctrl + Shift + H"`
     or like: `"Alt + P"`
 
 ```toml
-[[keybinds]]
+[keybinds]
 navigate_up = "arrowup"
 navigate_down = "j"
+# i didnt lie when i said as many mods as you like
+cut_to_clipboard = "ctrl + ctrl + ctrl + ctrl + ctrl + x"
 ```
 
 > [!NOTE]
