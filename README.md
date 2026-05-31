@@ -39,7 +39,7 @@ basically it lets you select multiple files when its on
 buoyant uses toml as the configuration language, please search it up if you want to know about the syntax!  
 the config file is located at `~/.config/buoyant/buoyant.toml`, its not created automatically so go make it yourself  
 
-#### [[view]]
+#### [view]
 for displaying various information (metadata)  
 
 |Key|Type|Default|Description|
@@ -50,7 +50,7 @@ for displaying various information (metadata)
 |filetype|bool|true|show file type|
 |filesize|bool|true|show file size|
 
-#### [[keybinds]]  
+#### [keybinds]
 **Value syntax:** `"[MODIFIERS] + [KEY]"`
 for example: `"Ctrl + Shift + H"`
     or like: `"Alt + P"`
