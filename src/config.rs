@@ -7,8 +7,11 @@ use iced::keyboard::{
 use serde::Deserialize;
 use std::{env::home_dir, fs};
 
+use crate::Displaying;
+
 pub struct Config {
     pub keybinds: KeybindsConfig,
+    pub view: Displaying,
 }
 
 pub struct KeybindsConfig {
@@ -35,6 +38,9 @@ pub struct KeybindEntry {
 pub fn get_keybinds() -> Config {
     // default config
     let mut config = Config {
+        view: Displaying {
+            ..Default::default()
+        },
         keybinds: KeybindsConfig {
             navigate_up: KeybindEntry {
                 key: Physical::Code(Code::ArrowUp),
@@ -112,7 +118,8 @@ pub fn get_keybinds() -> Config {
 
 #[derive(Deserialize)]
 struct RawConfig {
-    keybinds: RawKeybindsConfig,
+    keybinds: Option<RawKeybindsConfig>,
+    view: Option<RawViewConfig>,
 }
 
 #[derive(Deserialize)]
@@ -132,8 +139,45 @@ struct RawKeybindsConfig {
     toggle_visual_mode: Option<String>,
 }
 
+#[derive(Deserialize)]
+struct RawViewConfig {
+    hidden: Option<bool>,
+    last_accessed: Option<bool>,
+    created: Option<bool>,
+    filetype: Option<bool>,
+    filesize: Option<bool>,
+}
+
 fn process_rawconfig(raw_config: RawConfig, config: &mut Config) {
-    process_keybinds(raw_config.keybinds, &mut config.keybinds);
+    if let Some(table) = raw_config.keybinds {
+        process_keybinds(table, &mut config.keybinds);
+    }
+
+    if let Some(table) = raw_config.view {
+        process_view(table, &mut config.view);
+    }
+}
+
+fn process_view(raw_view: RawViewConfig, config: &mut Displaying) {
+    if let Some(conf) = raw_view.hidden {
+        config.hidden = conf;
+    }
+
+    if let Some(conf) = raw_view.last_accessed {
+        config.last_accessed = conf;
+    }
+
+    if let Some(conf) = raw_view.created {
+        config.created = conf;
+    }
+
+    if let Some(conf) = raw_view.filetype {
+        config.filetype = conf;
+    }
+
+    if let Some(conf) = raw_view.filesize {
+        config.filesize = conf;
+    }
 }
 
 fn match_key(raw_key: String) -> Option<KeybindEntry> {

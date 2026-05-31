@@ -1,6 +1,7 @@
 use std::{
+    collections::HashSet,
     env::{args, home_dir},
-    path::PathBuf,
+    path::{Path, PathBuf},
     process::{Command, Stdio},
 };
 
@@ -35,9 +36,9 @@ impl Program {
         }
     }
 
-    fn open(&mut self, new_path: &PathBuf) {
+    fn open(&mut self, new_path: &Path) {
         if new_path.is_dir() {
-            self.path = new_path.clone();
+            self.path = new_path.to_path_buf();
         } else {
             let cmd = Command::new("xdg-open")
                 .arg(new_path)
@@ -100,28 +101,31 @@ enum Message {
 }
 
 struct Entry {
+    index: usize,
     name: String,
     path: PathBuf,
+
     accessed: i64,
     created: i64,
-    index: usize,
+    filetype: &'static str,
+    filesize: String,
+
     hovered: bool,
-    filetype: String,
 }
 
 struct RenameModal {
     path: PathBuf,
     content: String,
-    error: Option<String>,
+    error: Option<&'static str>,
 }
 
 struct CreateModal {
     content: String,
-    error: String,
+    error: &'static str,
 }
 
 struct Clipboard {
-    entries: Vec<PathBuf>,
+    entries: HashSet<PathBuf>,
     mode: ClipboardMode,
 }
 
@@ -134,8 +138,8 @@ struct ModifiersState {
 struct ModalsState {
     opened: bool,
     rename: Option<RenameModal>,
-    operation: Option<bool>,
-    delete: Option<bool>,
+    operation: bool,
+    delete: bool,
     create_file: Option<CreateModal>,
     create_folder: Option<CreateModal>,
 }
@@ -156,15 +160,33 @@ enum ModalMessage {
     Content(String),
 }
 
-struct Application {
-    view_hidden: bool,
-    config: config::Config,
+struct Displaying {
+    hidden: bool,
+    last_accessed: bool,
+    created: bool,
+    filetype: bool,
+    filesize: bool,
+}
 
+impl Default for Displaying {
+    fn default() -> Self {
+        Displaying {
+            hidden: false,
+            last_accessed: false,
+            created: false,
+            filetype: true,
+            filesize: true,
+        }
+    }
+}
+
+struct Application {
+    config: config::Config,
     program: Program,
 
     current_index: Option<usize>,
-    entries: Vec<Entry>,
-    selected: Vec<usize>,
+    entries: Vec<Entry>, // this has to be ordered
+    selected: HashSet<usize>,
 
     modifiers_state: ModifiersState,
     clipboard: Clipboard,
@@ -174,7 +196,7 @@ struct Application {
 }
 
 impl Application {
-    fn new(input: String, config: config::Config) -> (Self, Task<Message>) {
+    fn new(input: &str, config: config::Config) -> (Self, Task<Message>) {
         let path_conversion = PathBuf::from(input);
         let path: PathBuf;
 
@@ -186,14 +208,13 @@ impl Application {
 
         (
             Application {
-                view_hidden: false,
                 config,
 
                 program: Program::init(path),
 
                 current_index: None,
                 entries: vec![],
-                selected: vec![],
+                selected: HashSet::new(),
 
                 modifiers_state: ModifiersState {
                     ctrl: false,
@@ -201,14 +222,14 @@ impl Application {
                     alt: false,
                 },
                 clipboard: Clipboard {
-                    entries: vec![],
+                    entries: HashSet::new(),
                     mode: ClipboardMode::Copy,
                 },
                 modals_state: ModalsState {
                     opened: false,
                     rename: None,
-                    operation: None,
-                    delete: None,
+                    operation: false,
+                    delete: false,
                     create_file: None,
                     create_folder: None,
                 },
@@ -319,7 +340,7 @@ impl Application {
                 let cur_paths = file::read_dir(&self.program.path);
                 let mut i: usize = 0;
                 for path in cur_paths {
-                    if !self.view_hidden && file::is_hidden(&path) {
+                    if !self.config.view.hidden && file::is_hidden(&path) {
                         continue;
                     }
 
@@ -331,6 +352,7 @@ impl Application {
                         index: i,
                         hovered: false,
                         filetype: file::get_filetype(&path),
+                        filesize: file::get_filesize(&path),
                     });
                     i += 1;
                 }
@@ -358,7 +380,7 @@ impl Application {
             }
 
             Message::ToggleHiddenView => {
-                self.view_hidden = !self.view_hidden;
+                self.config.view.hidden = !self.config.view.hidden;
                 Task::done(Message::UpdateEntries(None))
             }
             Message::ToggleVisualMode => {
@@ -373,7 +395,6 @@ impl Application {
                 modifiers_state.shift = shift_state;
                 modifiers_state.alt = alt_state;
 
-                //println!("current state: {:#?}", modifiers_state);
                 Task::none()
             }
 
@@ -391,8 +412,12 @@ impl Application {
                 };
 
                 for i in index.min(end_index)..=end_index.max(index) {
-                    self.selected.push(i);
+                    self.selected.insert(i);
                 } // selecting everything between the two indicies
+
+                if self.modifiers_state.ctrl && self.selected.contains(&index) {
+                    self.selected.remove(&index);
+                }
 
                 self.current_index = Some(index);
 
@@ -438,9 +463,7 @@ impl Application {
                     }
                 }
 
-                // println!("{}", current_index);
-
-                // TODO: update position of view following the selection index
+                // TODO: update position of view following the selection index, bro this is hard
                 Task::done(Message::Select(current_index))
             }
             Message::OpenSelection => {
@@ -473,9 +496,9 @@ impl Application {
 
                 clipboard.entries.clear();
 
-                self.selected
-                    .iter()
-                    .for_each(|i| clipboard.entries.push(self.entries[*i].path.clone()));
+                self.selected.iter().for_each(|i| {
+                    let _ = clipboard.entries.insert(self.entries[*i].path.clone());
+                });
 
                 clipboard.mode = mode;
 
@@ -490,10 +513,10 @@ impl Application {
 
                 match clipboard.mode {
                     ClipboardMode::Copy => {
-                        file::copy_dir(clipboard.entries.clone(), self.program.path.clone(), &opp);
+                        file::copy_dir(&clipboard.entries, &self.program.path, &opp);
                     }
                     ClipboardMode::Cut => {
-                        file::move_dir(clipboard.entries.clone(), self.program.path.clone(), &opp);
+                        file::move_dir(&clipboard.entries, &self.program.path, &opp);
                         clipboard.entries.clear();
                     }
                 }
@@ -516,8 +539,7 @@ impl Application {
                 // checking if the new name is valid?
                 for char in file::NONO_CHARACTERS {
                     if name.contains(char) {
-                        overlay.error =
-                            Some(String::from(format!("ERROR: name cannot contain {}", char)));
+                        overlay.error = Some("name cannot contain invalid characters!");
                         return Task::none();
                     }
                 }
@@ -527,13 +549,11 @@ impl Application {
 
                 // check if already exists in destination
                 if test_path.exists() {
-                    overlay.error = Some(String::from(
-                        "ERROR: file with the same name already exists",
-                    ));
+                    overlay.error = Some("ERROR: file with the same name already exists");
                     return Task::none();
                 }
 
-                file::rename(&mut overlay.path, name.clone());
+                file::rename(&mut overlay.path, name);
                 Task::done(Message::UpdateModal(ModalType::Rename, ModalMessage::Close))
                     .chain(Task::done(Message::UpdateEntries(None)))
             }
@@ -542,11 +562,9 @@ impl Application {
                 if mode {
                     let overlay = self.modals_state.create_file.as_mut().unwrap();
 
-                    let err = file::create(
-                        &self.program.path,
-                        PathBuf::from(overlay.content.clone().trim()),
-                        true,
-                    );
+                    let err =
+                        file::create(&self.program.path, Path::new(overlay.content.trim()), true);
+
                     if let Some(e) = err {
                         overlay.error = e;
                     } else {
@@ -561,13 +579,10 @@ impl Application {
                 } else {
                     let overlay = self.modals_state.create_folder.as_mut().unwrap();
 
-                    let err = file::create(
-                        &self.program.path,
-                        PathBuf::from(overlay.content.clone().trim()),
-                        false,
-                    );
+                    let err =
+                        file::create(&self.program.path, Path::new(overlay.content.trim()), false);
                     if let Some(e) = err {
-                        overlay.error = e;
+                        overlay.error = &e;
                     } else {
                         return Task::batch(vec![
                             Task::done(Message::UpdateEntries(None)),
@@ -623,11 +638,11 @@ impl Application {
                     ModalType::Delete => {
                         match msg {
                             ModalMessage::Open => {
-                                modals_state.delete = Some(true);
+                                modals_state.delete = true;
                                 *modals_opened = true;
                             }
                             ModalMessage::Close => {
-                                modals_state.delete = None;
+                                modals_state.delete = false;
                                 *modals_opened = false;
                             }
                             _ => {}
@@ -637,11 +652,11 @@ impl Application {
                     ModalType::Operation => {
                         match msg {
                             ModalMessage::Open => {
-                                modals_state.operation = Some(true);
+                                modals_state.operation = true;
                                 *modals_opened = true;
                             }
                             ModalMessage::Close => {
-                                modals_state.operation = None;
+                                modals_state.operation = false;
                                 *modals_opened = false;
                             }
                             _ => {}
@@ -653,7 +668,7 @@ impl Application {
                             ModalMessage::Open => {
                                 modals_state.create_file = Some(CreateModal {
                                     content: String::new(),
-                                    error: String::new(),
+                                    error: "",
                                 });
                                 *modals_opened = true;
 
@@ -675,7 +690,7 @@ impl Application {
                             ModalMessage::Open => {
                                 modals_state.create_folder = Some(CreateModal {
                                     content: String::new(),
-                                    error: String::new(),
+                                    error: "",
                                 });
                                 *modals_opened = true;
 
@@ -761,37 +776,61 @@ impl Application {
                 entries
                     .iter()
                     .map(|e| {
-                        container(
-                            mouse_area(
-                                row![
-                                    text(e.name.clone())
-                                        .width(300)
-                                        .align_x(alignment::Horizontal::Left),
-                                    text(e.filetype.clone())
-                                        .width(150)
-                                        .align_x(alignment::Horizontal::Left),
-                                    text(
-                                        DateTime::from_timestamp_secs(e.created)
-                                            .unwrap()
-                                            .to_string()
-                                    )
-                                    .width(200)
+                        let mut row = row![
+                            text(&e.name)
+                                .width(300)
+                                .align_x(alignment::Horizontal::Left),
+                        ]
+                        .spacing(5)
+                        .padding(5);
+
+                        let display_conf = &self.config.view;
+
+                        if display_conf.filesize {
+                            row = row.push(
+                                text(&e.filesize)
+                                    .width(100)
                                     .align_x(alignment::Horizontal::Left),
-                                    text(
-                                        DateTime::from_timestamp_secs(e.accessed)
-                                            .unwrap()
-                                            .to_string()
-                                    )
-                                    .width(Length::FillPortion(3))
-                                    .align_x(alignment::Horizontal::Left)
-                                ]
-                                .spacing(5)
-                                .padding(5),
-                            )
-                            .on_double_click(Message::Open(e.path.clone()))
-                            .on_press(Message::Select(e.index.clone()))
-                            .on_enter(Message::HoverEntry(e.index.clone(), true))
-                            .on_exit(Message::HoverEntry(e.index.clone(), false)),
+                            );
+                        }
+
+                        if display_conf.filetype {
+                            row = row.push(
+                                text(e.filetype)
+                                    .width(150)
+                                    .align_x(alignment::Horizontal::Left),
+                            );
+                        }
+
+                        if display_conf.created {
+                            row = row.push(
+                                text(
+                                    DateTime::from_timestamp_secs(e.created)
+                                        .unwrap()
+                                        .to_string(),
+                                )
+                                .width(200)
+                                .align_x(alignment::Horizontal::Left),
+                            );
+                        }
+
+                        if display_conf.last_accessed {
+                            row = row.push(
+                                text(
+                                    DateTime::from_timestamp_secs(e.accessed)
+                                        .unwrap()
+                                        .to_string(),
+                                )
+                                .align_x(alignment::Horizontal::Left),
+                            );
+                        }
+
+                        container(
+                            mouse_area(row)
+                                .on_double_click(Message::Open(e.path.clone()))
+                                .on_press(Message::Select(e.index.clone()))
+                                .on_enter(Message::HoverEntry(e.index.clone(), true))
+                                .on_exit(Message::HoverEntry(e.index.clone(), false)),
                         )
                         .style(|_theme| {
                             let mut style = container::Style::default();
@@ -891,7 +930,7 @@ impl Application {
             right_col = right_col.push(text("VISUAL MODE").height(20).width(Length::Fill));
         }
 
-        if self.view_hidden {
+        if self.config.view.hidden {
             right_col = right_col.push(
                 text(format!("showing hidden files",))
                     .height(20)
@@ -923,7 +962,7 @@ impl Application {
             .width(497)
             .spacing(7);
 
-            if let Some(th) = &thing.error {
+            if let Some(th) = thing.error {
                 col = col.push(
                     text(th)
                         .color(Color::from_rgba(1.0, 105.0 / 255.0, 97.0 / 255.0, 1.0))
@@ -938,7 +977,7 @@ impl Application {
             stack = stack.push(overlay);
         }
 
-        if let Some(_) = self.modals_state.operation {
+        if self.modals_state.operation {
             let row = row![
                 button(text("Replace \nreplace file if name is matched"))
                     .on_press(Message::PasteClipboard(file::OperationChoice::Merge))
@@ -960,7 +999,7 @@ impl Application {
             stack = stack.push(overlay);
         }
 
-        if let Some(_) = self.modals_state.delete {
+        if self.modals_state.delete {
             let overlay = opaque(float(
                 container(
                     column![
@@ -993,7 +1032,7 @@ impl Application {
                     self.program.path.display()
                 )),
                 input,
-                text(&thing.error).color(Color::from_rgba(1.0, 105.0 / 255.0, 97.0 / 255.0, 1.0))
+                text(thing.error).color(Color::from_rgba(1.0, 105.0 / 255.0, 97.0 / 255.0, 1.0))
             ]
             .width(497)
             .spacing(7);
@@ -1020,7 +1059,7 @@ impl Application {
                     self.program.path.display()
                 )),
                 input,
-                text(&thing.error).color(Color::from_rgba(1.0, 105.0 / 255.0, 97.0 / 255.0, 1.0))
+                text(thing.error).color(Color::from_rgba(1.0, 105.0 / 255.0, 97.0 / 255.0, 1.0))
             ]
             .width(497)
             .spacing(7);
@@ -1071,7 +1110,7 @@ fn main() -> iced::Result {
     let input = args().nth(1).unwrap_or_default();
 
     iced::application(
-        move || Application::new(input.clone(), config::get_keybinds()),
+        move || Application::new(&input, config::get_keybinds()),
         Application::update,
         Application::view,
     )

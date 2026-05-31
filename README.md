@@ -37,17 +37,34 @@ basically it lets you select multiple files when its on
 
 ### config 
 buoyant uses toml as the configuration language, please search it up if you want to know about the syntax!  
-its located at `~/.config/buoyant/buoyant.toml`  
+the config file is located at `~/.config/buoyant/buoyant.toml`, its not created automatically so go make it yourself  
+
+#### [[view]]
+for displaying various information (metadata)  
+
+|Key|Type|Default|Description|
+|---|---|---|---|
+|hidden|bool|false|show hidden files|
+|last_accessed|bool|false|show last accessed date|
+|created|bool|false|show creation date|
+|filetype|bool|true|show file type|
+|filesize|bool|true|show file size|
 
 #### [[keybinds]]  
 **Value syntax:** `"[MODIFIERS] + [KEY]"`
 for example: `"Ctrl + Shift + H"`
     or like: `"Alt + P"`
 
+```toml
+[[keybinds]]
+navigate_up = "arrowup"
+navigate_down = "j"
+```
+
 > [!NOTE]
 > there can only be **1** KEY, can be as many modifiers as you want,  
 > KEY, MODIFIERS, and each MODIFIER is separated by `+`  
-> oh and they have to be strings too btw *(coated in double quotes "")*
+> oh and they have to be **String** too btw *(coated in double quotes "")*
 
 **Keys List:** a, b, c, d, e, f, g, h, j, k, l, m, n, o, p, q, r, t, u, v, w, y, z, arrowup, arrowdown, arrowright, arrowleft, `, [, ], ,, =, -, ., ', ;, /, backspace, enter, space, tab, delete, end, home, insert, pagedown, pageup, numpadextract, escape, printscreen,  pausebreak, numpad0, numpad1, numpad2, numpad3, numpad4, numpad5, numpad6, numpad7, numpad8, numpad9, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, f1, f2, f3, f4, f5, f6, f7, f8, f9, f10, f11, f12,...to f35  
 

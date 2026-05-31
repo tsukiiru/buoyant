@@ -1,5 +1,12 @@
 use file_type::{self, FileType};
-use std::{fs, path::PathBuf, process::Command, time::SystemTime};
+use std::{
+    collections::HashSet,
+    fs,
+    os::unix::fs::MetadataExt,
+    path::{Path, PathBuf},
+    process::Command,
+    time::SystemTime,
+};
 
 pub const NONO_CHARACTERS: [&str; 3] = ["\0", "\"", "/"];
 
@@ -21,7 +28,7 @@ pub fn delete(path: &PathBuf) {
     }
 }
 
-pub fn rename(path: &PathBuf, name: String) {
+pub fn rename(path: &PathBuf, name: &str) {
     let mut new_path = path.clone();
     new_path.set_file_name(name);
 
@@ -32,18 +39,18 @@ pub fn rename(path: &PathBuf, name: String) {
     }
 }
 
-pub fn create(current_path: &PathBuf, new_path: PathBuf, last_is_file: bool) -> Option<String> {
+pub fn create(current_path: &Path, new_path: &Path, last_is_file: bool) -> Option<&'static str> {
     let layers: Vec<_> = new_path.components().collect();
     if layers.len() == 0 {
         return None;
     }
 
-    let mut clean_path: PathBuf = current_path.clone();
+    let mut clean_path = current_path.to_path_buf();
     for layer in layers {
         let name = layer.as_os_str().to_str().unwrap();
         for c in NONO_CHARACTERS {
             if name.contains(c) {
-                return Some(String::from("invalid characters"));
+                return Some("invalid characters");
             }
         }
         clean_path.push(layer);
@@ -72,15 +79,15 @@ pub fn create(current_path: &PathBuf, new_path: PathBuf, last_is_file: bool) -> 
     None
 }
 
-fn operation_recursion(
-    dest: &PathBuf,
-    prevs: &mut Vec<String>,
+fn operation_recursion<'life>(
+    dest: &Path,
+    prevs: &mut Vec<&'life str>,
     operation: &OperationChoice,
-    path: &PathBuf,
+    path: &'life Path,
     is_cut: bool,
 ) {
-    let file_name = path.file_name().unwrap().to_str().unwrap().to_string();
-    let mut final_path = dest.clone();
+    let file_name = path.file_name().unwrap().to_str().unwrap();
+    let mut final_path = dest.to_path_buf();
     prevs.iter().for_each(|prev| final_path.push(prev));
 
     let joined = &final_path.join(&file_name);
@@ -94,8 +101,8 @@ fn operation_recursion(
         OperationChoice::Duplicate => {
             // since both file/folder has the same outcome for choosing duplicate
             let new_path = increment_suffix(
-                get_filename(path),
-                format!(".{}", get_fileextension(path)),
+                get_filename(path).as_str(),
+                format!(".{}", get_fileextension(path)).as_str(),
                 &final_path,
             );
             move_file(path, &new_path, is_cut);
@@ -107,11 +114,8 @@ fn operation_recursion(
             }
 
             if !final_path.is_file() {
-                // if is not folder
-                //               println!("selected file is not a folder");
                 replace_file(path, &final_path.join(&file_name), is_cut);
             } else {
-                // println!("folder");
                 prevs.push(file_name);
                 operation_recursion(dest, prevs, operation, path, is_cut);
             }
@@ -119,7 +123,7 @@ fn operation_recursion(
     }
 }
 
-pub fn move_dir(old_files: Vec<PathBuf>, dest: PathBuf, operation: &OperationChoice) {
+pub fn move_dir(old_files: &HashSet<PathBuf>, dest: &Path, operation: &OperationChoice) {
     if !dest.exists() || !dest.is_dir() {
         return;
         // check if path not exists and is not a folder
@@ -137,7 +141,7 @@ pub fn move_dir(old_files: Vec<PathBuf>, dest: PathBuf, operation: &OperationCho
         .for_each(|p| operation_recursion(&dest, &mut vec![], operation, &p, true));
 }
 
-pub fn copy_dir(old_files: Vec<PathBuf>, dest: PathBuf, operation: &OperationChoice) {
+pub fn copy_dir(old_files: &HashSet<PathBuf>, dest: &Path, operation: &OperationChoice) {
     if !dest.exists() || !dest.is_dir() {
         return;
         // check if path not exists and is not a folder
@@ -145,10 +149,10 @@ pub fn copy_dir(old_files: Vec<PathBuf>, dest: PathBuf, operation: &OperationCho
 
     old_files
         .iter()
-        .for_each(|p| operation_recursion(&dest, &mut vec![], operation, &p, false));
+        .for_each(|p| operation_recursion(dest, &mut vec![], operation, &p, false));
 }
 
-fn move_file(old_path: &PathBuf, new_path: &PathBuf, is_cut: bool) {
+fn move_file(old_path: &Path, new_path: &Path, is_cut: bool) {
     let program = if is_cut { "mv" } else { "cp" };
     let cmd = Command::new(program).arg(&old_path).arg(new_path).output();
 
@@ -157,7 +161,7 @@ fn move_file(old_path: &PathBuf, new_path: &PathBuf, is_cut: bool) {
     }
 }
 
-fn replace_file(old_path: &PathBuf, new_path: &PathBuf, is_cut: bool) {
+fn replace_file(old_path: &Path, new_path: &Path, is_cut: bool) {
     let program = if is_cut { "mv" } else { "cp" };
 
     Command::new("rm")
@@ -175,7 +179,7 @@ fn replace_file(old_path: &PathBuf, new_path: &PathBuf, is_cut: bool) {
 }
 
 // helper functions
-pub fn read_dir(path: &PathBuf) -> Vec<PathBuf> {
+pub fn read_dir(path: &Path) -> Vec<PathBuf> {
     let read_results = fs::read_dir(path);
 
     if let Err(hi) = &read_results {
@@ -189,8 +193,9 @@ pub fn read_dir(path: &PathBuf) -> Vec<PathBuf> {
 } // returns a vec of children of a directory
 
 // get file name but stripped the extension
-pub fn get_filename(path: &PathBuf) -> String {
+pub fn get_filename(path: &Path) -> String {
     let mut name = path.file_name().unwrap().to_str().unwrap().to_string();
+
     if path.is_dir() {
         return name;
     }
@@ -201,33 +206,34 @@ pub fn get_filename(path: &PathBuf) -> String {
     if let Some(size) = i {
         name.truncate(size);
     }
+
     name
 }
 
 // file name but with extension
-fn get_filenameext(path: &PathBuf) -> String {
+fn get_filenameext(path: &Path) -> String {
     path.file_name().unwrap().to_str().unwrap().to_string()
 }
 
-pub fn get_filetype(path: &PathBuf) -> String {
+pub fn get_filetype(path: &Path) -> &'static str {
     if path.is_dir() {
-        return String::from("Folder");
+        return "Folder";
     }
 
     let ext = get_fileextension(path);
     let opt_type = FileType::from_extension(ext).first();
 
     if let Some(thing) = opt_type {
-        thing.name().to_string()
+        thing.name()
     } else {
-        String::from("unknown")
+        "unknown"
     }
     // i'll try to get a more accurate file type later
 }
 
 const UNIX_EPOCH: SystemTime = SystemTime::UNIX_EPOCH;
 
-pub fn get_fileaccessed(path: &PathBuf) -> i64 {
+pub fn get_fileaccessed(path: &Path) -> i64 {
     match path.metadata() {
         Ok(res) => res
             .accessed()
@@ -243,7 +249,7 @@ pub fn get_fileaccessed(path: &PathBuf) -> i64 {
     }
 }
 
-pub fn get_filecreated(path: &PathBuf) -> i64 {
+pub fn get_filecreated(path: &Path) -> i64 {
     match path.metadata() {
         Ok(res) => res
             .created()
@@ -258,28 +264,72 @@ pub fn get_filecreated(path: &PathBuf) -> i64 {
     }
 }
 
-pub fn is_hidden(path: &PathBuf) -> bool {
+pub fn get_filesize(path: &Path) -> String {
+    let mut res = String::new();
+
+    if !path.exists() {
+        return res;
+    }
+
+    let read_metadata = path.metadata();
+
+    if !read_metadata.is_ok() {
+        println!(
+            "problem encountered when trying to read metadata of {}",
+            path.display()
+        );
+    }
+
+    let metadata = read_metadata.unwrap();
+    let size = metadata.size();
+
+    // i dont think someone would have petabytes of data on their personal computer,,,
+    if size >= 10_u64.pow(12) {
+        // TiB
+        let round = size / 10_u64.pow(12);
+        res.push_str(&format!("{:.2}TiB", round.to_string()));
+    } else if size >= 10_u64.pow(9) {
+        // GiB
+        let round = size / 10_u64.pow(9);
+        res.push_str(&format!("{:.2}GiB", round.to_string()));
+    } else if size >= 10_u64.pow(6) {
+        // MiB
+        let round = size / 10_u64.pow(6);
+        res.push_str(&format!("{:.2}MiB", round.to_string()));
+    } else if size >= 10_u64.pow(3) {
+        // KiB
+        let round = size / 10_u64.pow(3);
+        res.push_str(&format!("{:.2}KiB", round.to_string()));
+    } else {
+        // bytes
+        res.push_str(&format!("{} bytes", size));
+    }
+
+    res
+}
+
+pub fn is_hidden(path: &Path) -> bool {
     // basically check if theres a dot at the start
     get_filenameext(path).starts_with(".")
 }
 
-fn get_fileextension(path: &PathBuf) -> String {
+fn get_fileextension(path: &Path) -> &str {
     let ext = path.extension();
 
     if let Some(e) = ext {
         // println!("this is in extension");
-        e.to_str().unwrap().to_string()
+        e.to_str().unwrap()
     } else {
-        String::from("")
+        ""
     }
 }
 
 // for checking if theres existing files at destination,
 // if there is, increment the ending by one, [FILE_NAME] (number)
-fn increment_suffix(file_name: String, file_extension: String, destination: &PathBuf) -> PathBuf {
+fn increment_suffix(file_name: &str, file_extension: &str, destination: &Path) -> PathBuf {
     for k in 0usize.. {
         let name = if k == 0 {
-            format!("{}{}", file_name.clone(), file_extension)
+            format!("{}{}", file_name, file_extension)
         } else {
             format!("{} ({}){}", file_name, k, file_extension)
         };
