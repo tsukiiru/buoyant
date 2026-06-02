@@ -12,6 +12,7 @@ use crate::Displaying;
 pub struct Config {
     pub keybinds: KeybindsConfig,
     pub view: Displaying,
+    pub sorting: Sorting,
 }
 
 pub struct KeybindsConfig {
@@ -30,6 +31,30 @@ pub struct KeybindsConfig {
     pub toggle_visual_mode: KeybindEntry,
 }
 
+pub struct Sorting {
+    pub sorting_by: SortingBy,
+    pub reversed: bool,
+}
+
+impl Default for Sorting {
+    fn default() -> Self {
+        Sorting {
+            sorting_by: SortingBy::default(),
+            reversed: false,
+        }
+    }
+}
+
+#[derive(Default)]
+pub enum SortingBy {
+    #[default]
+    Name,
+    Created,
+    Accessed,
+    Type,
+    Size,
+}
+
 pub struct KeybindEntry {
     pub key: Physical,
     pub modifiers: Modifiers,
@@ -41,6 +66,7 @@ pub fn get_keybinds() -> Config {
         view: Displaying {
             ..Default::default()
         },
+        sorting: Sorting::default(),
         keybinds: KeybindsConfig {
             navigate_up: KeybindEntry {
                 key: Physical::Code(Code::ArrowUp),
@@ -120,6 +146,13 @@ pub fn get_keybinds() -> Config {
 struct RawConfig {
     keybinds: Option<RawKeybindsConfig>,
     view: Option<RawViewConfig>,
+    sorting: Option<RawSortingConfig>,
+}
+
+#[derive(Deserialize)]
+struct RawSortingConfig {
+    sorting_by: Option<String>,
+    reversed: Option<bool>,
 }
 
 #[derive(Deserialize)]
@@ -155,6 +188,27 @@ fn process_rawconfig(raw_config: RawConfig, config: &mut Config) {
 
     if let Some(table) = raw_config.view {
         process_view(table, &mut config.view);
+    }
+
+    if let Some(table) = raw_config.sorting {
+        process_sorting(table, &mut config.sorting);
+    }
+}
+
+fn process_sorting(raw_sorting: RawSortingConfig, config: &mut Sorting) {
+    if let Some(c) = raw_sorting.sorting_by {
+        match c.trim().to_lowercase().as_str() {
+            "name" => config.sorting_by = SortingBy::Name,
+            "created" => config.sorting_by = SortingBy::Created,
+            "accessed" => config.sorting_by = SortingBy::Accessed,
+            "type" => config.sorting_by = SortingBy::Type,
+            "size" => config.sorting_by = SortingBy::Size,
+            _ => {}
+        }
+    }
+
+    if let Some(c) = raw_sorting.reversed {
+        config.reversed = c;
     }
 }
 

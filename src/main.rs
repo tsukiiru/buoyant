@@ -21,9 +21,12 @@ use iced::{
     },
 };
 
+use config::SortingBy;
+
 mod config;
 mod path;
 use path as file;
+use rayon::slice::ParallelSliceMut;
 
 struct Program {
     path: PathBuf,
@@ -101,14 +104,14 @@ enum Message {
 }
 
 struct Entry {
-    index: usize,
+    id: usize,
     name: String,
     path: PathBuf,
 
     accessed: i64,
     created: i64,
     filetype: &'static str,
-    filesize: String,
+    filesize: u64,
 
     hovered: bool,
 }
@@ -180,12 +183,49 @@ impl Default for Displaying {
     }
 }
 
+struct Entries {
+    children: Vec<Entry>,
+}
+
+impl Entries {
+    fn new() -> Self {
+        Entries {
+            children: Vec::new(),
+        }
+    }
+
+    fn getv_index(&self, index: &usize) -> Option<&Entry> {
+        self.children.get(*index)
+    }
+
+    fn get_mut(&mut self, id: &usize) -> Option<&mut Entry> {
+        for entry in &mut self.children {
+            if entry.id == *id {
+                return Some(entry);
+            }
+        }
+        None
+    }
+
+    fn get_index(&self, id: &usize) -> usize {
+        let mut res: usize = 0;
+
+        self.children.iter().enumerate().for_each(|(index, entry)| {
+            if entry.id == *id {
+                res = index;
+            }
+        });
+
+        res
+    }
+}
+
 struct Application {
     config: config::Config,
     program: Program,
 
     current_index: Option<usize>,
-    entries: Vec<Entry>, // this has to be ordered
+    entries: Entries,
     selected: HashSet<usize>,
 
     modifiers_state: ModifiersState,
@@ -213,7 +253,7 @@ impl Application {
                 program: Program::init(path),
 
                 current_index: None,
-                entries: vec![],
+                entries: Entries::new(),
                 selected: HashSet::new(),
 
                 modifiers_state: ModifiersState {
@@ -335,32 +375,65 @@ impl Application {
             }
 
             Message::UpdateEntries(prev_path) => {
-                self.entries.clear();
+                self.entries.children.clear();
 
                 let cur_paths = file::read_dir(&self.program.path);
                 let mut i: usize = 0;
+
                 for path in cur_paths {
                     if !self.config.view.hidden && file::is_hidden(&path) {
                         continue;
                     }
 
-                    self.entries.push(Entry {
+                    self.entries.children.push(Entry {
                         name: path.file_name().unwrap().to_str().unwrap().to_string(),
                         path: path.clone(),
                         created: file::get_filecreated(&path),
                         accessed: file::get_fileaccessed(&path),
-                        index: i,
+                        id: i,
                         hovered: false,
                         filetype: file::get_filetype(&path),
                         filesize: file::get_filesize(&path),
                     });
+
                     i += 1;
                 }
 
+                // sorting logic
+                let sorting_config = &self.config.sorting;
+                let entries = &mut self.entries.children;
+
+                match sorting_config.sorting_by {
+                    SortingBy::Name => entries.par_sort_by(|a, b| {
+                        let (x, y) = (a.name.as_str(), b.name.as_str());
+                        x.cmp(y)
+                    }),
+                    SortingBy::Size => entries.par_sort_by(|a, b| {
+                        let (x, y) = (&a.filesize, &b.filesize);
+                        x.cmp(y)
+                    }),
+                    SortingBy::Type => entries.par_sort_by(|a, b| {
+                        let (x, y) = (&a.filetype, &b.filetype);
+                        x.cmp(y)
+                    }),
+                    SortingBy::Created => entries.par_sort_by(|a, b| {
+                        let (x, y) = (&a.created, &b.created);
+                        x.cmp(y)
+                    }),
+                    SortingBy::Accessed => entries.par_sort_by(|a, b| {
+                        let (x, y) = (&a.accessed, &b.accessed);
+                        x.cmp(y)
+                    }),
+                }
+
+                if sorting_config.reversed {
+                    self.entries.children.reverse();
+                }
+
                 if let Some(path) = prev_path {
-                    self.entries.iter().for_each(|entry| {
+                    self.entries.children.iter().for_each(|entry| {
                         if entry.path == path {
-                            self.current_index = Some(entry.index);
+                            self.current_index = Some(self.entries.get_index(&entry.id));
                         }
                     });
                 } else {
@@ -370,7 +443,7 @@ impl Application {
                 Task::none()
             }
             Message::HoverEntry(id, state) => {
-                let entry = self.entries.get_mut(id);
+                let entry = self.entries.get_mut(&id);
 
                 if let Some(e) = entry {
                     e.hovered = state;
@@ -415,8 +488,12 @@ impl Application {
                     self.selected.insert(i);
                 } // selecting everything between the two indicies
 
-                if self.modifiers_state.ctrl && self.selected.contains(&index) {
-                    self.selected.remove(&index);
+                if self.modifiers_state.ctrl {
+                    if self.selected.contains(&index) {
+                        self.selected.remove(&index);
+                    } else {
+                        self.selected.insert(index);
+                    }
                 }
 
                 self.current_index = Some(index);
@@ -429,7 +506,16 @@ impl Application {
             }
             Message::DeleteSelection => {
                 for index in &self.selected {
-                    file::delete(&self.entries[*index].path);
+                    let try_getentry = &self.entries.getv_index(index);
+
+                    if let Some(entry) = try_getentry {
+                        file::delete(&entry.path);
+                    } else {
+                        println!(
+                            "encountered some error while trying to get entry from index {}",
+                            index
+                        );
+                    }
                 }
 
                 Task::done(Message::UpdateModal(ModalType::Delete, ModalMessage::Close))
@@ -452,7 +538,7 @@ impl Application {
 
                 match direction {
                     Direction::Down => {
-                        if current_index < self.entries.len() - 1 {
+                        if current_index < self.entries.children.len() - 1 {
                             current_index += 1;
                         }
                     }
@@ -480,7 +566,7 @@ impl Application {
                     return Task::none();
                 }
 
-                if let Some(entry) = self.entries.get(temp_index) {
+                if let Some(entry) = self.entries.getv_index(&temp_index) {
                     Task::done(Message::Open(entry.path.clone()))
                 } else {
                     Task::none()
@@ -497,7 +583,9 @@ impl Application {
                 clipboard.entries.clear();
 
                 self.selected.iter().for_each(|i| {
-                    let _ = clipboard.entries.insert(self.entries[*i].path.clone());
+                    let _ = clipboard
+                        .entries
+                        .insert(self.entries.getv_index(i).unwrap().path.clone());
                 });
 
                 clipboard.mode = mode;
@@ -612,7 +700,7 @@ impl Application {
                                 let current_index = self.current_index;
 
                                 if let Some(index) = current_index {
-                                    let selected = self.entries.get(index).unwrap();
+                                    let selected = self.entries.getv_index(&index).unwrap();
 
                                     modals_state.rename = Some(RenameModal {
                                         path: selected.path.clone(),
@@ -770,8 +858,42 @@ impl Application {
     }
 
     fn view(&self) -> Element<'_, Message> {
-        let entries = &self.entries;
-        let buttons: Element<Message> = column!()
+        let mut buttons = column![];
+        let display_conf = &self.config.view;
+
+        let mut row = row![
+            text("file name")
+                .width(300)
+                .align_x(alignment::Horizontal::Left)
+        ]
+        .spacing(5)
+        .padding(5);
+
+        if display_conf.filesize {
+            row = row.push(text("size").width(100).align_x(alignment::Horizontal::Left));
+        }
+
+        if display_conf.filetype {
+            row = row.push(text("type").width(150).align_x(alignment::Horizontal::Left));
+        }
+
+        if display_conf.created {
+            row = row.push(
+                text("creation date")
+                    .width(200)
+                    .align_x(alignment::Horizontal::Left),
+            );
+        }
+
+        if display_conf.last_accessed {
+            row = row.push(text("accessed date").align_x(alignment::Horizontal::Left));
+        }
+
+        buttons = buttons.push(row);
+
+        let entries = &self.entries.children;
+
+        buttons = buttons
             .extend(
                 entries
                     .iter()
@@ -784,11 +906,9 @@ impl Application {
                         .spacing(5)
                         .padding(5);
 
-                        let display_conf = &self.config.view;
-
                         if display_conf.filesize {
                             row = row.push(
-                                text(&e.filesize)
+                                text(file::convert_bytes_to_string(&e.filesize))
                                     .width(100)
                                     .align_x(alignment::Horizontal::Left),
                             );
@@ -825,18 +945,21 @@ impl Application {
                             );
                         }
 
+                        let index = self.entries.get_index(&e.id);
+
                         container(
                             mouse_area(row)
                                 .on_double_click(Message::Open(e.path.clone()))
-                                .on_press(Message::Select(e.index.clone()))
-                                .on_enter(Message::HoverEntry(e.index.clone(), true))
-                                .on_exit(Message::HoverEntry(e.index.clone(), false)),
+                                .on_press(Message::Select(index))
+                                .on_enter(Message::HoverEntry(e.id, true))
+                                .on_exit(Message::HoverEntry(e.id, false)),
                         )
                         .style(|_theme| {
                             let mut style = container::Style::default();
+                            let index = self.entries.get_index(&e.id);
 
                             if let Some(cur_index) = self.current_index
-                                && cur_index == e.index
+                                && cur_index == index
                             {
                                 style.border = Border {
                                     color: Color::from_rgba(0.0, 0.0, 0.0, 0.5),
@@ -850,7 +973,7 @@ impl Application {
                                     Some(Background::Color(Color::from_rgba(0.4, 0.4, 0.4, 0.1)));
                             }
 
-                            if self.selected.contains(&e.index) {
+                            if self.selected.contains(&index) {
                                 style.background =
                                     Some(Background::Color(Color::from_rgba(0.4, 0.4, 0.4, 0.3)));
                             }
@@ -862,8 +985,7 @@ impl Application {
             )
             .spacing(10)
             .padding(20)
-            .width(Length::Fill)
-            .into();
+            .width(Length::Fill);
 
         let explorer_scroll = scrollable(buttons)
             .id("scrollable")
@@ -922,6 +1044,21 @@ impl Application {
                 .center_y(30)
                 .center_x(Length::Fill)
                 .padding(5),
+            text(format!(
+                "sorting by: {} ({})",
+                match self.config.sorting.sorting_by {
+                    SortingBy::Name => "name",
+                    SortingBy::Type => "file type",
+                    SortingBy::Size => "file size",
+                    SortingBy::Created => "creation date",
+                    SortingBy::Accessed => "last accessed date",
+                },
+                if self.config.sorting.reversed {
+                    "↑"
+                } else {
+                    "↓"
+                }
+            ),)
         ]
         .width(300)
         .spacing(10);

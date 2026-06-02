@@ -190,7 +190,7 @@ pub fn read_dir(path: &Path) -> Vec<PathBuf> {
         .unwrap()
         .map(|r| r.map(|e| e.path()).unwrap())
         .collect::<Vec<_>>()
-} // returns a vec of children of a directory
+}
 
 // get file name but stripped the extension
 pub fn get_filename(path: &Path) -> String {
@@ -264,11 +264,9 @@ pub fn get_filecreated(path: &Path) -> i64 {
     }
 }
 
-pub fn get_filesize(path: &Path) -> String {
-    let mut res = String::new();
-
+pub fn get_filesize(path: &Path) -> u64 {
     if !path.exists() {
-        return res;
+        return 0_u64;
     }
 
     let read_metadata = path.metadata();
@@ -281,31 +279,31 @@ pub fn get_filesize(path: &Path) -> String {
     }
 
     let metadata = read_metadata.unwrap();
-    let size = metadata.size();
+    metadata.size()
+}
 
+pub fn convert_bytes_to_string(size: &u64) -> String {
     // i dont think someone would have petabytes of data on their personal computer,,,
-    if size >= 10_u64.pow(12) {
+    if *size >= 10_u64.pow(12) {
         // TiB
         let round = size / 10_u64.pow(12);
-        res.push_str(&format!("{:.2}TiB", round.to_string()));
-    } else if size >= 10_u64.pow(9) {
+        return format!("{:.2}TiB", round);
+    } else if *size >= 10_u64.pow(9) {
         // GiB
         let round = size / 10_u64.pow(9);
-        res.push_str(&format!("{:.2}GiB", round.to_string()));
-    } else if size >= 10_u64.pow(6) {
+        return format!("{:.2}GiB", round);
+    } else if *size >= 10_u64.pow(6) {
         // MiB
         let round = size / 10_u64.pow(6);
-        res.push_str(&format!("{:.2}MiB", round.to_string()));
-    } else if size >= 10_u64.pow(3) {
+        return format!("{:.2}MiB", round);
+    } else if *size >= 10_u64.pow(3) {
         // KiB
         let round = size / 10_u64.pow(3);
-        res.push_str(&format!("{:.2}KiB", round.to_string()));
+        return format!("{:.2}KiB", round);
     } else {
         // bytes
-        res.push_str(&format!("{} bytes", size));
+        return format!("{} bytes", size);
     }
-
-    res
 }
 
 pub fn is_hidden(path: &Path) -> bool {
