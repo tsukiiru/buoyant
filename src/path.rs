@@ -1,4 +1,5 @@
 use file_type::{self, FileType};
+use rayon::iter::{IntoParallelRefIterator, ParallelIterator};
 use std::{
     collections::HashSet,
     fs,
@@ -41,11 +42,13 @@ pub fn rename(path: &PathBuf, name: &str) {
 
 pub fn create(current_path: &Path, new_path: &Path, last_is_file: bool) -> Option<&'static str> {
     let layers: Vec<_> = new_path.components().collect();
+
     if layers.len() == 0 {
         return None;
     }
 
     let mut clean_path = current_path.to_path_buf();
+
     for layer in layers {
         let name = layer.as_os_str().to_str().unwrap();
         for c in NONO_CHARACTERS {
@@ -126,7 +129,6 @@ fn operation_recursion<'life>(
 pub fn move_dir(old_files: &HashSet<PathBuf>, dest: &Path, operation: &OperationChoice) {
     if !dest.exists() || !dest.is_dir() {
         return;
-        // check if path not exists and is not a folder
     }
 
     // check if file with same name exists
@@ -137,18 +139,17 @@ pub fn move_dir(old_files: &HashSet<PathBuf>, dest: &Path, operation: &Operation
     // if merge, check if folder or file, if folder, get into that folder and repeat, if file, replace the file in destination
 
     old_files
-        .iter()
+        .par_iter()
         .for_each(|p| operation_recursion(&dest, &mut vec![], operation, &p, true));
 }
 
 pub fn copy_dir(old_files: &HashSet<PathBuf>, dest: &Path, operation: &OperationChoice) {
     if !dest.exists() || !dest.is_dir() {
         return;
-        // check if path not exists and is not a folder
     }
 
     old_files
-        .iter()
+        .par_iter()
         .for_each(|p| operation_recursion(dest, &mut vec![], operation, &p, false));
 }
 
@@ -182,8 +183,8 @@ fn replace_file(old_path: &Path, new_path: &Path, is_cut: bool) {
 pub fn read_dir(path: &Path) -> Vec<PathBuf> {
     let read_results = fs::read_dir(path);
 
-    if let Err(hi) = &read_results {
-        eprintln!("{}", hi);
+    if let Err(error) = &read_results {
+        eprintln!("{}", error);
     }
 
     read_results
@@ -203,16 +204,13 @@ pub fn get_filename(path: &Path) -> String {
     let i = name.rfind(".");
     // trim the extension off
 
-    if let Some(size) = i {
+    if let Some(size) = i
+        && size != 0
+    {
         name.truncate(size);
     }
 
     name
-}
-
-// file name but with extension
-fn get_filenameext(path: &Path) -> String {
-    path.file_name().unwrap().to_str().unwrap().to_string()
 }
 
 pub fn get_filetype(path: &Path) -> &'static str {
@@ -228,7 +226,6 @@ pub fn get_filetype(path: &Path) -> &'static str {
     } else {
         "unknown"
     }
-    // i'll try to get a more accurate file type later
 }
 
 const UNIX_EPOCH: SystemTime = SystemTime::UNIX_EPOCH;
@@ -243,9 +240,7 @@ pub fn get_fileaccessed(path: &Path) -> i64 {
             .as_secs()
             .try_into()
             .unwrap(),
-        // bring the file back to the prehistoric time period if cannot find the last accessed time
-        // okay ima actually kms for real with this horrendous shit :sob:
-        Err(_e) => 0, // i'll probably add permission issues someday
+        Err(_e) => 0, // TODO: add perms issues
     }
 }
 
@@ -259,7 +254,6 @@ pub fn get_filecreated(path: &Path) -> i64 {
             .as_secs()
             .try_into()
             .unwrap(),
-        // bring the file back to the prehistoric time period if cannot find the last accessed time
         Err(_e) => 0,
     }
 }
@@ -307,15 +301,13 @@ pub fn convert_bytes_to_string(size: &u64) -> String {
 }
 
 pub fn is_hidden(path: &Path) -> bool {
-    // basically check if theres a dot at the start
-    get_filenameext(path).starts_with(".")
+    get_filename(path).starts_with(".")
 }
 
 fn get_fileextension(path: &Path) -> &str {
     let ext = path.extension();
 
     if let Some(e) = ext {
-        // println!("this is in extension");
         e.to_str().unwrap()
     } else {
         ""

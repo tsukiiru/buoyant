@@ -8,7 +8,8 @@ use std::{
 use chrono::DateTime;
 
 use iced::{
-    Background, Border, Color, Element, Event, Length, Subscription, Task, alignment,
+    Background, Border, Color, Element, Event, Length, Padding, Subscription, Task, Theme,
+    alignment,
     border::Radius,
     event::{self, Status},
     keyboard::{
@@ -16,10 +17,17 @@ use iced::{
         key::{self, Code, Physical},
     },
     widget::{
-        button, column, container, float, mouse_area, opaque, operation, row, scrollable, stack,
-        text, text_input,
+        button, column, container, float, mouse_area, opaque,
+        operation::{self, AbsoluteOffset},
+        row,
+        scrollable::Viewport,
+        selector::Target,
+        stack, text, text_input,
     },
 };
+
+use iced::widget::text::Wrapping;
+use iced::widget::{scrollable, selector};
 
 use config::SortingBy;
 
@@ -86,6 +94,9 @@ enum Message {
     ToggleVisualMode,
     UpdateModifiersState(bool, bool, bool),
 
+    UpdateExplorerScroll(Option<Target>),
+    UpdateExplorerOffset(Viewport),
+
     Select(usize),
     ResetSelection,
     DeleteSelection,
@@ -140,11 +151,11 @@ struct ModifiersState {
 
 struct ModalsState {
     opened: bool,
-    rename: Option<RenameModal>,
     operation: bool,
     delete: bool,
     create_file: Option<CreateModal>,
     create_folder: Option<CreateModal>,
+    rename: Option<RenameModal>,
 }
 
 #[derive(Clone, Debug)]
@@ -228,6 +239,8 @@ struct Application {
     entries: Entries,
     selected: HashSet<usize>,
 
+    explorer_offset: f32,
+
     modifiers_state: ModifiersState,
     clipboard: Clipboard,
     modals_state: ModalsState,
@@ -255,6 +268,8 @@ impl Application {
                 current_index: None,
                 entries: Entries::new(),
                 selected: HashSet::new(),
+
+                explorer_offset: 0.0,
 
                 modifiers_state: ModifiersState {
                     ctrl: false,
@@ -301,7 +316,10 @@ impl Application {
                 let path = Some(self.program.path.clone());
                 self.program.navigate_back();
 
-                Task::done(Message::UpdateEntries(path))
+                Task::done(Message::UpdateEntries(path)).chain(
+                    selector::find(selector::id("scrollable"))
+                        .then(|output| Task::done(Message::UpdateExplorerScroll(output))),
+                )
             }
 
             Message::KeyPressed(physical_key, modifiers) => {
@@ -376,6 +394,7 @@ impl Application {
 
             Message::UpdateEntries(prev_path) => {
                 self.entries.children.clear();
+                self.current_index = None;
 
                 let cur_paths = file::read_dir(&self.program.path);
                 let mut i: usize = 0;
@@ -471,6 +490,50 @@ impl Application {
                 Task::none()
             }
 
+            Message::UpdateExplorerScroll(target) => {
+                // consutrction
+                let widget = target.unwrap();
+                let height = widget.visible_bounds().unwrap().height;
+                //
+                let try_current_index = self.current_index;
+
+                if try_current_index.is_none() {
+                    return Task::none();
+                }
+
+                let current_index: f32 = try_current_index.unwrap() as f32 + 1.0;
+                let offset: f32 = 40.0 * (current_index - 1.0);
+
+                let widget_range = (self.explorer_offset, self.explorer_offset + height);
+
+                //println!("range is {:#?}", widget_range);
+                //               println!("while the offset is {}", offset);
+
+                if offset <= widget_range.0 {
+                    return operation::scroll_to(
+                        "scrollable",
+                        AbsoluteOffset { x: 0.0, y: offset },
+                    );
+                }
+
+                if widget_range.1 <= offset {
+                    return operation::scroll_to(
+                        "scrollable",
+                        AbsoluteOffset {
+                            x: 0.0,
+                            y: offset - height + 40.0,
+                        },
+                    );
+                }
+
+                Task::none()
+            }
+            Message::UpdateExplorerOffset(viewport) => {
+                self.explorer_offset = viewport.absolute_offset().y;
+                //          println!("current offset is {}", self.explorer_offset);
+                Task::none()
+            }
+
             Message::Select(index) => {
                 if !self.modifiers_state.shift && !self.visual_mode && !self.modifiers_state.ctrl {
                     self.selected.clear();
@@ -498,7 +561,8 @@ impl Application {
 
                 self.current_index = Some(index);
 
-                Task::none()
+                selector::find(selector::id("scrollable"))
+                    .then(|output| Task::done(Message::UpdateExplorerScroll(output)))
             }
             Message::ResetSelection => {
                 self.selected.clear();
@@ -859,38 +923,8 @@ impl Application {
 
     fn view(&self) -> Element<'_, Message> {
         let mut buttons = column![];
+
         let display_conf = &self.config.view;
-
-        let mut row = row![
-            text("file name")
-                .width(300)
-                .align_x(alignment::Horizontal::Left)
-        ]
-        .spacing(5)
-        .padding(5);
-
-        if display_conf.filesize {
-            row = row.push(text("size").width(100).align_x(alignment::Horizontal::Left));
-        }
-
-        if display_conf.filetype {
-            row = row.push(text("type").width(150).align_x(alignment::Horizontal::Left));
-        }
-
-        if display_conf.created {
-            row = row.push(
-                text("creation date")
-                    .width(200)
-                    .align_x(alignment::Horizontal::Left),
-            );
-        }
-
-        if display_conf.last_accessed {
-            row = row.push(text("accessed date").align_x(alignment::Horizontal::Left));
-        }
-
-        buttons = buttons.push(row);
-
         let entries = &self.entries.children;
 
         buttons = buttons
@@ -899,49 +933,68 @@ impl Application {
                     .iter()
                     .map(|e| {
                         let mut row = row![
-                            text(&e.name)
-                                .width(300)
-                                .align_x(alignment::Horizontal::Left),
+                            container(
+                                text(&e.name)
+                                    .wrapping(Wrapping::None)
+                                    .align_x(alignment::Horizontal::Left)
+                            )
+                            .width(300)
+                            .clip(true),
                         ]
-                        .spacing(5)
-                        .padding(5);
+                        .spacing(10);
 
                         if display_conf.filesize {
                             row = row.push(
-                                text(file::convert_bytes_to_string(&e.filesize))
-                                    .width(100)
-                                    .align_x(alignment::Horizontal::Left),
+                                container(
+                                    text(file::convert_bytes_to_string(&e.filesize))
+                                        .align_x(alignment::Horizontal::Left)
+                                        .wrapping(Wrapping::None),
+                                )
+                                .width(100)
+                                .clip(true),
                             );
                         }
 
                         if display_conf.filetype {
                             row = row.push(
-                                text(e.filetype)
-                                    .width(150)
-                                    .align_x(alignment::Horizontal::Left),
+                                container(
+                                    text(e.filetype)
+                                        .align_x(alignment::Horizontal::Left)
+                                        .wrapping(Wrapping::None),
+                                )
+                                .width(150)
+                                .clip(true),
                             );
                         }
 
                         if display_conf.created {
                             row = row.push(
-                                text(
-                                    DateTime::from_timestamp_secs(e.created)
-                                        .unwrap()
-                                        .to_string(),
+                                container(
+                                    text(
+                                        DateTime::from_timestamp_secs(e.created)
+                                            .unwrap()
+                                            .to_string(),
+                                    )
+                                    .align_x(alignment::Horizontal::Left)
+                                    .wrapping(Wrapping::None),
                                 )
                                 .width(200)
-                                .align_x(alignment::Horizontal::Left),
+                                .clip(true),
                             );
                         }
 
                         if display_conf.last_accessed {
                             row = row.push(
-                                text(
-                                    DateTime::from_timestamp_secs(e.accessed)
-                                        .unwrap()
-                                        .to_string(),
+                                container(
+                                    text(
+                                        DateTime::from_timestamp_secs(e.accessed)
+                                            .unwrap()
+                                            .to_string(),
+                                    )
+                                    .align_x(alignment::Horizontal::Left)
+                                    .wrapping(Wrapping::None),
                                 )
-                                .align_x(alignment::Horizontal::Left),
+                                .clip(true),
                             );
                         }
 
@@ -954,6 +1007,8 @@ impl Application {
                                 .on_enter(Message::HoverEntry(e.id, true))
                                 .on_exit(Message::HoverEntry(e.id, false)),
                         )
+                        .center_y(30)
+                        .padding(Padding::from([0, 5]))
                         .style(|_theme| {
                             let mut style = container::Style::default();
                             let index = self.entries.get_index(&e.id);
@@ -984,23 +1039,89 @@ impl Application {
                     .collect::<Vec<_>>(),
             )
             .spacing(10)
-            .padding(20)
             .width(Length::Fill);
 
         let explorer_scroll = scrollable(buttons)
             .id("scrollable")
             .width(Length::Fill)
-            .height(Length::Fill);
+            .height(Length::Fill)
+            .on_scroll(Message::UpdateExplorerOffset);
 
-        let explorer_select = container(mouse_area(explorer_scroll).on_press(
-            if !self.modifiers_state.ctrl || !self.visual_mode {
-                Message::ResetSelection
-            } else {
-                Message::None
-            },
-        ))
+        let mut row = row![
+            container(
+                text("file name")
+                    .wrapping(Wrapping::None)
+                    .align_x(alignment::Horizontal::Left)
+            )
+            .width(300)
+            .clip(true)
+        ]
+        .spacing(10)
+        .padding(5);
+
+        if display_conf.filesize {
+            row = row.push(
+                container(
+                    text("size")
+                        .wrapping(Wrapping::None)
+                        .align_x(alignment::Horizontal::Left),
+                )
+                .clip(true)
+                .width(100),
+            );
+        }
+
+        if display_conf.filetype {
+            row = row.push(
+                container(
+                    text("type")
+                        .wrapping(Wrapping::None)
+                        .align_x(alignment::Horizontal::Left),
+                )
+                .clip(true)
+                .width(150),
+            );
+        }
+
+        if display_conf.created {
+            row = row.push(
+                container(
+                    text("creation date")
+                        .wrapping(Wrapping::None)
+                        .align_x(alignment::Horizontal::Left),
+                )
+                .clip(true)
+                .width(200),
+            );
+        }
+
+        if display_conf.last_accessed {
+            row = row.push(
+                container(
+                    text("accessed date")
+                        .wrapping(Wrapping::None)
+                        .align_x(alignment::Horizontal::Left),
+                )
+                .clip(true),
+            );
+        }
+
+        let explorer_select = container(
+            column![
+                row,
+                mouse_area(explorer_scroll).on_press(
+                    if !self.modifiers_state.ctrl || !self.visual_mode {
+                        Message::ResetSelection
+                    } else {
+                        Message::None
+                    },
+                )
+            ]
+            .spacing(10),
+        )
         .width(Length::Fill)
-        .height(Length::Fill);
+        .height(Length::Fill)
+        .padding(20);
 
         let clipboard_mode = match self.clipboard.mode {
             ClipboardMode::Copy => "Copy",
@@ -1029,7 +1150,6 @@ impl Application {
                     })
                     .center_y(30)
                     .center_x(Length::Fill)
-                    .height(30)
                     .padding(5),
             ],
             explorer_select
@@ -1060,7 +1180,7 @@ impl Application {
                 }
             ),)
         ]
-        .width(300)
+        .width(200)
         .spacing(10);
 
         if self.visual_mode {
@@ -1253,5 +1373,6 @@ fn main() -> iced::Result {
     )
     .subscription(Application::subscription)
     .title("buoyant")
+    .theme(Theme::KanagawaLotus)
     .run()
 }

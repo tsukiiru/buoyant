@@ -130,9 +130,8 @@ pub fn get_keybinds() -> Config {
         println!("please check HOME environment variable and set it properly");
     }
 
-    let config_dir = home.unwrap().join(".config/buoyant/");
-    let config_file = config_dir.join("buoyant.toml");
-    let read_content = fs::read_to_string(&config_file);
+    let config_dir = home.unwrap().join(".config/buoyant/buoyant.toml");
+    let read_content = fs::read_to_string(&config_dir);
 
     if let Ok(content) = read_content {
         let raw_config: RawConfig = toml::from_str(&content).unwrap();
