@@ -16,6 +16,7 @@ use iced::{
         self, Modifiers,
         key::{self, Code, Physical},
     },
+    theme,
     widget::{
         button, column, container, float, mouse_area, opaque,
         operation::{self, AbsoluteOffset},
@@ -29,7 +30,7 @@ use iced::{
 use iced::widget::text::Wrapping;
 use iced::widget::{scrollable, selector};
 
-use config::SortingBy;
+use config::{Displaying, SortingBy};
 
 mod config;
 mod path;
@@ -124,6 +125,7 @@ struct Entry {
     filetype: &'static str,
     filesize: u64,
 
+    hidden: bool,
     hovered: bool,
 }
 
@@ -172,26 +174,6 @@ enum ModalMessage {
     Open,
     Close,
     Content(String),
-}
-
-struct Displaying {
-    hidden: bool,
-    last_accessed: bool,
-    created: bool,
-    filetype: bool,
-    filesize: bool,
-}
-
-impl Default for Displaying {
-    fn default() -> Self {
-        Displaying {
-            hidden: false,
-            last_accessed: false,
-            created: false,
-            filetype: true,
-            filesize: true,
-        }
-    }
 }
 
 struct Entries {
@@ -400,19 +382,24 @@ impl Application {
                 let mut i: usize = 0;
 
                 for path in cur_paths {
-                    if !self.config.view.hidden && file::is_hidden(&path) {
+                    if !self.config.view_hidden && file::is_hidden(&path) {
                         continue;
                     }
 
                     self.entries.children.push(Entry {
                         name: path.file_name().unwrap().to_str().unwrap().to_string(),
                         path: path.clone(),
+
                         created: file::get_filecreated(&path),
                         accessed: file::get_fileaccessed(&path),
+
                         id: i,
-                        hovered: false,
+
                         filetype: file::get_filetype(&path),
                         filesize: file::get_filesize(&path),
+
+                        hovered: false,
+                        hidden: file::is_hidden(&path),
                     });
 
                     i += 1;
@@ -472,7 +459,7 @@ impl Application {
             }
 
             Message::ToggleHiddenView => {
-                self.config.view.hidden = !self.config.view.hidden;
+                self.config.view_hidden = !self.config.view_hidden;
                 Task::done(Message::UpdateEntries(None))
             }
             Message::ToggleVisualMode => {
@@ -923,79 +910,112 @@ impl Application {
 
     fn view(&self) -> Element<'_, Message> {
         let mut buttons = column![];
-
-        let display_conf = &self.config.view;
         let entries = &self.entries.children;
+
+        let palette = theme::Theme::KanagawaLotus.palette();
+        let text_color = palette.text;
+        let darken_text_color = text_color.scale_alpha(0.69);
 
         buttons = buttons
             .extend(
                 entries
                     .iter()
                     .map(|e| {
-                        let mut row = row![
-                            container(
-                                text(&e.name)
-                                    .wrapping(Wrapping::None)
-                                    .align_x(alignment::Horizontal::Left)
-                            )
-                            .width(300)
-                            .clip(true),
-                        ]
-                        .spacing(10);
+                        let mut row = row![].spacing(10);
 
-                        if display_conf.filesize {
-                            row = row.push(
-                                container(
-                                    text(file::convert_bytes_to_string(&e.filesize))
-                                        .align_x(alignment::Horizontal::Left)
-                                        .wrapping(Wrapping::None),
-                                )
-                                .width(100)
-                                .clip(true),
-                            );
-                        }
-
-                        if display_conf.filetype {
-                            row = row.push(
-                                container(
-                                    text(e.filetype)
-                                        .align_x(alignment::Horizontal::Left)
-                                        .wrapping(Wrapping::None),
-                                )
-                                .width(150)
-                                .clip(true),
-                            );
-                        }
-
-                        if display_conf.created {
-                            row = row.push(
-                                container(
-                                    text(
-                                        DateTime::from_timestamp_secs(e.created)
-                                            .unwrap()
-                                            .to_string(),
+                        for child in &self.config.view {
+                            match child {
+                                Displaying::Name => {
+                                    row = row.push(
+                                        container(
+                                            text(&e.name)
+                                                .wrapping(Wrapping::None)
+                                                .align_x(alignment::Horizontal::Left)
+                                                .color(if e.hidden {
+                                                    darken_text_color
+                                                } else {
+                                                    text_color
+                                                }),
+                                        )
+                                        .width(300)
+                                        .clip(true),
                                     )
-                                    .align_x(alignment::Horizontal::Left)
-                                    .wrapping(Wrapping::None),
-                                )
-                                .width(200)
-                                .clip(true),
-                            );
-                        }
-
-                        if display_conf.last_accessed {
-                            row = row.push(
-                                container(
-                                    text(
-                                        DateTime::from_timestamp_secs(e.accessed)
-                                            .unwrap()
-                                            .to_string(),
-                                    )
-                                    .align_x(alignment::Horizontal::Left)
-                                    .wrapping(Wrapping::None),
-                                )
-                                .clip(true),
-                            );
+                                }
+                                Displaying::FileSize => {
+                                    row = row.push(
+                                        container(
+                                            text(file::convert_bytes_to_string(&e.filesize))
+                                                .align_x(alignment::Horizontal::Left)
+                                                .wrapping(Wrapping::None)
+                                                .color(if e.hidden {
+                                                    darken_text_color
+                                                } else {
+                                                    text_color
+                                                }),
+                                        )
+                                        .width(100)
+                                        .clip(true),
+                                    );
+                                }
+                                Displaying::FileType => {
+                                    row = row.push(
+                                        container(
+                                            text(e.filetype)
+                                                .align_x(alignment::Horizontal::Left)
+                                                .wrapping(Wrapping::None)
+                                                .color(if e.hidden {
+                                                    darken_text_color
+                                                } else {
+                                                    text_color
+                                                }),
+                                        )
+                                        .width(150)
+                                        .clip(true),
+                                    );
+                                }
+                                Displaying::Created => {
+                                    row =
+                                        row.push(
+                                            container(
+                                                text(
+                                                    DateTime::from_timestamp_secs(e.created)
+                                                        .unwrap()
+                                                        .to_string(),
+                                                )
+                                                .align_x(alignment::Horizontal::Left)
+                                                .wrapping(Wrapping::None)
+                                                .color(if e.hidden {
+                                                    darken_text_color
+                                                } else {
+                                                    text_color
+                                                }),
+                                            )
+                                            .width(200)
+                                            .clip(true),
+                                        );
+                                }
+                                Displaying::LastAccessed => {
+                                    row =
+                                        row.push(
+                                            container(
+                                                text(
+                                                    DateTime::from_timestamp_secs(e.accessed)
+                                                        .unwrap()
+                                                        .to_string(),
+                                                )
+                                                .align_x(alignment::Horizontal::Left)
+                                                .wrapping(Wrapping::None)
+                                                .color(if e.hidden {
+                                                    darken_text_color
+                                                } else {
+                                                    text_color
+                                                }),
+                                            )
+                                            .width(200)
+                                            .clip(true),
+                                        );
+                                }
+                            }
                         }
 
                         let index = self.entries.get_index(&e.id);
@@ -1047,63 +1067,66 @@ impl Application {
             .height(Length::Fill)
             .on_scroll(Message::UpdateExplorerOffset);
 
-        let mut row = row![
-            container(
-                text("file name")
-                    .wrapping(Wrapping::None)
-                    .align_x(alignment::Horizontal::Left)
-            )
-            .width(300)
-            .clip(true)
-        ]
-        .spacing(10)
-        .padding(5);
+        let mut row = row![].spacing(10).padding(5);
 
-        if display_conf.filesize {
-            row = row.push(
-                container(
-                    text("size")
-                        .wrapping(Wrapping::None)
-                        .align_x(alignment::Horizontal::Left),
-                )
-                .clip(true)
-                .width(100),
-            );
-        }
-
-        if display_conf.filetype {
-            row = row.push(
-                container(
-                    text("type")
-                        .wrapping(Wrapping::None)
-                        .align_x(alignment::Horizontal::Left),
-                )
-                .clip(true)
-                .width(150),
-            );
-        }
-
-        if display_conf.created {
-            row = row.push(
-                container(
-                    text("creation date")
-                        .wrapping(Wrapping::None)
-                        .align_x(alignment::Horizontal::Left),
-                )
-                .clip(true)
-                .width(200),
-            );
-        }
-
-        if display_conf.last_accessed {
-            row = row.push(
-                container(
-                    text("accessed date")
-                        .wrapping(Wrapping::None)
-                        .align_x(alignment::Horizontal::Left),
-                )
-                .clip(true),
-            );
+        for child in &self.config.view {
+            match child {
+                Displaying::Name => {
+                    row = row.push(
+                        container(
+                            text("file name")
+                                .wrapping(Wrapping::None)
+                                .align_x(alignment::Horizontal::Left),
+                        )
+                        .width(300)
+                        .clip(true),
+                    );
+                }
+                Displaying::FileSize => {
+                    row = row.push(
+                        container(
+                            text("size")
+                                .wrapping(Wrapping::None)
+                                .align_x(alignment::Horizontal::Left),
+                        )
+                        .clip(true)
+                        .width(100),
+                    );
+                }
+                Displaying::FileType => {
+                    row = row.push(
+                        container(
+                            text("type")
+                                .wrapping(Wrapping::None)
+                                .align_x(alignment::Horizontal::Left),
+                        )
+                        .clip(true)
+                        .width(150),
+                    );
+                }
+                Displaying::Created => {
+                    row = row.push(
+                        container(
+                            text("creation date")
+                                .wrapping(Wrapping::None)
+                                .align_x(alignment::Horizontal::Left),
+                        )
+                        .clip(true)
+                        .width(200),
+                    );
+                }
+                Displaying::LastAccessed => {
+                    row = row.push(
+                        container(
+                            text("accessed date")
+                                .wrapping(Wrapping::None)
+                                .align_x(alignment::Horizontal::Left),
+                        )
+                        .width(200)
+                        .clip(true),
+                    );
+                }
+            }
         }
 
         let explorer_select = container(
@@ -1187,7 +1210,7 @@ impl Application {
             right_col = right_col.push(text("VISUAL MODE").height(20).width(Length::Fill));
         }
 
-        if self.config.view.hidden {
+        if self.config.view_hidden {
             right_col = right_col.push(
                 text(format!("showing hidden files",))
                     .height(20)

@@ -7,12 +7,11 @@ use iced::keyboard::{
 use serde::Deserialize;
 use std::{env::home_dir, fs};
 
-use crate::Displaying;
-
 pub struct Config {
     pub keybinds: KeybindsConfig,
-    pub view: Displaying,
+    pub view: Vec<Displaying>,
     pub sorting: Sorting,
+    pub view_hidden: bool,
 }
 
 pub struct KeybindsConfig {
@@ -62,11 +61,11 @@ pub struct KeybindEntry {
 
 pub fn get_keybinds() -> Config {
     // default config
+
     let mut config = Config {
-        view: Displaying {
-            ..Default::default()
-        },
+        view: Vec::with_capacity(5),
         sorting: Sorting::default(),
+        view_hidden: false,
         keybinds: KeybindsConfig {
             navigate_up: KeybindEntry {
                 key: Physical::Code(Code::ArrowUp),
@@ -173,11 +172,15 @@ struct RawKeybindsConfig {
 
 #[derive(Deserialize)]
 struct RawViewConfig {
-    hidden: Option<bool>,
-    last_accessed: Option<bool>,
-    created: Option<bool>,
-    filetype: Option<bool>,
-    filesize: Option<bool>,
+    enabled: Option<Vec<String>>,
+}
+
+pub enum Displaying {
+    Name,
+    LastAccessed,
+    Created,
+    FileType,
+    FileSize,
 }
 
 fn process_rawconfig(raw_config: RawConfig, config: &mut Config) {
@@ -211,25 +214,16 @@ fn process_sorting(raw_sorting: RawSortingConfig, config: &mut Sorting) {
     }
 }
 
-fn process_view(raw_view: RawViewConfig, config: &mut Displaying) {
-    if let Some(conf) = raw_view.hidden {
-        config.hidden = conf;
-    }
-
-    if let Some(conf) = raw_view.last_accessed {
-        config.last_accessed = conf;
-    }
-
-    if let Some(conf) = raw_view.created {
-        config.created = conf;
-    }
-
-    if let Some(conf) = raw_view.filetype {
-        config.filetype = conf;
-    }
-
-    if let Some(conf) = raw_view.filesize {
-        config.filesize = conf;
+fn process_view(raw_view: RawViewConfig, config: &mut Vec<Displaying>) {
+    if let Some(conf) = raw_view.enabled {
+        conf.iter().for_each(|child| match child.as_str() {
+            "name" => config.push(Displaying::Name),
+            "last_accessed" => config.push(Displaying::LastAccessed),
+            "created" => config.push(Displaying::Created),
+            "file_type" => config.push(Displaying::FileType),
+            "file_size" => config.push(Displaying::FileSize),
+            _ => {}
+        })
     }
 }
 
