@@ -13,7 +13,7 @@ by the way, i made it for me, i dont care about you, so like, if it breaks anyth
 
 ### state
 yup, its actively being developed (in my free time) 🫰, by [me](https://github.com/tsukiiru)!!  
-heavily in development state and experimental, not like theres gonna be many breaking changes though, because i care about my children :3  
+heavily in development state and experimental, not like theres gonna be many breaking changes (subtle foreshadowing) though, because i care about my children :3  
 <sub>note: do not use this right now please, i cant guarantee it wont delete your entire system</sub>
 
 *[pretend theres a preview picture here with blurred background and a giant stylish logo in the middle]*
