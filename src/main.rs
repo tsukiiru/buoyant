@@ -84,6 +84,7 @@ enum Direction {
 enum Message {
     None,
     Open(PathBuf),
+    // referencing path here is also possible?
     Return,
 
     KeyPressed(Physical, Modifiers),
@@ -113,6 +114,9 @@ enum Message {
     UpdateModal(ModalType, ModalMessage),
     CheckModals,
     CloseModals,
+    ClearChoices,
+    SelectChoice,
+    UpdateChoiceIndex(bool),
 }
 
 struct Entry {
@@ -151,13 +155,16 @@ struct ModifiersState {
     alt: bool,
 }
 
-struct ModalsState {
+struct ModalState {
     opened: bool,
     operation: bool,
     delete: bool,
     create_file: Option<CreateModal>,
     create_folder: Option<CreateModal>,
     rename: Option<RenameModal>,
+
+    choices: Vec<Message>,
+    current_choice: usize,
 }
 
 #[derive(Clone, Debug)]
@@ -183,7 +190,7 @@ struct Entries {
 impl Entries {
     fn new() -> Self {
         Entries {
-            children: Vec::new(),
+            children: Vec::with_capacity(30),
         }
     }
 
@@ -225,7 +232,7 @@ struct Application {
 
     modifiers_state: ModifiersState,
     clipboard: Clipboard,
-    modals_state: ModalsState,
+    modals_state: ModalState,
 
     visual_mode: bool,
 }
@@ -262,13 +269,16 @@ impl Application {
                     entries: HashSet::new(),
                     mode: ClipboardMode::Copy,
                 },
-                modals_state: ModalsState {
+                modals_state: ModalState {
                     opened: false,
-                    rename: None,
                     operation: false,
                     delete: false,
+                    rename: None,
                     create_file: None,
                     create_folder: None,
+
+                    choices: Vec::with_capacity(2),
+                    current_choice: 0,
                 },
 
                 visual_mode: false,
@@ -310,11 +320,15 @@ impl Application {
                 if physical_key == keybinds.navigate_backward.key
                     && modifiers == keybinds.navigate_backward.modifiers
                 {
-                    return Task::done(Message::Return);
+                    // for navigating up the directory tree AND going changing modal selection index
+                    // - 1
+                    return Task::done(Message::UpdateChoiceIndex(false))
+                        .chain(Task::done(Message::Return));
                 } else if physical_key == keybinds.navigate_forward.key
                     && modifiers == keybinds.navigate_forward.modifiers
                 {
-                    return Task::done(Message::OpenSelection);
+                    return Task::done(Message::UpdateChoiceIndex(true))
+                        .chain(Task::done(Message::OpenSelection));
                 } else if physical_key == keybinds.navigate_down.key
                     && modifiers == keybinds.navigate_down.modifiers
                 {
@@ -377,16 +391,22 @@ impl Application {
             Message::UpdateEntries(prev_path) => {
                 self.entries.children.clear();
                 self.current_index = None;
+                self.selected.clear();
 
                 let cur_paths = file::read_dir(&self.program.path);
                 let mut i: usize = 0;
 
+                let entries = &mut self.entries.children;
+                let mut non_hidden_entries: Vec<Entry> = Vec::with_capacity(30);
+
                 for path in cur_paths {
-                    if !self.config.view_hidden && file::is_hidden(&path) {
+                    let is_hidden = file::is_hidden(&path);
+
+                    if !self.config.view_hidden && is_hidden {
                         continue;
                     }
 
-                    self.entries.children.push(Entry {
+                    let entry = Entry {
                         name: path.file_name().unwrap().to_str().unwrap().to_string(),
                         path: path.clone(),
 
@@ -399,51 +419,39 @@ impl Application {
                         filesize: file::get_filesize(&path),
 
                         hovered: false,
-                        hidden: file::is_hidden(&path),
-                    });
+                        hidden: is_hidden,
+                    };
+
+                    if !is_hidden {
+                        non_hidden_entries.push(entry);
+                    } else {
+                        // pushing hidden entries in first so they display separately
+                        entries.push(entry);
+                    }
 
                     i += 1;
                 }
 
                 // sorting logic
                 let sorting_config = &self.config.sorting;
-                let entries = &mut self.entries.children;
 
-                match sorting_config.sorting_by {
-                    SortingBy::Name => entries.par_sort_by(|a, b| {
-                        let (x, y) = (a.name.as_str(), b.name.as_str());
-                        x.cmp(y)
-                    }),
-                    SortingBy::Size => entries.par_sort_by(|a, b| {
-                        let (x, y) = (&a.filesize, &b.filesize);
-                        x.cmp(y)
-                    }),
-                    SortingBy::Type => entries.par_sort_by(|a, b| {
-                        let (x, y) = (&a.filetype, &b.filetype);
-                        x.cmp(y)
-                    }),
-                    SortingBy::Created => entries.par_sort_by(|a, b| {
-                        let (x, y) = (&a.created, &b.created);
-                        x.cmp(y)
-                    }),
-                    SortingBy::Accessed => entries.par_sort_by(|a, b| {
-                        let (x, y) = (&a.accessed, &b.accessed);
-                        x.cmp(y)
-                    }),
-                }
+                sort(&sorting_config.sorting_by, entries);
+                sort(&sorting_config.sorting_by, &mut non_hidden_entries);
 
                 if sorting_config.reversed {
-                    self.entries.children.reverse();
+                    entries.reverse();
+                    non_hidden_entries.reverse();
                 }
 
+                self.entries.children.extend(non_hidden_entries);
+
+                // highlight from lower directory if provided
                 if let Some(path) = prev_path {
                     self.entries.children.iter().for_each(|entry| {
                         if entry.path == path {
                             self.current_index = Some(self.entries.get_index(&entry.id));
                         }
                     });
-                } else {
-                    self.selected.clear();
                 }
 
                 Task::none()
@@ -600,7 +608,6 @@ impl Application {
                     }
                 }
 
-                // TODO: update position of view following the selection index, bro this is hard
                 Task::done(Message::Select(current_index))
             }
             Message::OpenSelection => {
@@ -757,7 +764,7 @@ impl Application {
                                         path: selected.path.clone(),
                                         content: selected.name.clone(),
                                         error: None,
-                                    })
+                                    }) // TODO: reference path here is possible?
                                 }
                                 *modals_opened = true;
 
@@ -766,6 +773,8 @@ impl Application {
                             ModalMessage::Close => {
                                 modals_state.rename = None;
                                 *modals_opened = false;
+
+                                return Task::done(Message::ClearChoices);
                             }
                             ModalMessage::Content(content) => {
                                 let overlay = modals_state.rename.as_mut().unwrap();
@@ -779,10 +788,14 @@ impl Application {
                             ModalMessage::Open => {
                                 modals_state.delete = true;
                                 *modals_opened = true;
+
+                                self.modals_state.choices.push(Message::DeleteSelection);
                             }
                             ModalMessage::Close => {
                                 modals_state.delete = false;
                                 *modals_opened = false;
+
+                                return Task::done(Message::ClearChoices);
                             }
                             _ => {}
                         }
@@ -791,12 +804,23 @@ impl Application {
                     ModalType::Operation => {
                         match msg {
                             ModalMessage::Open => {
+                                if self.clipboard.entries.is_empty() {
+                                    return Task::none();
+                                }
+
                                 modals_state.operation = true;
                                 *modals_opened = true;
+
+                                self.modals_state.choices.extend(vec![
+                                    Message::PasteClipboard(path::OperationChoice::Merge),
+                                    Message::PasteClipboard(path::OperationChoice::Duplicate),
+                                ]);
                             }
                             ModalMessage::Close => {
                                 modals_state.operation = false;
                                 *modals_opened = false;
+
+                                return Task::done(Message::ClearChoices);
                             }
                             _ => {}
                         }
@@ -820,9 +844,11 @@ impl Application {
                             ModalMessage::Content(content) => {
                                 let overlay = modals_state.create_file.as_mut().unwrap();
                                 overlay.content = content;
+
+                                return Task::none();
                             }
                         }
-                        Task::none()
+                        Task::done(Message::ClearChoices)
                     }
                     ModalType::CreateFolder => {
                         match msg {
@@ -843,10 +869,10 @@ impl Application {
                                 let overlay = modals_state.create_folder.as_mut().unwrap();
                                 overlay.content = content;
 
-                                return Task::batch(vec![operation::focus("create")]);
+                                return Task::none();
                             }
                         }
-                        Task::none()
+                        Task::done(Message::ClearChoices)
                     }
                 }
             }
@@ -903,7 +929,44 @@ impl Application {
                         ModalType::CreateFolder,
                         ModalMessage::Close,
                     )),
+                    Task::done(Message::ClearChoices),
                 ])
+            }
+            Message::ClearChoices => {
+                self.modals_state.choices.clear();
+                self.modals_state.current_choice = 0;
+
+                Task::none()
+            }
+            Message::SelectChoice => {
+                let choice = self
+                    .modals_state
+                    .choices
+                    .get(self.modals_state.current_choice);
+
+                if let Some(decision) = choice
+                    && self.modals_state.opened
+                {
+                    // clone is fine here since its a enum (i think (i hope :pray:))
+                    return Task::done(decision.clone());
+                }
+                Task::none()
+            }
+            Message::UpdateChoiceIndex(right) => {
+                // fuck i dont like the look of this at all
+
+                if self.modals_state.choices.len() == 0 {
+                    return Task::none();
+                }
+
+                let cur_choice = self.modals_state.current_choice as i8;
+                let dir = if right { 1 } else { -1 };
+                let new_index =
+                    (cur_choice + dir).clamp(0, (self.modals_state.choices.len() - 1) as i8);
+
+                self.modals_state.current_choice = new_index as usize;
+
+                Task::none()
             }
         }
     }
@@ -1029,7 +1092,7 @@ impl Application {
                         )
                         .center_y(30)
                         .padding(Padding::from([0, 5]))
-                        .style(|_theme| {
+                        .style(|_| {
                             let mut style = container::Style::default();
                             let index = self.entries.get_index(&e.id);
 
@@ -1167,7 +1230,7 @@ impl Application {
             row![
                 button(text("....")).on_press(Message::Return),
                 container(text(format!("{}", self.program.path.display())))
-                    .style(|_theme| {
+                    .style(|_| {
                         container::Style::default()
                             .background(Background::Color(Color::from_rgba(0.8, 0.8, 0.8, 0.8)))
                     })
@@ -1181,7 +1244,7 @@ impl Application {
         .height(Length::Fill)
         .width(Length::Fill);
 
-        let mut right_col = column![
+        let mut explorer_info = column![
             container(text("explorer info"))
                 .height(30)
                 .center_y(30)
@@ -1203,22 +1266,61 @@ impl Application {
                 }
             ),)
         ]
-        .width(200)
-        .spacing(10);
+        .spacing(10)
+        .height(Length::Fill);
 
         if self.visual_mode {
-            right_col = right_col.push(text("VISUAL MODE").height(20).width(Length::Fill));
+            explorer_info = explorer_info.push(text("VISUAL MODE").height(20).width(Length::Fill));
         }
 
         if self.config.view_hidden {
-            right_col = right_col.push(
+            explorer_info = explorer_info.push(
                 text(format!("showing hidden files",))
                     .height(20)
                     .width(Length::Fill),
             );
         }
 
-        right_col = right_col.push(clipboard);
+        explorer_info = explorer_info.push(clipboard);
+
+        let mut file_info = column![
+            container(text("file metadata"))
+                .height(30)
+                .center_y(30)
+                .center_x(Length::Fill)
+                .padding(5),
+        ]
+        .spacing(10);
+
+        if let Some(index) = self.current_index {
+            let entry = self.entries.getv_index(&index).unwrap();
+
+            file_info = file_info.extend(vec![
+                text(format!("name: {}", entry.name)).into(),
+                text(format!("type: {}", entry.filetype)).into(),
+                text(format!(
+                    "size: {}",
+                    file::convert_bytes_to_string(&entry.filesize)
+                ))
+                .into(),
+                text(format!(
+                    "last accessed: {}",
+                    DateTime::from_timestamp_secs(entry.accessed)
+                        .unwrap()
+                        .to_string()
+                ))
+                .into(),
+                text(format!(
+                    "creation date: {}",
+                    DateTime::from_timestamp_secs(entry.created)
+                        .unwrap()
+                        .to_string()
+                ))
+                .into(),
+            ]);
+        }
+
+        let right_col = column![explorer_info, file_info].width(300).spacing(20);
 
         let content = row![left_col, right_col]
             .width(Length::Fill)
@@ -1261,12 +1363,38 @@ impl Application {
             let row = row![
                 button(text("Replace \nreplace file if name is matched"))
                     .on_press(Message::PasteClipboard(file::OperationChoice::Merge))
-                    .padding(7),
+                    .padding(7)
+                    .style(|theme: &Theme, _| {
+                        let mut style = button::Style::default();
+                        let palette = theme.palette();
+
+                        if self.modals_state.current_choice == 0 {
+                            style.border = Border {
+                                color: palette.warning,
+                                width: 2.0,
+                                radius: Radius::new(8.0),
+                            }
+                        }
+                        style
+                    }),
                 button(text(
                     "Duplicate \nadd (n) to the end of file name if name is matched"
                 ))
                 .on_press(Message::PasteClipboard(file::OperationChoice::Duplicate))
                 .padding(7)
+                .style(|theme: &Theme, _| {
+                    let mut style = button::Style::default();
+                    let palette = theme.palette();
+
+                    if self.modals_state.current_choice == 1 {
+                        style.border = Border {
+                            color: palette.warning,
+                            width: 2.0,
+                            radius: Radius::new(8.0),
+                        }
+                    }
+                    style
+                }),
             ]
             .spacing(10);
 
@@ -1286,6 +1414,19 @@ impl Application {
                         text("you gonna delete the selections?"),
                         button(text("yeah :3"))
                             .padding(7)
+                            .style(|theme: &Theme, _| {
+                                let mut style = button::Style::default();
+                                let palette = theme.palette();
+
+                                if self.modals_state.current_choice == 0 {
+                                    style.border = Border {
+                                        color: palette.warning,
+                                        width: 2.0,
+                                        radius: Radius::new(8.0),
+                                    }
+                                }
+                                style
+                            })
                             .on_press(Message::DeleteSelection)
                     ]
                     .spacing(10),
@@ -1371,11 +1512,39 @@ impl Application {
                     ..
                 }) => match (physical_key, modifiers) {
                     (key::Physical::Code(Code::Escape), _) => Some(Message::CloseModals),
+                    (key::Physical::Code(Code::Enter), _) => Some(Message::SelectChoice),
+
                     _ => Some(Message::KeyPressed(physical_key, modifiers)),
+                    // weird stuff going on with my lsp, why is it lagging so much here?
                 },
                 _ => None,
             }
         })
+    }
+}
+
+fn sort(sorting_by: &SortingBy, entries: &mut Vec<Entry>) {
+    match sorting_by {
+        SortingBy::Name => entries.par_sort_by(|a, b| {
+            let (x, y) = (a.name.as_str(), b.name.as_str());
+            x.cmp(y)
+        }),
+        SortingBy::Size => entries.par_sort_by(|a, b| {
+            let (x, y) = (&a.filesize, &b.filesize);
+            x.cmp(y)
+        }),
+        SortingBy::Type => entries.par_sort_by(|a, b| {
+            let (x, y) = (&a.filetype, &b.filetype);
+            x.cmp(y)
+        }),
+        SortingBy::Created => entries.par_sort_by(|a, b| {
+            let (x, y) = (&a.created, &b.created);
+            x.cmp(y)
+        }),
+        SortingBy::Accessed => entries.par_sort_by(|a, b| {
+            let (x, y) = (&a.accessed, &b.accessed);
+            x.cmp(y)
+        }),
     }
 }
 

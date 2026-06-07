@@ -102,12 +102,14 @@ fn operation_recursion<'life>(
 
     match operation {
         OperationChoice::Duplicate => {
+            let result = get_fileextension(path);
+            let ext = if result == "" {
+                String::new()
+            } else {
+                format!(".{}", result)
+            };
             // since both file/folder has the same outcome for choosing duplicate
-            let new_path = increment_suffix(
-                get_filename(path).as_str(),
-                format!(".{}", get_fileextension(path)).as_str(),
-                &final_path,
-            );
+            let new_path = increment_suffix(get_filename(path).as_str(), ext.as_str(), &final_path);
             move_file(path, &new_path, is_cut);
         }
         OperationChoice::Merge => {
@@ -117,7 +119,7 @@ fn operation_recursion<'life>(
             }
 
             if !final_path.is_file() {
-                replace_file(path, &final_path.join(&file_name), is_cut);
+                replace_file(path, joined, is_cut);
             } else {
                 prevs.push(file_name);
                 operation_recursion(dest, prevs, operation, path, is_cut);
@@ -138,9 +140,14 @@ pub fn move_dir(old_files: &HashSet<PathBuf>, dest: &Path, operation: &Operation
     // if duplicate, increment suffix normally, move to the next file
     // if merge, check if folder or file, if folder, get into that folder and repeat, if file, replace the file in destination
 
-    old_files
-        .par_iter()
-        .for_each(|p| operation_recursion(&dest, &mut vec![], operation, &p, true));
+    old_files.par_iter().for_each(|path| {
+        let mut clean_path = path.clone();
+        clean_path.pop();
+
+        if clean_path != dest {
+            operation_recursion(&dest, &mut vec![], operation, &path, true);
+        }
+    })
 }
 
 pub fn copy_dir(old_files: &HashSet<PathBuf>, dest: &Path, operation: &OperationChoice) {
@@ -257,6 +264,32 @@ pub fn get_filecreated(path: &Path) -> i64 {
         Err(_e) => 0,
     }
 }
+
+/*pub fn get_filesize(path: &Path) -> u64 {
+    if !path.exists() {
+        return 0_u64;
+    }
+
+    let command = Command::new("du").arg("-s").arg(path).output();
+
+    if let Err(error) = &command {
+        println!(
+            "problem encountered when trying to read {}: {}",
+            path.display(),
+            error
+        );
+    }
+
+    let output = command.unwrap().stdout;
+    let result = from_utf8(&output).unwrap();
+    let (a, _) = result.split_once(char::is_whitespace).unwrap();
+
+    let size: u64 = a.parse::<u64>().unwrap() * 1024;
+    // since the size from du is in KiB
+    //
+    size
+}*/
+// THIS IS REALLY EXPENSIVE AND SLOW WHEN THERE ARE TOO MANY FILES
 
 pub fn get_filesize(path: &Path) -> u64 {
     if !path.exists() {
