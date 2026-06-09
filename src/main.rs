@@ -31,6 +31,7 @@ use iced::widget::{
 use config::{Displaying, SortingBy};
 
 mod config;
+mod file_types;
 mod path;
 use path as file;
 

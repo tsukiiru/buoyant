@@ -1,4 +1,3 @@
-use file_type::{self, FileType};
 use rayon::iter::{IntoParallelRefIterator, ParallelIterator};
 use std::{
     collections::HashSet,
@@ -9,6 +8,7 @@ use std::{
     time::SystemTime,
 };
 
+use crate::file_types;
 pub const NONO_CHARACTERS: [&str; 3] = ["\0", "\"", "/"];
 
 #[derive(Clone, Debug)]
@@ -226,11 +226,11 @@ pub fn get_filetype(path: &Path) -> String {
     }
 
     let ext = get_fileextension(path);
-    let opt_type = FileType::from_extension(ext).first();
+    let opt_type = file_types::convert_to_filetype(ext);
     let str_type: &str;
 
-    if let Some(thing) = opt_type {
-        str_type = thing.name();
+    if let Some(thing) = &opt_type {
+        str_type = thing;
     } else {
         str_type = "unknown";
     }
