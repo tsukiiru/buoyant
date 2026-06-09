@@ -145,7 +145,7 @@ pub fn move_dir(old_files: &HashSet<PathBuf>, dest: &Path, operation: &Operation
         clean_path.pop();
 
         if clean_path != dest {
-            operation_recursion(&dest, &mut vec![], operation, &path, true);
+            operation_recursion(&dest, &mut Vec::with_capacity(5), operation, &path, true);
         }
     })
 }
@@ -157,7 +157,7 @@ pub fn copy_dir(old_files: &HashSet<PathBuf>, dest: &Path, operation: &Operation
 
     old_files
         .par_iter()
-        .for_each(|p| operation_recursion(dest, &mut vec![], operation, &p, false));
+        .for_each(|p| operation_recursion(dest, &mut Vec::with_capacity(5), operation, &p, false));
 }
 
 fn move_file(old_path: &Path, new_path: &Path, is_cut: bool) {
@@ -220,19 +220,26 @@ pub fn get_filename(path: &Path) -> String {
     name
 }
 
-pub fn get_filetype(path: &Path) -> &'static str {
+pub fn get_filetype(path: &Path) -> String {
     if path.is_dir() {
-        return "Folder";
+        return String::from("Folder");
     }
 
     let ext = get_fileextension(path);
     let opt_type = FileType::from_extension(ext).first();
+    let str_type: &str;
 
     if let Some(thing) = opt_type {
-        thing.name()
+        str_type = thing.name();
     } else {
-        "unknown"
+        str_type = "unknown";
     }
+
+    if path.is_symlink() {
+        return "Symlink".to_owned() + " -> " + str_type;
+    }
+
+    str_type.to_owned()
 }
 
 const UNIX_EPOCH: SystemTime = SystemTime::UNIX_EPOCH;
@@ -290,6 +297,7 @@ pub fn get_filecreated(path: &Path) -> i64 {
     size
 }*/
 // THIS IS REALLY EXPENSIVE AND SLOW WHEN THERE ARE TOO MANY FILES
+// Though similar approaches should be considered for more accurate file size.
 
 pub fn get_filesize(path: &Path) -> u64 {
     if !path.exists() {

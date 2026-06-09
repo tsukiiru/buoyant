@@ -6,6 +6,7 @@ use std::{
 };
 
 use chrono::DateTime;
+use rayon::prelude::*;
 
 use iced::{
     Background, Border, Color, Element, Event, Length, Padding, Subscription, Task, Theme,
@@ -18,24 +19,20 @@ use iced::{
     },
     theme,
     widget::{
-        button, column, container, float, mouse_area, opaque,
-        operation::{self, AbsoluteOffset},
-        row,
-        scrollable::Viewport,
-        selector::Target,
+        button, column, container, float, mouse_area, opaque, operation, row, scrollable, selector,
         stack, text, text_input,
     },
 };
 
-use iced::widget::text::Wrapping;
-use iced::widget::{scrollable, selector};
+use iced::widget::{
+    operation::AbsoluteOffset, scrollable::Viewport, selector::Target, text::Wrapping,
+};
 
 use config::{Displaying, SortingBy};
 
 mod config;
 mod path;
 use path as file;
-use rayon::slice::ParallelSliceMut;
 
 struct Program {
     path: PathBuf,
@@ -82,7 +79,6 @@ enum Direction {
 
 #[derive(Clone, Debug)]
 enum Message {
-    None,
     Open(PathBuf),
     // referencing path here is also possible?
     Return,
@@ -126,7 +122,7 @@ struct Entry {
 
     accessed: i64,
     created: i64,
-    filetype: &'static str,
+    filetype: String,
     filesize: u64,
 
     hidden: bool,
@@ -289,7 +285,6 @@ impl Application {
 
     fn update(&mut self, message: Message) -> Task<Message> {
         match message {
-            Message::None => Task::none(),
             Message::Open(path) => {
                 self.program.open(&path);
 
@@ -560,7 +555,9 @@ impl Application {
                     .then(|output| Task::done(Message::UpdateExplorerScroll(output)))
             }
             Message::ResetSelection => {
-                self.selected.clear();
+                if !self.modifiers_state.ctrl || !self.visual_mode {
+                    self.selected.clear();
+                }
                 Task::none()
             }
             Message::DeleteSelection => {
@@ -1023,7 +1020,7 @@ impl Application {
                                 Displaying::FileType => {
                                     row = row.push(
                                         container(
-                                            text(e.filetype)
+                                            text(&e.filetype)
                                                 .align_x(alignment::Horizontal::Left)
                                                 .wrapping(Wrapping::None)
                                                 .color(if e.hidden {
@@ -1195,13 +1192,7 @@ impl Application {
         let explorer_select = container(
             column![
                 row,
-                mouse_area(explorer_scroll).on_press(
-                    if !self.modifiers_state.ctrl || !self.visual_mode {
-                        Message::ResetSelection
-                    } else {
-                        Message::None
-                    },
-                )
+                mouse_area(explorer_scroll).on_press(Message::ResetSelection)
             ]
             .spacing(10),
         )
@@ -1565,6 +1556,6 @@ fn main() -> iced::Result {
     )
     .subscription(Application::subscription)
     .title("buoyant")
-    .theme(Theme::KanagawaLotus)
+    .theme(Theme::KanagawaDragon)
     .run()
 }
