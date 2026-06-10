@@ -17,7 +17,7 @@ pub enum OperationChoice {
     Duplicate,
 }
 
-pub fn delete(path: &PathBuf) {
+pub fn delete(path: &Path) {
     if !path.exists() {
         return;
     }
@@ -82,11 +82,11 @@ pub fn create(current_path: &Path, new_path: &Path, last_is_file: bool) -> Optio
     None
 }
 
-fn operation_recursion<'life>(
+fn operation_recursion<'a>(
     dest: &Path,
-    prevs: &mut Vec<&'life str>,
+    prevs: &mut Vec<&'a str>,
     operation: &OperationChoice,
-    path: &'life Path,
+    path: &'a Path,
     is_cut: bool,
 ) {
     let file_name = path.file_name().unwrap().to_str().unwrap();
@@ -220,6 +220,16 @@ pub fn get_filename(path: &Path) -> String {
     name
 }
 
+fn is_textfile(path: &Path) -> bool {
+    let try_read = fs::read(path);
+
+    if let Ok(contents) = try_read {
+        return contents.is_ascii();
+    } else {
+        return false;
+    }
+}
+
 pub fn get_filetype(path: &Path) -> String {
     if path.is_dir() {
         return String::from("Folder");
@@ -231,12 +241,20 @@ pub fn get_filetype(path: &Path) -> String {
 
     if let Some(thing) = &opt_type {
         str_type = thing;
+    } else if is_textfile(path) {
+        str_type = "Text File";
     } else {
-        str_type = "unknown";
+        str_type = "Unknown";
     }
 
     if path.is_symlink() {
-        return "Symlink".to_owned() + " -> " + str_type;
+        let text = "Symlink".to_owned();
+
+        if str_type == "Unknown" {
+            return text + " (broken)";
+        } else {
+            return text + " -> " + str_type;
+        };
     }
 
     str_type.to_owned()

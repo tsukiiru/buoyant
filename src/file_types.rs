@@ -13,6 +13,11 @@ pub fn convert_to_filetype(extension: &str) -> Option<String> {
         // text
         "rs" => "Rust Source File",
         "py" => "Python Source File",
+        "txt" => "Generic Text File",
+        // archive
+        "7z" => "7Zip Archive",
+        "zip" => "Zip Archive",
+        "rar" => "Rar Archive",
         _ => "",
     };
 

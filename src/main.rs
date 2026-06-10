@@ -80,8 +80,7 @@ enum Direction {
 
 #[derive(Clone, Debug)]
 enum Message {
-    Open(PathBuf),
-    // referencing path here is also possible?
+    Open(usize),
     Return,
 
     KeyPressed(Physical, Modifiers),
@@ -133,7 +132,7 @@ struct Entry {
 struct RenameModal {
     path: PathBuf,
     content: String,
-    error: Option<&'static str>,
+    error: &'static str,
 }
 
 struct CreateModal {
@@ -195,7 +194,7 @@ impl Entries {
         self.children.get(*index)
     }
 
-    fn get_mut(&mut self, id: &usize) -> Option<&mut Entry> {
+    fn getv_id(&mut self, id: &usize) -> Option<&mut Entry> {
         for entry in &mut self.children {
             if entry.id == *id {
                 return Some(entry);
@@ -286,7 +285,9 @@ impl Application {
 
     fn update(&mut self, message: Message) -> Task<Message> {
         match message {
-            Message::Open(path) => {
+            Message::Open(id) => {
+                let path = &*self.entries.getv_id(&id).unwrap().path;
+
                 self.program.open(&path);
 
                 if path.is_file() {
@@ -316,13 +317,13 @@ impl Application {
                 if physical_key == keybinds.navigate_backward.key
                     && modifiers == keybinds.navigate_backward.modifiers
                 {
-                    // for navigating up the directory tree AND going changing modal selection index
-                    // - 1
+                    // for navigating up the directory tree AND changing modal selection index
                     return Task::done(Message::UpdateChoiceIndex(false))
                         .chain(Task::done(Message::Return));
                 } else if physical_key == keybinds.navigate_forward.key
                     && modifiers == keybinds.navigate_forward.modifiers
                 {
+                    // for navigating down the directory tree AND changing modal selection index
                     return Task::done(Message::UpdateChoiceIndex(true))
                         .chain(Task::done(Message::OpenSelection));
                 } else if physical_key == keybinds.navigate_down.key
@@ -404,7 +405,6 @@ impl Application {
 
                     let entry = Entry {
                         name: path.file_name().unwrap().to_str().unwrap().to_string(),
-                        path: path.clone(),
 
                         created: file::get_filecreated(&path),
                         accessed: file::get_fileaccessed(&path),
@@ -416,6 +416,8 @@ impl Application {
 
                         hovered: false,
                         hidden: is_hidden,
+
+                        path: path,
                     };
 
                     if !is_hidden {
@@ -453,10 +455,10 @@ impl Application {
                 Task::none()
             }
             Message::HoverEntry(id, state) => {
-                let entry = self.entries.get_mut(&id);
+                let try_get_entry = self.entries.getv_id(&id);
 
-                if let Some(e) = entry {
-                    e.hovered = state;
+                if let Some(entry) = try_get_entry {
+                    entry.hovered = state;
                 }
 
                 Task::none()
@@ -482,10 +484,6 @@ impl Application {
             }
 
             Message::UpdateExplorerScroll(target) => {
-                // consutrction
-                let widget = target.unwrap();
-                let height = widget.visible_bounds().unwrap().height;
-                //
                 let try_current_index = self.current_index;
 
                 if try_current_index.is_none() {
@@ -495,10 +493,8 @@ impl Application {
                 let current_index: f32 = try_current_index.unwrap() as f32 + 1.0;
                 let offset: f32 = 40.0 * (current_index - 1.0);
 
+                let height = target.unwrap().visible_bounds().unwrap().height;
                 let widget_range = (self.explorer_offset, self.explorer_offset + height);
-
-                //println!("range is {:#?}", widget_range);
-                //               println!("while the offset is {}", offset);
 
                 if offset <= widget_range.0 {
                     return operation::scroll_to(
@@ -521,7 +517,6 @@ impl Application {
             }
             Message::UpdateExplorerOffset(viewport) => {
                 self.explorer_offset = viewport.absolute_offset().y;
-                //          println!("current offset is {}", self.explorer_offset);
                 Task::none()
             }
 
@@ -567,11 +562,6 @@ impl Application {
 
                     if let Some(entry) = try_getentry {
                         file::delete(&entry.path);
-                    } else {
-                        println!(
-                            "encountered some error while trying to get entry from index {}",
-                            index
-                        );
                     }
                 }
 
@@ -588,8 +578,8 @@ impl Application {
 
                 if index_opt.is_none() {
                     return Task::done(Message::Select(0));
-                } else if let Some(thing) = index_opt {
-                    current_index = *thing;
+                } else if let Some(index) = index_opt {
+                    current_index = *index;
                 }
                 // shitty logic that forces the index to be 0 if nothing is selected yet.
 
@@ -623,7 +613,7 @@ impl Application {
                 }
 
                 if let Some(entry) = self.entries.getv_index(&temp_index) {
-                    Task::done(Message::Open(entry.path.clone()))
+                    Task::done(Message::Open(entry.id))
                 } else {
                     Task::none()
                 }
@@ -683,7 +673,7 @@ impl Application {
                 // checking if the new name is valid?
                 for char in file::NONO_CHARACTERS {
                     if name.contains(char) {
-                        overlay.error = Some("name cannot contain invalid characters!");
+                        overlay.error = "name cannot contain invalid characters!";
                         return Task::none();
                     }
                 }
@@ -693,7 +683,7 @@ impl Application {
 
                 // check if already exists in destination
                 if test_path.exists() {
-                    overlay.error = Some("ERROR: file with the same name already exists");
+                    overlay.error = "ERROR: file with the same name already exists";
                     return Task::none();
                 }
 
@@ -706,11 +696,11 @@ impl Application {
                 if mode {
                     let overlay = self.modals_state.create_file.as_mut().unwrap();
 
-                    let err =
+                    let try_create =
                         file::create(&self.program.path, Path::new(overlay.content.trim()), true);
 
-                    if let Some(e) = err {
-                        overlay.error = e;
+                    if let Some(error) = try_create {
+                        overlay.error = error;
                     } else {
                         return Task::batch(vec![
                             Task::done(Message::UpdateModal(
@@ -723,10 +713,10 @@ impl Application {
                 } else {
                     let overlay = self.modals_state.create_folder.as_mut().unwrap();
 
-                    let err =
+                    let try_create =
                         file::create(&self.program.path, Path::new(overlay.content.trim()), false);
-                    if let Some(e) = err {
-                        overlay.error = &e;
+                    if let Some(error) = try_create {
+                        overlay.error = &error;
                     } else {
                         return Task::batch(vec![
                             Task::done(Message::UpdateEntries(None)),
@@ -761,8 +751,8 @@ impl Application {
                                     modals_state.rename = Some(RenameModal {
                                         path: selected.path.clone(),
                                         content: selected.name.clone(),
-                                        error: None,
-                                    }) // TODO: reference path here is possible?
+                                        error: "",
+                                    })
                                 }
                                 *modals_opened = true;
 
@@ -1083,7 +1073,7 @@ impl Application {
 
                         container(
                             mouse_area(row)
-                                .on_double_click(Message::Open(e.path.clone()))
+                                .on_double_click(Message::Open(e.id))
                                 .on_press(Message::Select(index))
                                 .on_enter(Message::HoverEntry(e.id, true))
                                 .on_exit(Message::HoverEntry(e.id, false)),
@@ -1322,30 +1312,27 @@ impl Application {
 
         let mut stack = stack![content].width(Length::Fill).height(Length::Fill);
 
-        if let Some(thing) = &self.modals_state.rename {
-            let input = text_input("input the new name here :3", &thing.content)
+        if let Some(modal) = &self.modals_state.rename {
+            let input = text_input("input the new name here :3", &modal.content)
                 .on_input(|inp| Message::UpdateModal(ModalType::Rename, ModalMessage::Content(inp)))
                 .on_submit(Message::Rename)
                 .padding(7)
                 .id("rename");
 
-            let mut col = column![
-                text(format!("you are renaming, {}", thing.path.display())),
+            let col = column![
+                text("press Esc to exit, Enter to confirm :D")
+                    .color(palette.primary.scale_alpha(0.4)),
+                text(format!("you are renaming, {}", modal.path.display())),
                 input,
+                text(modal.error).color(palette.warning).size(13)
             ]
-            .width(497)
-            .spacing(7);
-
-            if let Some(th) = thing.error {
-                col = col.push(
-                    text(th)
-                        .color(Color::from_rgba(1.0, 105.0 / 255.0, 97.0 / 255.0, 1.0))
-                        .size(13),
-                );
-            }
+            .width(500)
+            .spacing(10);
 
             let overlay = opaque(float(
-                container(col).style(move |_| style()).center(Length::Fill),
+                container(col)
+                    .style(move |_| palette.background.scale_alpha(0.6).into())
+                    .center(Length::Fill),
             ));
 
             stack = stack.push(overlay);
@@ -1391,9 +1378,18 @@ impl Application {
             .spacing(10);
 
             let overlay = opaque(float(
-                container(column![text("choose an operation type"), row].spacing(10))
-                    .style(move |_| style())
-                    .center(Length::Fill),
+                container(
+                    column![
+                        text("press Esc to exit")
+                            .size(13)
+                            .color(palette.primary.scale_alpha(0.4)),
+                        text("choose an operation type"),
+                        row
+                    ]
+                    .spacing(10),
+                )
+                .style(move |_| palette.background.scale_alpha(0.6).into())
+                .center(Length::Fill),
             ));
 
             stack = stack.push(overlay);
@@ -1403,6 +1399,9 @@ impl Application {
             let overlay = opaque(float(
                 container(
                     column![
+                        text("press Esc to exit")
+                            .size(13)
+                            .color(palette.primary.scale_alpha(0.4)),
                         text("you gonna delete the selections?"),
                         button(text("yeah :3"))
                             .padding(7)
@@ -1423,15 +1422,15 @@ impl Application {
                     ]
                     .spacing(10),
                 )
-                .style(move |_| style())
+                .style(move |_| palette.background.scale_alpha(0.6).into())
                 .center(Length::Fill),
             ));
 
             stack = stack.push(overlay);
         }
 
-        if let Some(thing) = &self.modals_state.create_file {
-            let input = text_input("input the file path here! :3", &thing.content)
+        if let Some(modal) = &self.modals_state.create_file {
+            let input = text_input("input the file path here! :3", &modal.content)
                 .on_input(|inp| {
                     Message::UpdateModal(ModalType::CreateFile, ModalMessage::Content(inp))
                 })
@@ -1445,20 +1444,25 @@ impl Application {
                     self.program.path.display()
                 )),
                 input,
-                text(thing.error).color(Color::from_rgba(1.0, 105.0 / 255.0, 97.0 / 255.0, 1.0))
+                text("press Esc to exit, Enter to confirm :D")
+                    .size(13)
+                    .color(palette.primary.scale_alpha(0.4)),
+                text(modal.error).color(palette.warning)
             ]
             .width(497)
             .spacing(7);
 
             let overlay = opaque(float(
-                container(col).style(move |_| style()).center(Length::Fill),
+                container(col)
+                    .style(move |_| palette.background.scale_alpha(0.6).into())
+                    .center(Length::Fill),
             ));
 
             stack = stack.push(overlay);
         }
 
-        if let Some(thing) = &self.modals_state.create_folder {
-            let input = text_input("input the folder path here! :3", &thing.content)
+        if let Some(modal) = &self.modals_state.create_folder {
+            let input = text_input("input the folder path here! :3", &modal.content)
                 .on_input(|inp| {
                     Message::UpdateModal(ModalType::CreateFolder, ModalMessage::Content(inp))
                 })
@@ -1472,13 +1476,18 @@ impl Application {
                     self.program.path.display()
                 )),
                 input,
-                text(thing.error).color(Color::from_rgba(1.0, 105.0 / 255.0, 97.0 / 255.0, 1.0))
+                text("press Esc to exit, Enter to confirm :D")
+                    .size(13)
+                    .color(palette.primary.scale_alpha(0.4)),
+                text(modal.error).color(palette.warning)
             ]
             .width(497)
             .spacing(7);
 
             let overlay = opaque(float(
-                container(col).style(move |_| style()).center(Length::Fill),
+                container(col)
+                    .style(move |_| palette.background.scale_alpha(0.6).into())
+                    .center(Length::Fill),
             ));
 
             stack = stack.push(overlay);
@@ -1540,13 +1549,6 @@ fn sort(sorting_by: &SortingBy, entries: &mut Vec<Entry>) {
     }
 }
 
-fn style() -> container::Style {
-    container::Style {
-        background: Some(Background::Color(Color::from_rgba(1.0, 1.0, 1.0, 0.95))),
-        ..Default::default()
-    }
-}
-
 fn main() -> iced::Result {
     let input = args().nth(1).unwrap_or_default();
 
@@ -1557,6 +1559,6 @@ fn main() -> iced::Result {
     )
     .subscription(Application::subscription)
     .title("buoyant")
-    .theme(Theme::KanagawaDragon)
+    .theme(Theme::KanagawaLotus)
     .run()
 }
