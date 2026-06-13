@@ -187,17 +187,19 @@ fn replace_file(old_path: &Path, new_path: &Path, is_cut: bool) {
 }
 
 // helper functions
-pub fn read_dir(path: &Path) -> Vec<PathBuf> {
+pub fn read_dir(path: &Path) -> Result<Vec<PathBuf>, String> {
     let read_results = fs::read_dir(path);
 
-    if let Err(error) = &read_results {
-        eprintln!("{}", error);
+    if read_results.is_err() {
+        return Err(String::from(
+            "cannot read directory without root permissions",
+        ));
     }
 
-    read_results
+    Ok(read_results
         .unwrap()
         .map(|r| r.map(|e| e.path()).unwrap())
-        .collect::<Vec<_>>()
+        .collect::<Vec<_>>())
 }
 
 // get file name but stripped the extension

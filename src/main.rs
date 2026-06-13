@@ -225,6 +225,7 @@ struct Application {
     selected: HashSet<usize>,
 
     explorer_offset: f32,
+    explorer_error: Option<String>,
 
     modifiers_state: ModifiersState,
     clipboard: Clipboard,
@@ -239,7 +240,13 @@ impl Application {
         let path: PathBuf;
 
         if !path_conversion.exists() {
-            path = home_dir().unwrap();
+            let home_directory = home_dir();
+
+            if let Some(dir) = home_directory {
+                path = dir;
+            } else {
+                path = PathBuf::from("/");
+            }
         } else {
             path = path_conversion;
         }
@@ -255,6 +262,7 @@ impl Application {
                 selected: HashSet::new(),
 
                 explorer_offset: 0.0,
+                explorer_error: None,
 
                 modifiers_state: ModifiersState {
                     ctrl: false,
@@ -390,7 +398,18 @@ impl Application {
                 self.current_index = None;
                 self.selected.clear();
 
-                let cur_paths = file::read_dir(&self.program.path);
+                let try_get_paths = file::read_dir(&self.program.path);
+
+                if let Err(error) = try_get_paths {
+                    self.explorer_error = Some(error);
+
+                    return Task::none();
+                }
+
+                self.explorer_error = None;
+
+                let cur_paths = try_get_paths.unwrap();
+
                 let mut i: usize = 0;
 
                 let entries = &mut self.entries.children;
@@ -960,14 +979,15 @@ impl Application {
     }
 
     fn view(&self) -> Element<'_, Message> {
-        let mut buttons = column![];
         let entries = &self.entries.children;
 
         let palette = theme::Theme::KanagawaLotus.palette();
         let text_color = palette.text;
         let darken_text_color = text_color.scale_alpha(0.69);
 
-        buttons = buttons
+        let mut explorer_column = column![];
+
+        explorer_column = explorer_column
             .extend(
                 entries
                     .iter()
@@ -1112,18 +1132,18 @@ impl Application {
             .spacing(10)
             .width(Length::Fill);
 
-        let explorer_scroll = scrollable(buttons)
+        let explorer_scroll = scrollable(explorer_column)
             .id("scrollable")
             .width(Length::Fill)
             .height(Length::Fill)
             .on_scroll(Message::UpdateExplorerOffset);
 
-        let mut row = row![].spacing(10).padding(5);
+        let mut column_names = row![].spacing(10).padding(5);
 
         for child in &self.config.view {
             match child {
                 Displaying::Name => {
-                    row = row.push(
+                    column_names = column_names.push(
                         container(
                             text("file name")
                                 .wrapping(Wrapping::None)
@@ -1134,7 +1154,7 @@ impl Application {
                     );
                 }
                 Displaying::FileSize => {
-                    row = row.push(
+                    column_names = column_names.push(
                         container(
                             text("size")
                                 .wrapping(Wrapping::None)
@@ -1145,7 +1165,7 @@ impl Application {
                     );
                 }
                 Displaying::FileType => {
-                    row = row.push(
+                    column_names = column_names.push(
                         container(
                             text("type")
                                 .wrapping(Wrapping::None)
@@ -1156,7 +1176,7 @@ impl Application {
                     );
                 }
                 Displaying::Created => {
-                    row = row.push(
+                    column_names = column_names.push(
                         container(
                             text("creation date")
                                 .wrapping(Wrapping::None)
@@ -1167,7 +1187,7 @@ impl Application {
                     );
                 }
                 Displaying::LastAccessed => {
-                    row = row.push(
+                    column_names = column_names.push(
                         container(
                             text("accessed date")
                                 .wrapping(Wrapping::None)
@@ -1180,16 +1200,24 @@ impl Application {
             }
         }
 
-        let explorer_select = container(
-            column![
-                row,
-                mouse_area(explorer_scroll).on_press(Message::ResetSelection)
-            ]
-            .spacing(10),
-        )
-        .width(Length::Fill)
-        .height(Length::Fill)
-        .padding(20);
+        let mut explorer_select_col = column![column_names,].spacing(10);
+
+        if let Some(error) = &self.explorer_error {
+            explorer_select_col = explorer_select_col.push(
+                text(error)
+                    .center()
+                    .width(Length::Fill)
+                    .color(palette.danger.scale_alpha(0.5)),
+            );
+        }
+
+        explorer_select_col =
+            explorer_select_col.push(mouse_area(explorer_scroll).on_press(Message::ResetSelection));
+
+        let explorer_select = container(explorer_select_col)
+            .width(Length::Fill)
+            .height(Length::Fill)
+            .padding(20);
 
         let clipboard_mode = match self.clipboard.mode {
             ClipboardMode::Copy => "Copy",
@@ -1212,9 +1240,8 @@ impl Application {
             row![
                 button(text("....")).on_press(Message::Return),
                 container(text(format!("{}", self.program.path.display())))
-                    .style(|_| {
-                        container::Style::default()
-                            .background(Background::Color(Color::from_rgba(0.8, 0.8, 0.8, 0.8)))
+                    .style(move |_| {
+                        container::Style::default().background(palette.background.scale_alpha(0.4))
                     })
                     .center_y(30)
                     .center_x(Length::Fill)
