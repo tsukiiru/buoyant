@@ -1,5 +1,4 @@
 // "prepare for matching hell" - tsuki May 29th 2026
-//
 use iced::keyboard::{
     Modifiers,
     key::{Code, Physical},
@@ -12,7 +11,7 @@ pub struct Config {
     pub view: Vec<Displaying>,
     pub sorting: Sorting,
     pub view_hidden: bool,
-    pub format: Formatting,
+    pub misc: Misc,
 }
 
 pub struct KeybindsConfig {
@@ -23,6 +22,7 @@ pub struct KeybindsConfig {
     pub copy_to_clipboard: KeybindEntry,
     pub cut_to_clipboard: KeybindEntry,
     pub paste_from_clipboard: KeybindEntry,
+    pub clear_clipboard: KeybindEntry,
     pub delete_selections: KeybindEntry,
     pub rename_file: KeybindEntry,
     pub toggle_hidden_view: KeybindEntry,
@@ -31,9 +31,8 @@ pub struct KeybindsConfig {
     pub toggle_visual_mode: KeybindEntry,
 }
 
-#[derive(Deserialize)]
-pub struct Formatting {
-    pub metadata_date: String,
+pub struct Misc {
+    pub format_date: String,
 }
 
 pub struct Sorting {
@@ -66,13 +65,15 @@ pub struct KeybindEntry {
 }
 
 pub fn get_keybinds() -> Config {
-    // default config
+    let mut ctrl_shift_mod = Modifiers::CTRL;
+    ctrl_shift_mod.insert(Modifiers::SHIFT);
 
+    // default config
     let mut config = Config {
         view: Vec::with_capacity(5),
         sorting: Sorting::default(),
-        format: Formatting {
-            metadata_date: String::from("%d/%m/%Y, %I:%M:%S %p"),
+        misc: Misc {
+            format_date: String::from("%d/%m/%Y, %I:%M:%S %p"),
         },
         view_hidden: false,
         keybinds: KeybindsConfig {
@@ -103,6 +104,10 @@ pub fn get_keybinds() -> Config {
             paste_from_clipboard: KeybindEntry {
                 key: Physical::Code(Code::KeyV),
                 modifiers: Modifiers::CTRL,
+            },
+            clear_clipboard: KeybindEntry {
+                key: Physical::Code(Code::KeyV),
+                modifiers: ctrl_shift_mod,
             },
             delete_selections: KeybindEntry {
                 key: Physical::Code(Code::Delete),
@@ -154,7 +159,12 @@ struct RawConfig {
     keybinds: Option<RawKeybindsConfig>,
     view: Option<RawViewConfig>,
     sorting: Option<RawSortingConfig>,
-    format: Option<Formatting>,
+    misc: Option<RawMiscConfig>,
+}
+
+#[derive(Deserialize)]
+struct RawMiscConfig {
+    format_time: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -172,6 +182,7 @@ struct RawKeybindsConfig {
     copy_to_clipboard: Option<String>,
     cut_to_clipboard: Option<String>,
     paste_from_clipboard: Option<String>,
+    clear_clipboard: Option<String>,
     delete_selections: Option<String>,
     rename_file: Option<String>,
     toggle_hidden_view: Option<String>,
@@ -206,8 +217,14 @@ fn process_rawconfig(raw_config: RawConfig, config: &mut Config) {
         process_sorting(table, &mut config.sorting);
     }
 
-    if let Some(table) = raw_config.format {
-        config.format = table;
+    if let Some(table) = raw_config.misc {
+        process_misc(table, &mut config.misc);
+    }
+}
+
+fn process_misc(raw_config: RawMiscConfig, config: &mut Misc) {
+    if let Some(c) = raw_config.format_time {
+        config.format_date = c;
     }
 }
 
@@ -371,6 +388,7 @@ fn match_key(raw_key: String) -> Option<KeybindEntry> {
         "f35" => Physical::Code(Code::F35),
         _ => Physical::Code(Code::F35),
     };
+    // yes i typed all of these by hand
 
     let raw_modifiers = splitted;
 
@@ -436,6 +454,12 @@ fn process_keybinds(raw_keybinds: RawKeybindsConfig, keybinds: &mut KeybindsConf
         && let Some(fresh_key) = match_key(key_str)
     {
         keybinds.paste_from_clipboard = fresh_key;
+    }
+
+    if let Some(key_str) = raw_keybinds.clear_clipboard
+        && let Some(fresh_key) = match_key(key_str)
+    {
+        keybinds.clear_clipboard = fresh_key;
     }
 
     if let Some(key_str) = raw_keybinds.delete_selections

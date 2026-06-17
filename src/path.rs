@@ -96,6 +96,7 @@ fn operation_recursion<'a>(
     let joined = &final_path.join(&file_name);
     // check if not exists in the destination
     if !joined.exists() {
+        //println!("already existed");
         move_file(path, joined, is_cut);
         return;
     }
@@ -110,10 +111,11 @@ fn operation_recursion<'a>(
             };
             // since both file/folder has the same outcome for choosing duplicate
             let new_path = increment_suffix(get_filename(path).as_str(), ext.as_str(), &final_path);
+            //println!("{}, {}", new_path.display(), is_cut);
             move_file(path, &new_path, is_cut);
         }
         OperationChoice::Merge => {
-            if final_path == *dest {
+            if path == joined {
                 return;
                 // does nothing if trying to merge with the same destination as start
             }
@@ -161,10 +163,19 @@ pub fn copy_dir(old_files: &HashSet<PathBuf>, dest: &Path, operation: &Operation
 }
 
 fn move_file(old_path: &Path, new_path: &Path, is_cut: bool) {
-    let program = if is_cut { "mv" } else { "cp" };
-    let cmd = Command::new(program).arg(&old_path).arg(new_path).output();
+    let command;
 
-    if let Err(e) = cmd {
+    if is_cut {
+        command = Command::new("mv").arg(old_path).arg(new_path).output();
+    } else {
+        command = Command::new("cp")
+            .arg(old_path)
+            .arg(new_path)
+            .arg("-r")
+            .output();
+    }
+
+    if let Err(e) = command {
         println!("{}", e);
     }
 }

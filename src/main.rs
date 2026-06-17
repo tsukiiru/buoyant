@@ -6,7 +6,7 @@ use std::{
     process::{Command, Stdio},
 };
 
-use chrono::{DateTime, Utc};
+use chrono::{DateTime, Datelike, Utc};
 use rayon::prelude::*;
 
 use iced::{
@@ -18,7 +18,6 @@ use iced::{
         self, Modifiers,
         key::{self, Code, Physical},
     },
-    theme,
     widget::{
         button, column, container, float, mouse_area, opaque, operation, row, scrollable, selector,
         stack, text, text_input,
@@ -143,7 +142,7 @@ struct CreateModal {
 
 struct Clipboard {
     entries: HashSet<PathBuf>,
-    mode: ClipboardMode,
+    mode: Option<ClipboardMode>,
 }
 
 struct ModifiersState {
@@ -217,9 +216,11 @@ impl Entries {
     }
 }
 
-struct Application {
+struct Buoyant {
     config: config::Config,
     program: Program,
+
+    theme: Theme,
 
     current_index: Option<usize>,
     entries: Entries,
@@ -235,7 +236,7 @@ struct Application {
     visual_mode: bool,
 }
 
-impl Application {
+impl Buoyant {
     fn new(input: &str, config: config::Config) -> (Self, Task<Message>) {
         let path_conversion = PathBuf::from(input);
         let path: PathBuf;
@@ -253,10 +254,11 @@ impl Application {
         }
 
         (
-            Application {
+            Buoyant {
                 config,
 
                 program: Program::init(path),
+                theme: Theme::CatppuccinLatte,
 
                 current_index: None,
                 entries: Entries::new(),
@@ -272,7 +274,7 @@ impl Application {
                 },
                 clipboard: Clipboard {
                     entries: HashSet::new(),
-                    mode: ClipboardMode::Copy,
+                    mode: None,
                 },
                 modals_state: ModalState {
                     opened: false,
@@ -358,6 +360,13 @@ impl Application {
                         ModalType::Operation,
                         ModalMessage::Open,
                     ));
+                } else if physical_key == keybinds.clear_clipboard.key
+                    && modifiers == keybinds.clear_clipboard.modifiers
+                {
+                    self.clipboard.entries.clear();
+                    self.clipboard.mode = None;
+
+                    return Task::none();
                 } else if physical_key == keybinds.delete_selections.key
                     && modifiers == keybinds.delete_selections.modifiers
                 {
@@ -547,10 +556,10 @@ impl Application {
                     self.selected.clear();
                 }
 
-                let end_index = if let Some(i) = self.current_index
+                let end_index = if let Some(current_index) = self.current_index
                     && (self.modifiers_state.shift || self.visual_mode)
                 {
-                    i
+                    current_index
                 } else {
                     index
                 };
@@ -656,24 +665,29 @@ impl Application {
                         .insert(self.entries.getv_index(i).unwrap().path.clone());
                 });
 
-                clipboard.mode = mode;
+                clipboard.mode = Some(mode);
 
                 Task::none()
             }
             Message::PasteClipboard(opp) => {
                 let clipboard = &mut self.clipboard;
+                let clipboard_mode = clipboard.mode.as_ref();
 
-                if clipboard.entries.is_empty() {
+                if clipboard.entries.is_empty() || clipboard_mode.is_none() {
                     return Task::none();
                 }
 
-                match clipboard.mode {
+                let mode = clipboard_mode.unwrap();
+
+                match mode {
                     ClipboardMode::Copy => {
                         file::copy_dir(&clipboard.entries, &self.program.path, &opp);
                     }
                     ClipboardMode::Cut => {
                         file::move_dir(&clipboard.entries, &self.program.path, &opp);
+
                         clipboard.entries.clear();
+                        clipboard.mode = None;
                     }
                 }
 
@@ -724,13 +738,11 @@ impl Application {
                     if let Some(error) = try_create {
                         overlay.error = error;
                     } else {
-                        return Task::batch(vec![
-                            Task::done(Message::UpdateModal(
-                                ModalType::CreateFile,
-                                ModalMessage::Close,
-                            )),
-                            Task::done(Message::UpdateEntries(None)),
-                        ]);
+                        return Task::done(Message::UpdateModal(
+                            ModalType::CreateFile,
+                            ModalMessage::Close,
+                        ))
+                        .chain(Task::done(Message::UpdateEntries(None)));
                     }
                 } else {
                     let overlay = self.modals_state.create_folder.as_mut().unwrap();
@@ -740,13 +752,11 @@ impl Application {
                     if let Some(error) = try_create {
                         overlay.error = &error;
                     } else {
-                        return Task::batch(vec![
-                            Task::done(Message::UpdateEntries(None)),
-                            Task::done(Message::UpdateModal(
-                                ModalType::CreateFolder,
-                                ModalMessage::Close,
-                            )),
-                        ]);
+                        return Task::done(Message::UpdateModal(
+                            ModalType::CreateFolder,
+                            ModalMessage::Close,
+                        ))
+                        .chain(Task::done(Message::UpdateEntries(None)));
                     }
                 }
 
@@ -778,7 +788,7 @@ impl Application {
                                 }
                                 *modals_opened = true;
 
-                                return Task::batch(vec![operation::focus("rename")]);
+                                return operation::focus("rename");
                             }
                             ModalMessage::Close => {
                                 modals_state.rename = None;
@@ -796,6 +806,10 @@ impl Application {
                     ModalType::Delete => {
                         match msg {
                             ModalMessage::Open => {
+                                if self.selected.is_empty() {
+                                    return Task::none();
+                                }
+
                                 modals_state.delete = true;
                                 *modals_opened = true;
 
@@ -845,7 +859,7 @@ impl Application {
                                 });
                                 *modals_opened = true;
 
-                                return Task::batch(vec![operation::focus("create")]);
+                                return operation::focus("create");
                             }
                             ModalMessage::Close => {
                                 modals_state.create_file = None;
@@ -869,7 +883,7 @@ impl Application {
                                 });
                                 *modals_opened = true;
 
-                                return Task::batch(vec![operation::focus("create")]);
+                                return operation::focus("create");
                             }
                             ModalMessage::Close => {
                                 modals_state.create_folder = None;
@@ -920,27 +934,23 @@ impl Application {
                 task
             }
             Message::CloseModals => {
-                if !self.modals_state.opened {
+                let modals_state = &mut self.modals_state;
+
+                if !modals_state.opened {
                     return Task::none();
                 }
 
-                Task::batch(vec![
-                    Task::done(Message::UpdateModal(
-                        ModalType::Operation,
-                        ModalMessage::Close,
-                    )),
-                    Task::done(Message::UpdateModal(ModalType::Delete, ModalMessage::Close)),
-                    Task::done(Message::UpdateModal(ModalType::Rename, ModalMessage::Close)),
-                    Task::done(Message::UpdateModal(
-                        ModalType::CreateFile,
-                        ModalMessage::Close,
-                    )),
-                    Task::done(Message::UpdateModal(
-                        ModalType::CreateFolder,
-                        ModalMessage::Close,
-                    )),
-                    Task::done(Message::ClearChoices),
-                ])
+                modals_state.opened = false;
+                modals_state.delete = false;
+                modals_state.operation = false;
+
+                modals_state.create_file = None;
+                modals_state.create_folder = None;
+                modals_state.rename = None;
+                // sloppy code
+                // i mean there has to be some state-resetting somewhere right?
+
+                Task::done(Message::ClearChoices)
             }
             Message::ClearChoices => {
                 self.modals_state.choices.clear();
@@ -963,13 +973,12 @@ impl Application {
                 Task::none()
             }
             Message::UpdateChoiceIndex(right) => {
-                // fuck i dont like the look of this at all
-
                 if self.modals_state.choices.len() == 0 {
                     return Task::none();
                 }
 
                 let cur_choice = self.modals_state.current_choice as i8;
+                // conv to i8 because usize cant go under 0
                 let dir = if right { 1 } else { -1 };
                 let new_index =
                     (cur_choice + dir).clamp(0, (self.modals_state.choices.len() - 1) as i8);
@@ -984,146 +993,143 @@ impl Application {
     fn view(&self) -> Element<'_, Message> {
         let entries = &self.entries.children;
 
-        let palette = theme::Theme::KanagawaLotus.palette();
+        let palette = self.theme.palette();
         let text_color = palette.text;
         let darken_text_color = text_color.scale_alpha(0.69);
 
-        let mut explorer_column = column![];
+        let explorer_column = column(
+            entries
+                .iter()
+                .map(|e| {
+                    let mut row = row![].spacing(10);
 
-        explorer_column = explorer_column
-            .extend(
-                entries
-                    .iter()
-                    .map(|e| {
-                        let mut row = row![].spacing(10);
-
-                        for child in &self.config.view {
-                            match child {
-                                Displaying::Name => {
-                                    row = row.push(
-                                        container(
-                                            text(&e.name)
-                                                .wrapping(Wrapping::None)
-                                                .align_x(alignment::Horizontal::Left)
-                                                .color(if e.hidden {
-                                                    darken_text_color
-                                                } else {
-                                                    text_color
-                                                }),
-                                        )
-                                        .width(300)
-                                        .clip(true),
+                    for child in &self.config.view {
+                        match child {
+                            Displaying::Name => {
+                                row = row.push(
+                                    container(
+                                        text(&e.name)
+                                            .wrapping(Wrapping::None)
+                                            .align_x(alignment::Horizontal::Left)
+                                            .color(if e.hidden {
+                                                darken_text_color
+                                            } else {
+                                                text_color
+                                            }),
                                     )
-                                }
-                                Displaying::FileSize => {
-                                    row = row.push(
-                                        container(
-                                            text(file::convert_bytes_to_string(&e.filesize))
-                                                .align_x(alignment::Horizontal::Left)
-                                                .wrapping(Wrapping::None)
-                                                .color(if e.hidden {
-                                                    darken_text_color
-                                                } else {
-                                                    text_color
-                                                }),
-                                        )
-                                        .width(100)
-                                        .clip(true),
-                                    );
-                                }
-                                Displaying::FileType => {
-                                    row = row.push(
-                                        container(
-                                            text(&e.filetype)
-                                                .align_x(alignment::Horizontal::Left)
-                                                .wrapping(Wrapping::None)
-                                                .color(if e.hidden {
-                                                    darken_text_color
-                                                } else {
-                                                    text_color
-                                                }),
-                                        )
-                                        .width(150)
-                                        .clip(true),
-                                    );
-                                }
-                                Displaying::Created => {
-                                    row = row.push(
-                                        container(
-                                            text(format_date(e.created))
-                                                .align_x(alignment::Horizontal::Left)
-                                                .wrapping(Wrapping::None)
-                                                .color(if e.hidden {
-                                                    darken_text_color
-                                                } else {
-                                                    text_color
-                                                }),
-                                        )
-                                        .width(200)
-                                        .clip(true),
-                                    );
-                                }
-                                Displaying::LastAccessed => {
-                                    row = row.push(
-                                        container(
-                                            text(format_date(e.accessed))
-                                                .align_x(alignment::Horizontal::Left)
-                                                .wrapping(Wrapping::None)
-                                                .color(if e.hidden {
-                                                    darken_text_color
-                                                } else {
-                                                    text_color
-                                                }),
-                                        )
-                                        .width(200)
-                                        .clip(true),
-                                    );
-                                }
+                                    .width(300)
+                                    .clip(true),
+                                )
+                            }
+                            Displaying::FileSize => {
+                                row = row.push(
+                                    container(
+                                        text(file::convert_bytes_to_string(&e.filesize))
+                                            .align_x(alignment::Horizontal::Left)
+                                            .wrapping(Wrapping::None)
+                                            .color(if e.hidden {
+                                                darken_text_color
+                                            } else {
+                                                text_color
+                                            }),
+                                    )
+                                    .width(100)
+                                    .clip(true),
+                                );
+                            }
+                            Displaying::FileType => {
+                                row = row.push(
+                                    container(
+                                        text(&e.filetype)
+                                            .align_x(alignment::Horizontal::Left)
+                                            .wrapping(Wrapping::None)
+                                            .color(if e.hidden {
+                                                darken_text_color
+                                            } else {
+                                                text_color
+                                            }),
+                                    )
+                                    .width(150)
+                                    .clip(true),
+                                );
+                            }
+                            Displaying::Created => {
+                                row = row.push(
+                                    container(
+                                        text(self.format_date(e.created))
+                                            .align_x(alignment::Horizontal::Left)
+                                            .wrapping(Wrapping::None)
+                                            .color(if e.hidden {
+                                                darken_text_color
+                                            } else {
+                                                text_color
+                                            }),
+                                    )
+                                    .width(200)
+                                    .clip(true),
+                                );
+                            }
+                            Displaying::LastAccessed => {
+                                row = row.push(
+                                    container(
+                                        text(self.format_date(e.accessed))
+                                            .align_x(alignment::Horizontal::Left)
+                                            .wrapping(Wrapping::None)
+                                            .color(if e.hidden {
+                                                darken_text_color
+                                            } else {
+                                                text_color
+                                            }),
+                                    )
+                                    .width(200)
+                                    .clip(true),
+                                );
                             }
                         }
+                    }
 
+                    let index = self.entries.get_index(&e.id);
+
+                    container(
+                        mouse_area(row)
+                            .on_double_click(Message::Open(e.id))
+                            .on_press(Message::Select(index))
+                            .on_enter(Message::HoverEntry(e.id, true))
+                            .on_exit(Message::HoverEntry(e.id, false)),
+                    )
+                    .center_y(30)
+                    .padding(Padding::from([0, 5]))
+                    .style(|_| {
+                        let mut style = container::Style::default();
                         let index = self.entries.get_index(&e.id);
 
-                        container(
-                            mouse_area(row)
-                                .on_double_click(Message::Open(e.id))
-                                .on_press(Message::Select(index))
-                                .on_enter(Message::HoverEntry(e.id, true))
-                                .on_exit(Message::HoverEntry(e.id, false)),
-                        )
-                        .center_y(30)
-                        .padding(Padding::from([0, 5]))
-                        .style(|_| {
-                            let mut style = container::Style::default();
-                            let index = self.entries.get_index(&e.id);
+                        if let Some(cur_index) = self.current_index
+                            && cur_index == index
+                        {
+                            style.border = Border {
+                                color: Color::from_rgba(0.0, 0.0, 0.0, 0.5),
+                                width: 2.0,
+                                radius: Radius::new(4.0),
+                            };
+                        }
 
-                            if let Some(cur_index) = self.current_index
-                                && cur_index == index
-                            {
-                                style.border = Border {
-                                    color: Color::from_rgba(0.0, 0.0, 0.0, 0.5),
-                                    width: 2.0,
-                                    radius: Radius::new(4.0),
-                                };
-                            }
+                        if e.hovered {
+                            style.background =
+                                Some(Background::Color(Color::from_rgba(0.4, 0.4, 0.4, 0.1)));
+                        }
 
-                            if e.hovered {
-                                style.background =
-                                    Some(Background::Color(Color::from_rgba(0.4, 0.4, 0.4, 0.1)));
-                            }
-
-                            if self.selected.contains(&index) {
-                                style.background =
-                                    Some(Background::Color(Color::from_rgba(0.4, 0.4, 0.4, 0.3)));
-                            }
-                            style
-                        })
-                        .into()
+                        if self.selected.contains(&index) {
+                            style.background =
+                                Some(Background::Color(Color::from_rgba(0.4, 0.4, 0.4, 0.3)));
+                        }
+                        style
                     })
-                    .collect::<Vec<_>>(),
-            )
-            .spacing(10)
-            .width(Length::Fill);
+                    .into()
+                })
+                .collect::<Vec<_>>(),
+        )
+        .spacing(10)
+        .width(Length::Fill);
 
         let explorer_scroll = scrollable(explorer_column)
             .id("scrollable")
@@ -1212,30 +1218,34 @@ impl Application {
             .height(Length::Fill)
             .padding(20);
 
-        let clipboard_mode = match self.clipboard.mode {
-            ClipboardMode::Copy => "Copy",
-            ClipboardMode::Cut => "Cut",
-        };
+        let clipboard_mode = &self.clipboard.mode;
+        let mut clipboard_mode_display = "";
+
+        if let Some(mode) = clipboard_mode {
+            clipboard_mode_display = match mode {
+                ClipboardMode::Copy => "Clipboard Mode: Copy",
+                ClipboardMode::Cut => "Clipboard Mode: Cut",
+            };
+        }
 
         let clipboard_entries = &self.clipboard.entries;
-        let clipboard: Element<Message> = column![text(format!("type: {}", clipboard_mode))]
-            .extend(
-                clipboard_entries
-                    .iter()
-                    .map(|e| text(e.display().to_string()).into()),
-            )
-            .spacing(10)
-            .width(Length::Fill)
-            .height(Length::Fill)
-            .into();
+        let clipboard: Element<Message> =
+            column![text(clipboard_mode_display).color(palette.success)]
+                .extend(
+                    clipboard_entries
+                        .iter()
+                        .map(|e| text(e.display().to_string()).into()),
+                )
+                .spacing(10)
+                .width(Length::Fill)
+                .height(Length::Fill)
+                .into();
 
         let left_col = column![
             row![
                 button(text("....")).on_press(Message::Return),
                 container(text(format!("{}", self.program.path.display())))
-                    .style(move |_| {
-                        container::Style::default().background(palette.background.scale_alpha(0.4))
-                    })
+                    .style(move |_| { palette.text.scale_alpha(0.1).into() })
                     .center_y(30)
                     .center_x(Length::Fill)
                     .padding(5),
@@ -1309,14 +1319,14 @@ impl Application {
                     "last accessed: {}",
                     DateTime::from_timestamp_secs(entry.accessed)
                         .unwrap()
-                        .format(&self.config.format.metadata_date)
+                        .format(&self.config.misc.format_date)
                 ))
                 .into(),
                 text(format!(
                     "creation date: {}",
                     DateTime::from_timestamp_secs(entry.created)
                         .unwrap()
-                        .format(&self.config.format.metadata_date)
+                        .format(&self.config.misc.format_date)
                 ))
                 .into(),
             ]);
@@ -1363,9 +1373,8 @@ impl Application {
                 button(text("Replace \nreplace file if name is matched"))
                     .on_press(Message::PasteClipboard(file::OperationChoice::Merge))
                     .padding(7)
-                    .style(|theme: &Theme, _| {
+                    .style(move |_, _| {
                         let mut style = button::Style::default();
-                        let palette = theme.palette();
 
                         if self.modals_state.current_choice == 0 {
                             style.border = Border {
@@ -1381,9 +1390,8 @@ impl Application {
                 ))
                 .on_press(Message::PasteClipboard(file::OperationChoice::Duplicate))
                 .padding(7)
-                .style(|theme: &Theme, _| {
+                .style(move |_, _| {
                     let mut style = button::Style::default();
-                    let palette = theme.palette();
 
                     if self.modals_state.current_choice == 1 {
                         style.border = Border {
@@ -1425,9 +1433,8 @@ impl Application {
                         text("you gonna delete the selections?"),
                         button(text("yeah :3"))
                             .padding(7)
-                            .style(|theme: &Theme, _| {
+                            .style(move |_, _| {
                                 let mut style = button::Style::default();
-                                let palette = theme.palette();
 
                                 if self.modals_state.current_choice == 0 {
                                     style.border = Border {
@@ -1516,6 +1523,58 @@ impl Application {
         stack.into()
     }
 
+    fn theme(&self) -> Theme {
+        self.theme.clone()
+    }
+
+    fn format_date(&self, date: i64) -> String {
+        let current_date = Utc::now();
+        let given_date = DateTime::from_timestamp_secs(date).unwrap_or_default();
+
+        let current_day = current_date.day();
+        let given_day = given_date.day();
+
+        let time_delta = current_date.sub(given_date);
+        let delta_day = time_delta.num_hours() / 24;
+
+        // today
+        if delta_day < 1 && current_day == given_day {
+            return format!("Today, {}", given_date.format("%I:%M %p"));
+        }
+        // yesterday
+        else if delta_day < 2 {
+            return format!("Yesterday, {}", given_date.format("%I:%M %p"));
+        }
+        // this week
+        else if delta_day <= 7 {
+            return format!("{} days ago", delta_day);
+        }
+        // last week
+        else if delta_day <= 14 {
+            return String::from("Last week");
+        }
+        // this month
+        else if delta_day <= 31 {
+            return format!("{} weeks ago", delta_day / 7);
+        }
+        // last month
+        else if delta_day <= 62 {
+            return String::from("Last month");
+        }
+        // this year
+        else if delta_day <= 365 {
+            return format!("{} months ago", delta_day / 31);
+        }
+        // last year
+        else if delta_day <= 730 {
+            return String::from("Last year");
+        }
+        // blah blah blah
+        else {
+            return format!("{} years ago", delta_day / 365);
+        }
+    }
+
     fn subscription(&self) -> Subscription<Message> {
         event::listen_with(move |event, status, _| {
             if status == Status::Captured {
@@ -1569,65 +1628,17 @@ fn sort(sorting_by: &SortingBy, entries: &mut Vec<Entry>) {
     }
 }
 
-fn format_date(date: i64) -> String {
-    let current_date = Utc::now();
-    let given_date = DateTime::from_timestamp_secs(date).unwrap_or_default();
-
-    let time_delta = current_date.sub(given_date);
-    let delta_day = time_delta.num_days();
-
-    let formatted: String;
-
-    // today
-    if delta_day < 1 {
-        formatted = format!("Today, {}", given_date.format("%H:%M %p"));
-    }
-    // yesterday
-    else if delta_day == 1 {
-        formatted = format!("Yesterday, {}", given_date.format("%H:%M %p"));
-    }
-    // this week
-    else if delta_day <= 7 {
-        formatted = format!("{} days ago", delta_day);
-    }
-    // last week
-    else if delta_day <= 14 {
-        formatted = String::from("Last week");
-    }
-    // this month
-    else if delta_day <= 31 {
-        formatted = format!("{} weeks ago", delta_day / 7);
-    }
-    // last month
-    else if delta_day <= 62 {
-        formatted = String::from("Last month");
-    }
-    // this year
-    else if delta_day <= 365 {
-        formatted = format!("{} months ago", delta_day / 31);
-    }
-    // last year
-    else if delta_day <= 730 {
-        formatted = String::from("Last year");
-    }
-    // blah blah blah
-    else {
-        formatted = format!("{} years ago", delta_day / 365);
-    }
-
-    formatted
-}
-
 fn main() -> iced::Result {
     let input = args().nth(1).unwrap_or_default();
+    // for optional starting path as an argument
 
     iced::application(
-        move || Application::new(&input, config::get_keybinds()),
-        Application::update,
-        Application::view,
+        move || Buoyant::new(&input, config::get_keybinds()),
+        Buoyant::update,
+        Buoyant::view,
     )
-    .subscription(Application::subscription)
+    .subscription(Buoyant::subscription)
     .title("buoyant")
-    .theme(Theme::KanagawaLotus)
+    .theme(Buoyant::theme)
     .run()
 }
