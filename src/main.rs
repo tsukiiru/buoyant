@@ -1,11 +1,12 @@
 use std::{
     collections::HashSet,
     env::{args, home_dir},
+    ops::Sub,
     path::{Path, PathBuf},
     process::{Command, Stdio},
 };
 
-use chrono::DateTime;
+use chrono::{DateTime, Utc};
 use rayon::prelude::*;
 
 use iced::{
@@ -513,7 +514,7 @@ impl Application {
                 let offset: f32 = 40.0 * (current_index - 1.0);
 
                 let height = target.unwrap().visible_bounds().unwrap().height;
-                let widget_range = (self.explorer_offset, self.explorer_offset + height);
+                let widget_range = (self.explorer_offset, self.explorer_offset + height - 10.0);
 
                 if offset <= widget_range.0 {
                     return operation::scroll_to(
@@ -521,6 +522,8 @@ impl Application {
                         AbsoluteOffset { x: 0.0, y: offset },
                     );
                 }
+
+                // 40 is the height of the button
 
                 if widget_range.1 <= offset {
                     return operation::scroll_to(
@@ -1045,14 +1048,9 @@ impl Application {
                                     );
                                 }
                                 Displaying::Created => {
-                                    row =
-                                        row.push(
-                                            container(
-                                                text(
-                                                    DateTime::from_timestamp_secs(e.created)
-                                                        .unwrap()
-                                                        .to_string(),
-                                                )
+                                    row = row.push(
+                                        container(
+                                            text(format_date(e.created))
                                                 .align_x(alignment::Horizontal::Left)
                                                 .wrapping(Wrapping::None)
                                                 .color(if e.hidden {
@@ -1060,20 +1058,15 @@ impl Application {
                                                 } else {
                                                     text_color
                                                 }),
-                                            )
-                                            .width(200)
-                                            .clip(true),
-                                        );
+                                        )
+                                        .width(200)
+                                        .clip(true),
+                                    );
                                 }
                                 Displaying::LastAccessed => {
-                                    row =
-                                        row.push(
-                                            container(
-                                                text(
-                                                    DateTime::from_timestamp_secs(e.accessed)
-                                                        .unwrap()
-                                                        .to_string(),
-                                                )
+                                    row = row.push(
+                                        container(
+                                            text(format_date(e.accessed))
                                                 .align_x(alignment::Horizontal::Left)
                                                 .wrapping(Wrapping::None)
                                                 .color(if e.hidden {
@@ -1081,10 +1074,10 @@ impl Application {
                                                 } else {
                                                     text_color
                                                 }),
-                                            )
-                                            .width(200)
-                                            .clip(true),
-                                        );
+                                        )
+                                        .width(200)
+                                        .clip(true),
+                                    );
                                 }
                             }
                         }
@@ -1316,14 +1309,14 @@ impl Application {
                     "last accessed: {}",
                     DateTime::from_timestamp_secs(entry.accessed)
                         .unwrap()
-                        .to_string()
+                        .format(&self.config.format.metadata_date)
                 ))
                 .into(),
                 text(format!(
                     "creation date: {}",
                     DateTime::from_timestamp_secs(entry.created)
                         .unwrap()
-                        .to_string()
+                        .format(&self.config.format.metadata_date)
                 ))
                 .into(),
             ]);
@@ -1358,7 +1351,7 @@ impl Application {
 
             let overlay = opaque(float(
                 container(col)
-                    .style(move |_| palette.background.scale_alpha(0.6).into())
+                    .style(move |_| palette.background.scale_alpha(0.8).into())
                     .center(Length::Fill),
             ));
 
@@ -1415,7 +1408,7 @@ impl Application {
                     ]
                     .spacing(10),
                 )
-                .style(move |_| palette.background.scale_alpha(0.6).into())
+                .style(move |_| palette.background.scale_alpha(0.8).into())
                 .center(Length::Fill),
             ));
 
@@ -1449,7 +1442,7 @@ impl Application {
                     ]
                     .spacing(10),
                 )
-                .style(move |_| palette.background.scale_alpha(0.6).into())
+                .style(move |_| palette.background.scale_alpha(0.8).into())
                 .center(Length::Fill),
             ));
 
@@ -1481,7 +1474,7 @@ impl Application {
 
             let overlay = opaque(float(
                 container(col)
-                    .style(move |_| palette.background.scale_alpha(0.6).into())
+                    .style(move |_| palette.background.scale_alpha(0.8).into())
                     .center(Length::Fill),
             ));
 
@@ -1513,7 +1506,7 @@ impl Application {
 
             let overlay = opaque(float(
                 container(col)
-                    .style(move |_| palette.background.scale_alpha(0.6).into())
+                    .style(move |_| palette.background.scale_alpha(0.8).into())
                     .center(Length::Fill),
             ));
 
@@ -1574,6 +1567,55 @@ fn sort(sorting_by: &SortingBy, entries: &mut Vec<Entry>) {
             x.cmp(y)
         }),
     }
+}
+
+fn format_date(date: i64) -> String {
+    let current_date = Utc::now();
+    let given_date = DateTime::from_timestamp_secs(date).unwrap_or_default();
+
+    let time_delta = current_date.sub(given_date);
+    let delta_day = time_delta.num_days();
+
+    let formatted: String;
+
+    // today
+    if delta_day < 1 {
+        formatted = format!("Today, {}", given_date.format("%H:%M %p"));
+    }
+    // yesterday
+    else if delta_day == 1 {
+        formatted = format!("Yesterday, {}", given_date.format("%H:%M %p"));
+    }
+    // this week
+    else if delta_day <= 7 {
+        formatted = format!("{} days ago", delta_day);
+    }
+    // last week
+    else if delta_day <= 14 {
+        formatted = String::from("Last week");
+    }
+    // this month
+    else if delta_day <= 31 {
+        formatted = format!("{} weeks ago", delta_day / 7);
+    }
+    // last month
+    else if delta_day <= 62 {
+        formatted = String::from("Last month");
+    }
+    // this year
+    else if delta_day <= 365 {
+        formatted = format!("{} months ago", delta_day / 31);
+    }
+    // last year
+    else if delta_day <= 730 {
+        formatted = String::from("Last year");
+    }
+    // blah blah blah
+    else {
+        formatted = format!("{} years ago", delta_day / 365);
+    }
+
+    formatted
 }
 
 fn main() -> iced::Result {

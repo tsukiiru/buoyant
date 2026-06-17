@@ -12,6 +12,7 @@ pub struct Config {
     pub view: Vec<Displaying>,
     pub sorting: Sorting,
     pub view_hidden: bool,
+    pub format: Formatting,
 }
 
 pub struct KeybindsConfig {
@@ -28,6 +29,11 @@ pub struct KeybindsConfig {
     pub create_file_path: KeybindEntry,
     pub create_folder_path: KeybindEntry,
     pub toggle_visual_mode: KeybindEntry,
+}
+
+#[derive(Deserialize)]
+pub struct Formatting {
+    pub metadata_date: String,
 }
 
 pub struct Sorting {
@@ -65,6 +71,9 @@ pub fn get_keybinds() -> Config {
     let mut config = Config {
         view: Vec::with_capacity(5),
         sorting: Sorting::default(),
+        format: Formatting {
+            metadata_date: String::from("%d/%m/%Y, %I:%M:%S %p"),
+        },
         view_hidden: false,
         keybinds: KeybindsConfig {
             navigate_up: KeybindEntry {
@@ -145,6 +154,7 @@ struct RawConfig {
     keybinds: Option<RawKeybindsConfig>,
     view: Option<RawViewConfig>,
     sorting: Option<RawSortingConfig>,
+    format: Option<Formatting>,
 }
 
 #[derive(Deserialize)]
@@ -194,6 +204,10 @@ fn process_rawconfig(raw_config: RawConfig, config: &mut Config) {
 
     if let Some(table) = raw_config.sorting {
         process_sorting(table, &mut config.sorting);
+    }
+
+    if let Some(table) = raw_config.format {
+        config.format = table;
     }
 }
 

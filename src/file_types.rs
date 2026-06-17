@@ -14,6 +14,8 @@ pub fn convert_to_filetype(extension: &str) -> Option<String> {
         "rs" => "Rust Source File",
         "py" => "Python Source File",
         "txt" => "Generic Text File",
+        "md" => "Markdown Document",
+        "toml" => "TOML Document",
         // archive
         "7z" => "7Zip Archive",
         "zip" => "Zip Archive",
