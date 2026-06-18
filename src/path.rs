@@ -9,13 +9,8 @@ use std::{
 };
 
 use crate::file_types;
+use crate::types::PasteType;
 pub const NONO_CHARACTERS: [&str; 3] = ["\0", "\"", "/"];
-
-#[derive(Clone, Debug)]
-pub enum OperationChoice {
-    Merge,
-    Duplicate,
-}
 
 pub fn delete(path: &Path) {
     if !path.exists() {
@@ -85,15 +80,15 @@ pub fn create(current_path: &Path, new_path: &Path, last_is_file: bool) -> Optio
 fn operation_recursion<'a>(
     dest: &Path,
     prevs: &mut Vec<&'a str>,
-    operation: &OperationChoice,
+    operation: &PasteType,
     path: &'a Path,
     is_cut: bool,
 ) {
-    let file_name = path.file_name().unwrap().to_str().unwrap();
+    let name = path.file_name().unwrap().to_str().unwrap();
     let mut final_path = dest.to_path_buf();
     prevs.iter().for_each(|prev| final_path.push(prev));
 
-    let joined = &final_path.join(&file_name);
+    let joined = &final_path.join(&name);
     // check if not exists in the destination
     if !joined.exists() {
         //println!("already existed");
@@ -102,19 +97,19 @@ fn operation_recursion<'a>(
     }
 
     match operation {
-        OperationChoice::Duplicate => {
-            let result = get_fileextension(path);
+        PasteType::Duplicate => {
+            let result = file_extension(path);
             let ext = if result == "" {
                 String::new()
             } else {
                 format!(".{}", result)
             };
             // since both file/folder has the same outcome for choosing duplicate
-            let new_path = increment_suffix(get_filename(path).as_str(), ext.as_str(), &final_path);
+            let new_path = increment_suffix(&file_name(path), ext.as_str(), &final_path);
             //println!("{}, {}", new_path.display(), is_cut);
             move_file(path, &new_path, is_cut);
         }
-        OperationChoice::Merge => {
+        PasteType::Replace => {
             if path == joined {
                 return;
                 // does nothing if trying to merge with the same destination as start
@@ -123,14 +118,14 @@ fn operation_recursion<'a>(
             if !final_path.is_file() {
                 replace_file(path, joined, is_cut);
             } else {
-                prevs.push(file_name);
+                prevs.push(name);
                 operation_recursion(dest, prevs, operation, path, is_cut);
             }
         }
     }
 }
 
-pub fn move_dir(old_files: &HashSet<PathBuf>, dest: &Path, operation: &OperationChoice) {
+pub fn move_dir(old_files: &HashSet<PathBuf>, dest: &Path, operation: &PasteType) {
     if !dest.exists() || !dest.is_dir() {
         return;
     }
@@ -152,7 +147,7 @@ pub fn move_dir(old_files: &HashSet<PathBuf>, dest: &Path, operation: &Operation
     })
 }
 
-pub fn copy_dir(old_files: &HashSet<PathBuf>, dest: &Path, operation: &OperationChoice) {
+pub fn copy_dir(old_files: &HashSet<PathBuf>, dest: &Path, operation: &PasteType) {
     if !dest.exists() || !dest.is_dir() {
         return;
     }
@@ -214,7 +209,7 @@ pub fn read_dir(path: &Path) -> Result<Vec<PathBuf>, String> {
 }
 
 // get file name but stripped the extension
-pub fn get_filename(path: &Path) -> String {
+pub fn file_name(path: &Path) -> String {
     let mut name = path.file_name().unwrap().to_str().unwrap().to_string();
 
     if path.is_dir() {
@@ -243,13 +238,13 @@ fn is_textfile(path: &Path) -> bool {
     }
 }
 
-pub fn get_filetype(path: &Path) -> String {
+pub fn file_type(path: &Path) -> String {
     if path.is_dir() {
         return String::from("Folder");
     }
 
-    let ext = get_fileextension(path);
-    let opt_type = file_types::convert_to_filetype(ext);
+    let ext = file_extension(path);
+    let opt_type = file_types::extension_to_filetype(ext);
     let str_type: &str;
 
     if let Some(thing) = &opt_type {
@@ -275,7 +270,7 @@ pub fn get_filetype(path: &Path) -> String {
 
 const UNIX_EPOCH: SystemTime = SystemTime::UNIX_EPOCH;
 
-pub fn get_fileaccessed(path: &Path) -> i64 {
+pub fn file_accessed(path: &Path) -> i64 {
     match path.metadata() {
         Ok(res) => res
             .accessed()
@@ -289,7 +284,7 @@ pub fn get_fileaccessed(path: &Path) -> i64 {
     }
 }
 
-pub fn get_filecreated(path: &Path) -> i64 {
+pub fn file_created(path: &Path) -> i64 {
     match path.metadata() {
         Ok(res) => res
             .created()
@@ -330,7 +325,7 @@ pub fn get_filecreated(path: &Path) -> i64 {
 // THIS IS REALLY EXPENSIVE AND SLOW WHEN THERE ARE TOO MANY FILES
 // Though similar approaches should be considered for more accurate file size.
 
-pub fn get_filesize(path: &Path) -> u64 {
+pub fn file_size(path: &Path) -> u64 {
     if !path.exists() {
         return 0_u64;
     }
@@ -348,7 +343,7 @@ pub fn get_filesize(path: &Path) -> u64 {
     metadata.size()
 }
 
-pub fn convert_bytes_to_string(size: &u64) -> String {
+pub fn bytes_to_string(size: &u64) -> String {
     // i dont think someone would have petabytes of data on their personal computer,,,
     if *size >= 10_u64.pow(12) {
         // TiB
@@ -373,10 +368,10 @@ pub fn convert_bytes_to_string(size: &u64) -> String {
 }
 
 pub fn is_hidden(path: &Path) -> bool {
-    get_filename(path).starts_with(".")
+    file_name(path).starts_with(".")
 }
 
-fn get_fileextension(path: &Path) -> &str {
+fn file_extension(path: &Path) -> &str {
     let ext = path.extension();
 
     if let Some(e) = ext {

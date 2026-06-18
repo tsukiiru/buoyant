@@ -393,7 +393,6 @@ fn match_key(raw_key: String) -> Option<KeybindEntry> {
     let raw_modifiers = splitted;
 
     if raw_modifiers.is_empty() {
-        //       println!("no modifier provided !");
         return Some(result);
     }
 

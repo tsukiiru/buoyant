@@ -1,6 +1,6 @@
 /// manually matching every (common) file types because im fucking insane and unemployed
 
-pub fn convert_to_filetype(extension: &str) -> Option<String> {
+pub fn extension_to_filetype(extension: &str) -> Option<String> {
     let something: &str = match extension {
         // images
         "png" => "PNG Image",
