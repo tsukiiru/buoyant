@@ -25,8 +25,8 @@ use iced::{
 };
 
 use crate::types::{
-    Clipboard, ClipboardMode, CreateModal, Direction, Entries, Entry, ModalMessage, ModalType,
-    PasteType, RenameModal,
+    Clipboard, ClipboardMode, CreateModal, Direction, Entries, Entry, Item, ModalMessage,
+    ModalType, PasteType, RenameModal, TempItem,
 };
 use iced::widget::{
     operation::AbsoluteOffset, scrollable::Viewport, selector::Target, text::Wrapping,
@@ -192,7 +192,7 @@ impl Buoyant {
 
                 entries: Entries::new(),
                 clipboard: Clipboard::default(),
-                selected: HashSet::new(),
+                selected: HashSet::with_capacity(5),
 
                 states: States::default(),
             },
@@ -213,13 +213,17 @@ impl Buoyant {
                     .children
                     .iter()
                     .enumerate()
-                    .for_each(|(i, entry)| {
+                    .for_each(|(i, item)| {
                         if i == index.unwrap() {
-                            path = &entry.path;
+                            path = &item.path;
                         }
                     });
 
-                if path.is_file() {
+                if path.is_dir() {
+                    self.current_path = path.to_owned();
+                    self.current_index = None;
+                    Task::done(Message::UpdateEntries(None))
+                } else {
                     let cmd = Command::new("xdg-open")
                         .arg(path)
                         .stderr(Stdio::null())
@@ -230,10 +234,6 @@ impl Buoyant {
                     }
 
                     Task::none()
-                } else {
-                    self.current_path = path.to_owned();
-                    self.current_index = None;
-                    Task::done(Message::UpdateEntries(None))
                 }
             }
             Message::NavigateBack => {
@@ -322,13 +322,22 @@ impl Buoyant {
             }
 
             Message::UpdateEntries(prev_path) => {
-                self.entries.children.clear();
-                self.current_index = None;
                 self.selected.clear();
+                self.current_index = None;
 
-                let try_get_paths = path::read_dir(&self.current_path);
+                // clear all entries, without reallocating
+                self.entries.children.par_iter_mut().for_each(|item| {
+                    item.using = false;
+                    item.name.clear();
+                    item.path.clear();
+                    item.accessed = 0;
+                    item.created = 0;
+                    item.filetype.clear();
+                });
 
-                if let Err(error) = try_get_paths {
+                let try_cur_paths = path::read_dir(&self.current_path);
+
+                if let Err(error) = try_cur_paths {
                     self.states.explorer.error = Some(error);
 
                     return Task::none();
@@ -336,12 +345,8 @@ impl Buoyant {
 
                 self.states.explorer.error = None;
 
-                let cur_paths = try_get_paths.unwrap();
-
-                let mut i: usize = 0;
-
-                let entries = &mut self.entries.children;
-                let mut non_hidden_entries: Vec<Entry> = Vec::with_capacity(30);
+                let cur_paths = try_cur_paths.unwrap();
+                let mut index: usize = 0;
 
                 for path in cur_paths {
                     let is_hidden = path::is_hidden(&path);
@@ -350,50 +355,67 @@ impl Buoyant {
                         continue;
                     }
 
-                    let entry = Entry {
-                        id: i,
-                        name: path.file_name().unwrap().to_str().unwrap().to_string(),
-
-                        created: path::file_created(&path),
+                    let temp_item = TempItem {
+                        filetype: &path::file_type(&path),
                         accessed: path::file_accessed(&path),
-
-                        filetype: path::file_type(&path),
+                        created: path::file_created(&path),
                         filesize: path::file_size(&path),
-
-                        hovered: false,
                         hidden: is_hidden,
+                        name: path.file_name().unwrap().to_str().unwrap(),
 
-                        path: path,
+                        path: &path,
                     };
 
-                    if !is_hidden {
-                        non_hidden_entries.push(entry);
-                    } else {
-                        // pushing hidden entries in first so they display separately
-                        entries.push(entry);
+                    self.push_entry(&temp_item, index);
+
+                    index += 1;
+                }
+
+                // SORTING LOGIC
+                let mut actual_len = self.entries.children.len();
+                for (index, entry) in self.entries.children.iter().enumerate() {
+                    if !entry.using {
+                        actual_len = index + 1;
+                        break;
                     }
-
-                    i += 1;
                 }
 
-                // sorting logic
-                let sorting_config = &self.config.sorting;
+                let using_slice = &mut self.entries.children[..actual_len - 1];
 
-                sort(&sorting_config.sorting_by, entries);
-                sort(&sorting_config.sorting_by, &mut non_hidden_entries);
+                using_slice.par_sort_by(|a, b| {
+                    let (x, y) = (&a.hidden, &b.hidden);
+                    y.cmp(x)
+                });
 
-                if sorting_config.reversed {
-                    entries.reverse();
-                    non_hidden_entries.reverse();
+                // sort hidden and visible
+                // get the last hidden index to sort them separately from visible items
+
+                let mut last_hidden_index: usize = 0;
+
+                for (index, entry) in using_slice.iter().enumerate() {
+                    if !entry.hidden {
+                        last_hidden_index = index;
+                        break;
+                    }
                 }
 
-                self.entries.children.extend(non_hidden_entries);
+                sort(
+                    &self.config.sorting.sorting_by,
+                    &mut using_slice[..last_hidden_index],
+                    self.config.sorting.reversed,
+                );
+
+                sort(
+                    &self.config.sorting.sorting_by,
+                    &mut self.entries.children[last_hidden_index..actual_len],
+                    self.config.sorting.reversed,
+                );
 
                 // highlight from lower directory if provided
                 if let Some(path) = prev_path {
-                    self.entries.children.iter().for_each(|entry| {
-                        if entry.path == path {
-                            self.current_index = Some(self.entries.index(&entry.id));
+                    self.entries.children.iter().for_each(|item| {
+                        if item.path == path {
+                            self.current_index = Some(self.entries.index(&item.id));
                         }
                     });
                 }
@@ -401,9 +423,9 @@ impl Buoyant {
                 Task::none()
             }
             Message::HoverEntry(id, state) => {
-                self.entries.children.par_iter_mut().for_each(|entry| {
-                    if entry.id == id {
-                        entry.hovered = state
+                self.entries.children.par_iter_mut().for_each(|item| {
+                    if item.id == id {
+                        item.hovered = state
                     }
                 });
 
@@ -513,10 +535,10 @@ impl Buoyant {
             }
             Message::Delete => {
                 for index in &self.selected {
-                    let try_getentry = &self.entries.children.get(*index);
+                    let try_getitem = &self.entries.children.get(*index);
 
-                    if let Some(entry) = try_getentry {
-                        path::delete(&entry.path);
+                    if let Some(item) = try_getitem {
+                        path::delete(&item.path);
                     }
                 }
 
@@ -536,11 +558,12 @@ impl Buoyant {
                 } else if let Some(index) = index_opt {
                     current_index = *index;
                 }
-                // shitty logic that forces the index to be 0 if nothing is selected yet.
 
                 match direction {
                     Direction::Down => {
-                        if current_index < self.entries.children.len() - 1 {
+                        if current_index < self.entries.children.len() - 1
+                            && self.entries.children[current_index + 1].using
+                        {
                             current_index += 1;
                         }
                     }
@@ -896,7 +919,8 @@ impl Buoyant {
         let explorer_column = column(
             entries
                 .iter()
-                .map(|entry| {
+                .filter(|item| item.using)
+                .map(|item| {
                     let mut row = row![].spacing(10);
 
                     for child in &self.config.view {
@@ -904,10 +928,10 @@ impl Buoyant {
                             Displaying::Name => {
                                 row = row.push(
                                     container(
-                                        text(&entry.name)
+                                        text(&item.name)
                                             .wrapping(Wrapping::None)
                                             .align_x(alignment::Horizontal::Left)
-                                            .color(if entry.hidden {
+                                            .color(if item.hidden {
                                                 darken_text_color
                                             } else {
                                                 text_color
@@ -920,10 +944,10 @@ impl Buoyant {
                             Displaying::FileSize => {
                                 row = row.push(
                                     container(
-                                        text(path::bytes_to_string(&entry.filesize))
+                                        text(path::bytes_to_string(&item.filesize))
                                             .align_x(alignment::Horizontal::Left)
                                             .wrapping(Wrapping::None)
-                                            .color(if entry.hidden {
+                                            .color(if item.hidden {
                                                 darken_text_color
                                             } else {
                                                 text_color
@@ -936,10 +960,10 @@ impl Buoyant {
                             Displaying::FileType => {
                                 row = row.push(
                                     container(
-                                        text(&entry.filetype)
+                                        text(&item.filetype)
                                             .align_x(alignment::Horizontal::Left)
                                             .wrapping(Wrapping::None)
-                                            .color(if entry.hidden {
+                                            .color(if item.hidden {
                                                 darken_text_color
                                             } else {
                                                 text_color
@@ -952,10 +976,10 @@ impl Buoyant {
                             Displaying::Created => {
                                 row = row.push(
                                     container(
-                                        text(format_date(entry.created))
+                                        text(format_date(item.created))
                                             .align_x(alignment::Horizontal::Left)
                                             .wrapping(Wrapping::None)
-                                            .color(if entry.hidden {
+                                            .color(if item.hidden {
                                                 darken_text_color
                                             } else {
                                                 text_color
@@ -968,10 +992,10 @@ impl Buoyant {
                             Displaying::LastAccessed => {
                                 row = row.push(
                                     container(
-                                        text(format_date(entry.accessed))
+                                        text(format_date(item.accessed))
                                             .align_x(alignment::Horizontal::Left)
                                             .wrapping(Wrapping::None)
-                                            .color(if entry.hidden {
+                                            .color(if item.hidden {
                                                 darken_text_color
                                             } else {
                                                 text_color
@@ -984,20 +1008,20 @@ impl Buoyant {
                         }
                     }
 
-                    let index = self.entries.index(&entry.id);
+                    let index = self.entries.index(&item.id);
 
                     container(
                         mouse_area(row)
                             .on_double_click(Message::Open(Some(index)))
                             .on_press(Message::Select(index))
-                            .on_enter(Message::HoverEntry(entry.id, true))
-                            .on_exit(Message::HoverEntry(entry.id, false)),
+                            .on_enter(Message::HoverEntry(item.id, true))
+                            .on_exit(Message::HoverEntry(item.id, false)),
                     )
                     .center_y(30)
                     .padding(Padding::from([0, 5]))
                     .style(|_| {
                         let mut style = container::Style::default();
-                        let index = self.entries.index(&entry.id);
+                        let index = self.entries.index(&item.id);
 
                         if let Some(cur_index) = self.current_index
                             && cur_index == index
@@ -1009,7 +1033,7 @@ impl Buoyant {
                             };
                         }
 
-                        if entry.hovered {
+                        if item.hovered {
                             style.background =
                                 Some(Background::Color(Color::from_rgba(0.4, 0.4, 0.4, 0.1)));
                         }
@@ -1201,22 +1225,22 @@ impl Buoyant {
         .spacing(10);
 
         if let Some(index) = self.current_index {
-            let entry = self.entries.children.get(index).unwrap();
+            let item = self.entries.children.get(index).unwrap();
 
             file_info = file_info.extend(vec![
-                text(format!("name: {}", entry.name)).into(),
-                text(format!("type: {}", entry.filetype)).into(),
-                text(format!("size: {}", path::bytes_to_string(&entry.filesize))).into(),
+                text(format!("name: {}", item.name)).into(),
+                text(format!("type: {}", item.filetype)).into(),
+                text(format!("size: {}", path::bytes_to_string(&item.filesize))).into(),
                 text(format!(
                     "last accessed: {}",
-                    DateTime::from_timestamp_secs(entry.accessed)
+                    DateTime::from_timestamp_secs(item.accessed)
                         .unwrap()
                         .format(&self.config.misc.format_date)
                 ))
                 .into(),
                 text(format!(
                     "creation date: {}",
-                    DateTime::from_timestamp_secs(entry.created)
+                    DateTime::from_timestamp_secs(item.created)
                         .unwrap()
                         .format(&self.config.misc.format_date)
                 ))
@@ -1415,6 +1439,46 @@ impl Buoyant {
         self.theme.clone()
     }
 
+    pub fn push_entry(&mut self, entry: &TempItem, index: usize) {
+        let filesize = entry.filesize;
+        let hidden = entry.hidden;
+        let accessed = entry.accessed;
+        let created = entry.created;
+        let name = entry.name;
+        let path = entry.path;
+        let filetype = entry.filetype;
+
+        let try_item = self.entries.children.get_mut(index);
+
+        if let Some(item) = try_item {
+            item.filesize = filesize;
+            item.hidden = hidden;
+            item.accessed = accessed;
+            item.created = created;
+            item.using = true;
+
+            item.name.push_str(name);
+            item.path.push(path);
+            item.filetype.push_str(filetype);
+        } else {
+            let mut entry = Item {
+                filesize,
+                hidden,
+                accessed,
+                created,
+                using: true,
+                id: self.entries.children.len(),
+                ..Default::default()
+            };
+
+            entry.name.push_str(name);
+            entry.path.push(path);
+            entry.filetype.push_str(filetype);
+
+            self.entries.children.push(entry);
+        }
+    }
+
     pub fn subscription(&self) -> Subscription<Message> {
         event::listen_with(move |event, status, _| {
             if status == Status::Captured {
@@ -1443,28 +1507,35 @@ impl Buoyant {
     }
 }
 
-fn sort(sorting_by: &SortingBy, entries: &mut Vec<Entry>) {
+fn sort<T>(sorting_by: &SortingBy, entries: &mut [T], is_reversed: bool)
+where
+    T: Entry + std::marker::Send,
+{
     match sorting_by {
         SortingBy::Name => entries.par_sort_by(|a, b| {
-            let (x, y) = (&a.name, &b.name);
+            let (x, y) = (&a.name(), &b.name());
             x.cmp(y)
         }),
         SortingBy::Size => entries.par_sort_by(|a, b| {
-            let (x, y) = (&a.filesize, &b.filesize);
+            let (x, y) = (&a.filesize(), &b.filesize());
             x.cmp(y)
         }),
         SortingBy::Type => entries.par_sort_by(|a, b| {
-            let (x, y) = (&a.filetype, &b.filetype);
+            let (x, y) = (&a.filetype(), &b.filetype());
             x.cmp(y)
         }),
         SortingBy::Created => entries.par_sort_by(|a, b| {
-            let (x, y) = (&a.created, &b.created);
+            let (x, y) = (&a.created(), &b.created());
             x.cmp(y)
         }),
         SortingBy::Accessed => entries.par_sort_by(|a, b| {
-            let (x, y) = (&a.accessed, &b.accessed);
+            let (x, y) = (&a.accessed(), &b.accessed());
             x.cmp(y)
         }),
+    }
+
+    if is_reversed {
+        entries.reverse();
     }
 }
 
