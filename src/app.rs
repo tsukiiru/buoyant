@@ -929,6 +929,7 @@ impl Buoyant {
 
     pub fn view(&self) -> Element<'_, Message> {
         let palette = self.theme.palette();
+
         if self.states.is_loading {
             return container(text("loading...").size(17))
                 .style(move |_| palette.background.scale_alpha(0.8).into())
@@ -947,7 +948,7 @@ impl Buoyant {
                 .map(|item| {
                     let mut row = row![].spacing(10);
 
-                    for child in &self.config.view {
+                    for child in &self.config.view.explorer {
                         match child {
                             Displaying::Name => {
                                 row = row.push(
@@ -969,7 +970,7 @@ impl Buoyant {
                                 let txt = if let Some(s) = item.foldersize {
                                     format!("{} items", s)
                                 } else {
-                                    path::bytes_to_string(&item.filesize)
+                                    path::bytes_to_string(item.filesize)
                                 };
 
                                 row = row.push(
@@ -1089,7 +1090,7 @@ impl Buoyant {
 
         let mut column_names = row![].spacing(10).padding(5);
 
-        for child in &self.config.view {
+        for child in &self.config.view.explorer {
             match child {
                 Displaying::Name => {
                     column_names = column_names.push(
@@ -1257,26 +1258,43 @@ impl Buoyant {
         if let Some(index) = self.current_index {
             let item = self.entries.children.get(index).unwrap();
 
-            file_info = file_info.extend(vec![
-                text(format!("name: {}", item.name)).into(),
-                text(format!("type: {}", item.filetype)).into(),
-                text(format!("size: {}", path::bytes_to_string(&item.filesize))).into(),
-                text(format!(
-                    "last accessed: {}",
-                    DateTime::from_timestamp_secs(item.accessed)
-                        .unwrap()
-                        .format(&self.config.misc.format_date)
-                ))
-                .into(),
-                text(format!(
-                    "creation date: {}",
-                    DateTime::from_timestamp_secs(item.created)
-                        .unwrap()
-                        .format(&self.config.misc.format_date)
-                ))
-                .into(),
-            ]);
-        }
+            for v in &self.config.view.metadata {
+                match v {
+                    Displaying::Name => {
+                        file_info = file_info.push(text(format!("name: {}", item.name)));
+                    }
+                    Displaying::FileType => {
+                        file_info = file_info.push(text(format!("type: {}", item.filetype)));
+                    }
+                    Displaying::FileSize => {
+                        file_info = file_info.push(text(format!(
+                            "size: {}",
+                            path::bytes_to_string(if self.config.misc.accurate_filesize {
+                                path::accurate_filesize(&item.path)
+                            } else {
+                                item.filesize
+                            })
+                        )));
+                    }
+                    Displaying::LastAccessed => {
+                        file_info = file_info.push(text(format!(
+                            "last accessed: {}",
+                            DateTime::from_timestamp_secs(item.accessed)
+                                .unwrap()
+                                .format(&self.config.misc.format_date)
+                        )));
+                    }
+                    Displaying::Created => {
+                        file_info = file_info.push(text(format!(
+                            "creation date: {}",
+                            DateTime::from_timestamp_secs(item.created)
+                                .unwrap()
+                                .format(&self.config.misc.format_date)
+                        )));
+                    }
+                };
+            }
+        };
 
         let right_col = column![explorer_info, file_info].width(300).spacing(20);
 
@@ -1532,7 +1550,6 @@ impl Buoyant {
                     (key::Physical::Code(Code::Enter), _) => Some(Message::SelectChoice),
 
                     _ => Some(Message::KeyPressed(physical_key, modifiers)),
-                    // weird stuff going on with my lsp, why is it lagging so much here?
                 },
                 _ => None,
             }

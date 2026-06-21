@@ -8,7 +8,7 @@ use std::{env::home_dir, fs};
 
 pub struct Config {
     pub keybinds: KeybindsConfig,
-    pub view: Vec<Displaying>,
+    pub view: View,
     pub sorting: Sorting,
     pub view_hidden: bool,
     pub misc: Misc,
@@ -19,14 +19,15 @@ impl Default for Config {
         let mut ctrl_shift_mod = Modifiers::CTRL;
         ctrl_shift_mod.insert(Modifiers::SHIFT);
 
-        let mut view_vec = Vec::with_capacity(5);
-        view_vec.push(Displaying::Name);
+        let mut view = View::default();
+        view.explorer.push(Displaying::Name);
 
         Config {
-            view: view_vec,
+            view: view,
             sorting: Sorting::default(),
             misc: Misc {
                 format_date: String::from("%d/%m/%Y, %I:%M:%S %p"),
+                accurate_filesize: false,
             },
             view_hidden: false,
             keybinds: KeybindsConfig {
@@ -95,6 +96,26 @@ impl Default for Config {
     }
 }
 
+pub struct View {
+    pub explorer: Vec<Displaying>,
+    pub metadata: Vec<Displaying>,
+}
+
+impl Default for View {
+    fn default() -> Self {
+        View {
+            explorer: Vec::with_capacity(5),
+            metadata: vec![
+                Displaying::Name,
+                Displaying::LastAccessed,
+                Displaying::Created,
+                Displaying::FileType,
+                Displaying::FileSize,
+            ],
+        }
+    }
+}
+
 pub struct KeybindsConfig {
     pub navigate_up: KeybindEntry,
     pub navigate_down: KeybindEntry,
@@ -115,6 +136,7 @@ pub struct KeybindsConfig {
 
 pub struct Misc {
     pub format_date: String,
+    pub accurate_filesize: bool,
 }
 
 pub struct Sorting {
@@ -174,6 +196,7 @@ struct RawConfig {
 #[derive(Deserialize)]
 struct RawMiscConfig {
     format_time: Option<String>,
+    accurate_filesize: Option<bool>,
 }
 
 #[derive(Deserialize)]
@@ -203,7 +226,8 @@ struct RawKeybindsConfig {
 
 #[derive(Deserialize)]
 struct RawViewConfig {
-    enabled: Option<Vec<String>>,
+    explorer: Option<Vec<String>>,
+    metadata: Option<Vec<String>>,
 }
 
 pub enum Displaying {
@@ -236,6 +260,10 @@ fn process_misc(raw_config: RawMiscConfig, config: &mut Misc) {
     if let Some(c) = raw_config.format_time {
         config.format_date = c;
     }
+
+    if let Some(conf) = raw_config.accurate_filesize {
+        config.accurate_filesize = conf;
+    }
 }
 
 fn process_sorting(raw_sorting: RawSortingConfig, config: &mut Sorting) {
@@ -255,15 +283,31 @@ fn process_sorting(raw_sorting: RawSortingConfig, config: &mut Sorting) {
     }
 }
 
-fn process_view(raw_view: RawViewConfig, config: &mut Vec<Displaying>) {
-    config.clear();
-    if let Some(conf) = raw_view.enabled {
+fn process_view(raw_view: RawViewConfig, config: &mut View) {
+    if let Some(conf) = raw_view.explorer {
+        config.explorer.clear();
+        let explorer_conf = &mut config.explorer;
+
         conf.iter().for_each(|child| match child.as_str() {
-            "name" => config.push(Displaying::Name),
-            "last_accessed" => config.push(Displaying::LastAccessed),
-            "created" => config.push(Displaying::Created),
-            "file_type" => config.push(Displaying::FileType),
-            "file_size" => config.push(Displaying::FileSize),
+            "name" => explorer_conf.push(Displaying::Name),
+            "last_accessed" => explorer_conf.push(Displaying::LastAccessed),
+            "created" => explorer_conf.push(Displaying::Created),
+            "file_type" => explorer_conf.push(Displaying::FileType),
+            "file_size" => explorer_conf.push(Displaying::FileSize),
+            _ => {}
+        })
+    }
+
+    if let Some(conf) = raw_view.metadata {
+        config.metadata.clear();
+        let metadata_conf = &mut config.metadata;
+
+        conf.iter().for_each(|child| match child.as_str() {
+            "name" => metadata_conf.push(Displaying::Name),
+            "last_accessed" => metadata_conf.push(Displaying::LastAccessed),
+            "created" => metadata_conf.push(Displaying::Created),
+            "file_type" => metadata_conf.push(Displaying::FileType),
+            "file_size" => metadata_conf.push(Displaying::FileSize),
             _ => {}
         })
     }

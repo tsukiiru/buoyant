@@ -10,6 +10,9 @@ pub fn extension_to_filetype(extension: &str) -> Option<String> {
         "avif" => "AVIF Image",
         "gif" => "GIF Image",
         // videos
+        "mp4" => "MP4 Video",
+        // audio
+        "mp3" => "MP3 Audio",
         // text
         "rs" => "Rust Source File",
         "py" => "Python Source File",

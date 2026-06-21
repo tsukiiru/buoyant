@@ -5,6 +5,7 @@ use std::{
     os::unix::fs::MetadataExt,
     path::{Path, PathBuf},
     process::Command,
+    str::from_utf8,
     time::SystemTime,
 };
 
@@ -296,7 +297,7 @@ pub fn file_created(path: &Path) -> i64 {
     }
 }
 
-/*pub fn accurate_filesize(path: &Path) -> u64 {
+pub fn accurate_filesize(path: &Path) -> u64 {
     if !path.exists() {
         return 0_u64;
     }
@@ -319,7 +320,7 @@ pub fn file_created(path: &Path) -> i64 {
     // since the size from du is in KiB
     //
     size
-}*/
+}
 // THIS IS REALLY EXPENSIVE AND SLOW WHEN THERE ARE TOO MANY FILES
 // Though similar approaches should be considered for more accurate file size.
 
@@ -354,21 +355,21 @@ pub fn folder_size(path: &Path) -> Option<usize> {
     None
 }
 
-pub fn bytes_to_string(size: &u64) -> String {
+pub fn bytes_to_string(size: u64) -> String {
     // i dont think someone would have petabytes of data on their personal computer,,,
-    if *size >= 10_u64.pow(12) {
+    if size >= 10_u64.pow(12) {
         // TiB
         let round = size / 10_u64.pow(12);
         return format!("{:.2}TiB", round);
-    } else if *size >= 10_u64.pow(9) {
+    } else if size >= 10_u64.pow(9) {
         // GiB
         let round = size / 10_u64.pow(9);
         return format!("{:.2}GiB", round);
-    } else if *size >= 10_u64.pow(6) {
+    } else if size >= 10_u64.pow(6) {
         // MiB
         let round = size / 10_u64.pow(6);
         return format!("{:.2}MiB", round);
-    } else if *size >= 10_u64.pow(3) {
+    } else if size >= 10_u64.pow(3) {
         // KiB
         let round = size / 10_u64.pow(3);
         return format!("{:.2}KiB", round);
