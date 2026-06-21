@@ -25,9 +25,9 @@ heavily in development state and experimental, not like theres gonna be many bre
   
 #### creating file or folder
 you can input a whole long path into it, for example:  
-`hey/michael/vsauce/here`  
+`hey/vsauce/michael/here`  
 lets say im creating a new folder then in the current directory, we will have this:  
-`📁 youarehere` > `📁 hey` > `📁 michael` > `📁 vsauce` > `📁 here`  
+`📁 youarehere` > `📁 hey` > `📁 vsauce` > `📁 michael` > `📁 here`  
 so cool right?
 
 #### visual mode?
