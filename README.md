@@ -19,10 +19,10 @@ heavily in development state and experimental, not like theres gonna be many bre
 *[pretend theres a preview picture here with blurred background and a giant stylish logo in the middle]*
 
 ### fun stuff
-- amazing configuration file in toml language, from a to z (only keybinds is supported currently now tho)
+- amazing configuration file in toml language, from a to z (theme soon)
 - keybinds-heavy
-- yeah thats it for now...
-
+- very cool stuff im sure, go read down below
+  
 #### creating file or folder
 you can input a whole long path into it, for example:  
 `hey/michael/vsauce/here`  
