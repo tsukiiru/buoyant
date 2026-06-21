@@ -106,7 +106,7 @@ default: `"name"`
 type: string  
 available values: name, accessed, created, type, size   
 
-**key: reversed**
+**key: reversed**  
 default: `false`  
 type: boolean  
 
