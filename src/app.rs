@@ -40,6 +40,7 @@ struct States {
     modals: ModalsState,
     explorer: ExplorerState,
     is_visual_mode: bool,
+    is_loading: bool,
 }
 
 impl Default for States {
@@ -49,6 +50,7 @@ impl Default for States {
             modals: ModalsState::default(),
             explorer: ExplorerState::default(),
             is_visual_mode: false,
+            is_loading: false,
         }
     }
 }
@@ -149,6 +151,9 @@ pub enum Message {
     ClearChoices,
     SelectChoice,
     ChoiceIndex(bool),
+
+    // app
+    FetchConfig,
 }
 
 pub struct Buoyant {
@@ -166,7 +171,7 @@ pub struct Buoyant {
 }
 
 impl Buoyant {
-    pub fn new(input: &str, config: config::Config) -> (Self, Task<Message>) {
+    pub fn new(input: &str) -> (Self, Task<Message>) {
         let path_conversion = PathBuf::from(input);
         let path: PathBuf;
 
@@ -184,7 +189,7 @@ impl Buoyant {
 
         (
             Buoyant {
-                config,
+                config: config::Config::default(),
                 theme: Theme::CatppuccinLatte,
 
                 current_path: path,
@@ -196,12 +201,19 @@ impl Buoyant {
 
                 states: States::default(),
             },
-            Task::done(Message::UpdateEntries(None)),
+            Task::done(Message::FetchConfig).chain(Task::done(Message::UpdateEntries(None))),
         )
     }
 
     pub fn update(&mut self, message: Message) -> Task<Message> {
         match message {
+            Message::FetchConfig => {
+                self.states.is_loading = true;
+                config::fetch(&mut self.config);
+                self.states.is_loading = false;
+                Task::none()
+            }
+
             Message::Open(index) => {
                 if index.is_none() {
                     return Task::none();
@@ -290,7 +302,6 @@ impl Buoyant {
                 {
                     self.clipboard.entries.clear();
                     self.clipboard.mode = None;
-
                     return Task::none();
                 } else if physical_key == keybinds.delete_selections.key
                     && modifiers == keybinds.delete_selections.modifiers
@@ -316,6 +327,11 @@ impl Buoyant {
                     && modifiers == keybinds.toggle_visual_mode.modifiers
                 {
                     return Task::done(Message::ToggleVisualMode);
+                } else if physical_key == keybinds.refresh.key
+                    && modifiers == keybinds.refresh.modifiers
+                {
+                    return Task::done(Message::FetchConfig)
+                        .chain(Task::done(Message::UpdateEntries(None)));
                 }
 
                 Task::none()
@@ -332,12 +348,13 @@ impl Buoyant {
                     item.path.clear();
                     item.accessed = 0;
                     item.created = 0;
+                    item.foldersize = None;
                     item.filetype.clear();
                 });
 
-                let try_cur_paths = path::read_dir(&self.current_path);
+                let cur_paths_opt = path::read_dir(&self.current_path);
 
-                if let Err(error) = try_cur_paths {
+                if let Err(error) = cur_paths_opt {
                     self.states.explorer.error = Some(error);
 
                     return Task::none();
@@ -345,7 +362,7 @@ impl Buoyant {
 
                 self.states.explorer.error = None;
 
-                let cur_paths = try_cur_paths.unwrap();
+                let cur_paths = cur_paths_opt.unwrap();
                 let mut index: usize = 0;
 
                 for path in cur_paths {
@@ -360,6 +377,7 @@ impl Buoyant {
                         accessed: path::file_accessed(&path),
                         created: path::file_created(&path),
                         filesize: path::file_size(&path),
+                        foldersize: path::folder_size(&path),
                         hidden: is_hidden,
                         name: path.file_name().unwrap().to_str().unwrap(),
 
@@ -407,7 +425,7 @@ impl Buoyant {
 
                 sort(
                     &self.config.sorting.sorting_by,
-                    &mut self.entries.children[last_hidden_index..actual_len],
+                    &mut using_slice[last_hidden_index..],
                     self.config.sorting.reversed,
                 );
 
@@ -452,13 +470,13 @@ impl Buoyant {
             }
 
             Message::ExplorerScroll(target) => {
-                let try_current_index = self.current_index;
+                let cur_index_opt = self.current_index;
 
-                if try_current_index.is_none() {
+                if cur_index_opt.is_none() {
                     return Task::none();
                 }
 
-                let current_index: f32 = try_current_index.unwrap() as f32 + 1.0;
+                let current_index: f32 = cur_index_opt.unwrap() as f32 + 1.0;
                 let offset: f32 = 40.0 * (current_index - 1.0);
 
                 let height = target.unwrap().visible_bounds().unwrap().height;
@@ -535,9 +553,9 @@ impl Buoyant {
             }
             Message::Delete => {
                 for index in &self.selected {
-                    let try_getitem = &self.entries.children.get(*index);
+                    let item_opt = &self.entries.children.get(*index);
 
-                    if let Some(item) = try_getitem {
+                    if let Some(item) = item_opt {
                         path::delete(&item.path);
                     }
                 }
@@ -910,9 +928,15 @@ impl Buoyant {
     }
 
     pub fn view(&self) -> Element<'_, Message> {
-        let entries = &self.entries.children;
-
         let palette = self.theme.palette();
+        if self.states.is_loading {
+            return container(text("loading...").size(17))
+                .style(move |_| palette.background.scale_alpha(0.8).into())
+                .center(Length::Fill)
+                .into();
+        }
+
+        let entries = &self.entries.children;
         let text_color = palette.text;
         let darken_text_color = text_color.scale_alpha(0.69);
 
@@ -942,9 +966,15 @@ impl Buoyant {
                                 )
                             }
                             Displaying::FileSize => {
+                                let txt = if let Some(s) = item.foldersize {
+                                    format!("{} items", s)
+                                } else {
+                                    path::bytes_to_string(&item.filesize)
+                                };
+
                                 row = row.push(
                                     container(
-                                        text(path::bytes_to_string(&item.filesize))
+                                        text(txt)
                                             .align_x(alignment::Horizontal::Left)
                                             .wrapping(Wrapping::None)
                                             .color(if item.hidden {
@@ -1163,7 +1193,7 @@ impl Buoyant {
 
         let left_col = column![
             row![
-                button(text("....")).on_press(Message::NavigateBack),
+                button(text("..back")).on_press(Message::NavigateBack),
                 container(text(format!("{}", self.current_path.display())))
                     .style(move |_| { palette.text.scale_alpha(0.1).into() })
                     .center_y(30)
@@ -1447,15 +1477,17 @@ impl Buoyant {
         let name = entry.name;
         let path = entry.path;
         let filetype = entry.filetype;
+        let foldersize = entry.foldersize;
 
-        let try_item = self.entries.children.get_mut(index);
+        let item_opt = self.entries.children.get_mut(index);
 
-        if let Some(item) = try_item {
+        if let Some(item) = item_opt {
             item.filesize = filesize;
             item.hidden = hidden;
             item.accessed = accessed;
             item.created = created;
             item.using = true;
+            item.foldersize = foldersize;
 
             item.name.push_str(name);
             item.path.push(path);
@@ -1466,6 +1498,7 @@ impl Buoyant {
                 hidden,
                 accessed,
                 created,
+                foldersize,
                 using: true,
                 id: self.entries.children.len(),
                 ..Default::default()

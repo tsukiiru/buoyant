@@ -71,6 +71,7 @@ pub struct TempItem<'a> {
     pub accessed: i64,
     pub created: i64,
     pub filesize: u64,
+    pub foldersize: Option<usize>,
 
     pub hidden: bool,
 }
@@ -129,6 +130,7 @@ pub struct Item {
     pub created: i64,
     pub filetype: String,
     pub filesize: u64,
+    pub foldersize: Option<usize>, // number of items in the folder (if it is)
 
     pub hidden: bool,
     pub hovered: bool,
@@ -145,6 +147,7 @@ impl Default for Item {
             created: 0,
             filetype: String::with_capacity(20),
             filesize: 0,
+            foldersize: None,
             hidden: false,
             hovered: false,
             using: false,

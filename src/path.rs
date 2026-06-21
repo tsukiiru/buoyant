@@ -77,12 +77,12 @@ pub fn create(current_path: &Path, new_path: &Path, last_is_file: bool) -> Optio
     None
 }
 
-fn operation_recursion<'a>(
+fn paste<'a>(
     dest: &Path,
     prevs: &mut Vec<&'a str>,
-    operation: &PasteType,
+    paste_type: &PasteType,
     path: &'a Path,
-    is_cut: bool,
+    is_cut: bool, // true - cut. false - copy
 ) {
     let name = path.file_name().unwrap().to_str().unwrap();
     let mut final_path = dest.to_path_buf();
@@ -91,12 +91,11 @@ fn operation_recursion<'a>(
     let joined = &final_path.join(&name);
     // check if not exists in the destination
     if !joined.exists() {
-        //println!("already existed");
         move_file(path, joined, is_cut);
         return;
     }
 
-    match operation {
+    match paste_type {
         PasteType::Duplicate => {
             let result = file_extension(path);
             let ext = if result == "" {
@@ -106,7 +105,6 @@ fn operation_recursion<'a>(
             };
             // since both file/folder has the same outcome for choosing duplicate
             let new_path = increment_suffix(&file_name(path), ext.as_str(), &final_path);
-            //println!("{}, {}", new_path.display(), is_cut);
             move_file(path, &new_path, is_cut);
         }
         PasteType::Replace => {
@@ -119,7 +117,7 @@ fn operation_recursion<'a>(
                 replace_file(path, joined, is_cut);
             } else {
                 prevs.push(name);
-                operation_recursion(dest, prevs, operation, path, is_cut);
+                paste(dest, prevs, paste_type, path, is_cut);
             }
         }
     }
@@ -142,7 +140,7 @@ pub fn move_dir(old_files: &HashSet<PathBuf>, dest: &Path, operation: &PasteType
         clean_path.pop();
 
         if clean_path != dest {
-            operation_recursion(&dest, &mut Vec::with_capacity(5), operation, &path, true);
+            paste(&dest, &mut Vec::with_capacity(5), operation, &path, true);
         }
     })
 }
@@ -154,7 +152,7 @@ pub fn copy_dir(old_files: &HashSet<PathBuf>, dest: &Path, operation: &PasteType
 
     old_files
         .par_iter()
-        .for_each(|p| operation_recursion(dest, &mut Vec::with_capacity(5), operation, &p, false));
+        .for_each(|p| paste(dest, &mut Vec::with_capacity(5), operation, &p, false));
 }
 
 fn move_file(old_path: &Path, new_path: &Path, is_cut: bool) {
@@ -280,7 +278,7 @@ pub fn file_accessed(path: &Path) -> i64 {
             .as_secs()
             .try_into()
             .unwrap(),
-        Err(_e) => 0, // TODO: add perms issues
+        Err(_) => 0, // TODO: add perms issues
     }
 }
 
@@ -294,11 +292,11 @@ pub fn file_created(path: &Path) -> i64 {
             .as_secs()
             .try_into()
             .unwrap(),
-        Err(_e) => 0,
+        Err(_) => 0,
     }
 }
 
-/*pub fn get_filesize(path: &Path) -> u64 {
+/*pub fn accurate_filesize(path: &Path) -> u64 {
     if !path.exists() {
         return 0_u64;
     }
@@ -341,6 +339,19 @@ pub fn file_size(path: &Path) -> u64 {
 
     let metadata = read_metadata.unwrap();
     metadata.size()
+}
+
+pub fn folder_size(path: &Path) -> Option<usize> {
+    if path.is_file() {
+        return None;
+    }
+
+    let read_opt = read_dir(&path);
+    if let Ok(children) = read_opt {
+        return Some(children.len());
+    }
+
+    None
 }
 
 pub fn bytes_to_string(size: &u64) -> String {

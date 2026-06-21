@@ -14,6 +14,87 @@ pub struct Config {
     pub misc: Misc,
 }
 
+impl Default for Config {
+    fn default() -> Self {
+        let mut ctrl_shift_mod = Modifiers::CTRL;
+        ctrl_shift_mod.insert(Modifiers::SHIFT);
+
+        let mut view_vec = Vec::with_capacity(5);
+        view_vec.push(Displaying::Name);
+
+        Config {
+            view: view_vec,
+            sorting: Sorting::default(),
+            misc: Misc {
+                format_date: String::from("%d/%m/%Y, %I:%M:%S %p"),
+            },
+            view_hidden: false,
+            keybinds: KeybindsConfig {
+                navigate_up: KeybindEntry {
+                    key: Physical::Code(Code::ArrowUp),
+                    modifiers: Modifiers::NONE,
+                },
+                navigate_down: KeybindEntry {
+                    key: Physical::Code(Code::ArrowDown),
+                    modifiers: Modifiers::NONE,
+                },
+                navigate_backward: KeybindEntry {
+                    key: Physical::Code(Code::ArrowLeft),
+                    modifiers: Modifiers::NONE,
+                },
+                navigate_forward: KeybindEntry {
+                    key: Physical::Code(Code::ArrowRight),
+                    modifiers: Modifiers::NONE,
+                },
+                copy_to_clipboard: KeybindEntry {
+                    key: Physical::Code(Code::KeyC),
+                    modifiers: Modifiers::CTRL,
+                },
+                cut_to_clipboard: KeybindEntry {
+                    key: Physical::Code(Code::KeyX),
+                    modifiers: Modifiers::CTRL,
+                },
+                paste_from_clipboard: KeybindEntry {
+                    key: Physical::Code(Code::KeyV),
+                    modifiers: Modifiers::CTRL,
+                },
+                clear_clipboard: KeybindEntry {
+                    key: Physical::Code(Code::KeyV),
+                    modifiers: ctrl_shift_mod,
+                },
+                delete_selections: KeybindEntry {
+                    key: Physical::Code(Code::Delete),
+                    modifiers: Modifiers::NONE,
+                },
+                rename_file: KeybindEntry {
+                    key: Physical::Code(Code::F2),
+                    modifiers: Modifiers::NONE,
+                },
+                toggle_hidden_view: KeybindEntry {
+                    key: Physical::Code(Code::KeyH),
+                    modifiers: Modifiers::CTRL,
+                },
+                create_file_path: KeybindEntry {
+                    key: Physical::Code(Code::KeyN),
+                    modifiers: Modifiers::CTRL,
+                },
+                create_folder_path: KeybindEntry {
+                    key: Physical::Code(Code::KeyN),
+                    modifiers: Modifiers::ALT,
+                },
+                toggle_visual_mode: KeybindEntry {
+                    key: Physical::Code(Code::KeyV),
+                    modifiers: Modifiers::NONE,
+                },
+                refresh: KeybindEntry {
+                    key: Physical::Code(Code::KeyR),
+                    modifiers: Modifiers::CTRL,
+                },
+            },
+        }
+    }
+}
+
 pub struct KeybindsConfig {
     pub navigate_up: KeybindEntry,
     pub navigate_down: KeybindEntry,
@@ -29,6 +110,7 @@ pub struct KeybindsConfig {
     pub create_file_path: KeybindEntry,
     pub create_folder_path: KeybindEntry,
     pub toggle_visual_mode: KeybindEntry,
+    pub refresh: KeybindEntry,
 }
 
 pub struct Misc {
@@ -64,78 +146,7 @@ pub struct KeybindEntry {
     pub modifiers: Modifiers,
 }
 
-pub fn get_keybinds() -> Config {
-    let mut ctrl_shift_mod = Modifiers::CTRL;
-    ctrl_shift_mod.insert(Modifiers::SHIFT);
-
-    // default config
-    let mut config = Config {
-        view: Vec::with_capacity(5),
-        sorting: Sorting::default(),
-        misc: Misc {
-            format_date: String::from("%d/%m/%Y, %I:%M:%S %p"),
-        },
-        view_hidden: false,
-        keybinds: KeybindsConfig {
-            navigate_up: KeybindEntry {
-                key: Physical::Code(Code::ArrowUp),
-                modifiers: Modifiers::NONE,
-            },
-            navigate_down: KeybindEntry {
-                key: Physical::Code(Code::ArrowDown),
-                modifiers: Modifiers::NONE,
-            },
-            navigate_backward: KeybindEntry {
-                key: Physical::Code(Code::ArrowLeft),
-                modifiers: Modifiers::NONE,
-            },
-            navigate_forward: KeybindEntry {
-                key: Physical::Code(Code::ArrowRight),
-                modifiers: Modifiers::NONE,
-            },
-            copy_to_clipboard: KeybindEntry {
-                key: Physical::Code(Code::KeyC),
-                modifiers: Modifiers::CTRL,
-            },
-            cut_to_clipboard: KeybindEntry {
-                key: Physical::Code(Code::KeyX),
-                modifiers: Modifiers::CTRL,
-            },
-            paste_from_clipboard: KeybindEntry {
-                key: Physical::Code(Code::KeyV),
-                modifiers: Modifiers::CTRL,
-            },
-            clear_clipboard: KeybindEntry {
-                key: Physical::Code(Code::KeyV),
-                modifiers: ctrl_shift_mod,
-            },
-            delete_selections: KeybindEntry {
-                key: Physical::Code(Code::Delete),
-                modifiers: Modifiers::NONE,
-            },
-            rename_file: KeybindEntry {
-                key: Physical::Code(Code::F2),
-                modifiers: Modifiers::NONE,
-            },
-            toggle_hidden_view: KeybindEntry {
-                key: Physical::Code(Code::KeyH),
-                modifiers: Modifiers::CTRL,
-            },
-            create_file_path: KeybindEntry {
-                key: Physical::Code(Code::KeyN),
-                modifiers: Modifiers::CTRL,
-            },
-            create_folder_path: KeybindEntry {
-                key: Physical::Code(Code::KeyN),
-                modifiers: Modifiers::ALT,
-            },
-            toggle_visual_mode: KeybindEntry {
-                key: Physical::Code(Code::KeyV),
-                modifiers: Modifiers::NONE,
-            },
-        },
-    };
-
+pub fn fetch(config: &mut Config) {
     let home = home_dir();
 
     if home.is_none() {
@@ -148,10 +159,8 @@ pub fn get_keybinds() -> Config {
 
     if let Ok(content) = read_content {
         let raw_config: RawConfig = toml::from_str(&content).unwrap();
-        process_rawconfig(raw_config, &mut config);
+        process_rawconfig(raw_config, config);
     }
-
-    config
 }
 
 #[derive(Deserialize)]
@@ -189,6 +198,7 @@ struct RawKeybindsConfig {
     create_file_path: Option<String>,
     create_folder_path: Option<String>,
     toggle_visual_mode: Option<String>,
+    refresh: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -246,6 +256,7 @@ fn process_sorting(raw_sorting: RawSortingConfig, config: &mut Sorting) {
 }
 
 fn process_view(raw_view: RawViewConfig, config: &mut Vec<Displaying>) {
+    config.clear();
     if let Some(conf) = raw_view.enabled {
         conf.iter().for_each(|child| match child.as_str() {
             "name" => config.push(Displaying::Name),
@@ -262,7 +273,7 @@ fn match_key(raw_key: String) -> Option<KeybindEntry> {
     // keybind format: [whatever modifiers you have here, separated by "+"] + [main key (the last one)]
     let raw_key = raw_key.to_lowercase();
     let mut splitted = raw_key
-        .split("+") // split
+        .split("+")
         .map(|s| s.trim()) // trim
         .collect::<Vec<&str>>();
 
@@ -403,6 +414,7 @@ fn match_key(raw_key: String) -> Option<KeybindEntry> {
             "ctrl" => Modifiers::CTRL,
             "shift" => Modifiers::SHIFT,
             "alt" => Modifiers::ALT,
+            "super" => Modifiers::LOGO,
             _ => Modifiers::NONE,
         });
     }
@@ -418,82 +430,74 @@ fn process_keybinds(raw_keybinds: RawKeybindsConfig, keybinds: &mut KeybindsConf
     {
         keybinds.navigate_up = fresh_key;
     }
-
     if let Some(key_str) = raw_keybinds.navigate_down
         && let Some(fresh_key) = match_key(key_str)
     {
         keybinds.navigate_down = fresh_key;
     }
-
     if let Some(key_str) = raw_keybinds.navigate_forward
         && let Some(fresh_key) = match_key(key_str)
     {
         keybinds.navigate_forward = fresh_key;
     }
-
     if let Some(key_str) = raw_keybinds.navigate_backward
         && let Some(fresh_key) = match_key(key_str)
     {
         keybinds.navigate_backward = fresh_key;
     }
-
     if let Some(key_str) = raw_keybinds.copy_to_clipboard
         && let Some(fresh_key) = match_key(key_str)
     {
         keybinds.copy_to_clipboard = fresh_key;
     }
-
     if let Some(key_str) = raw_keybinds.cut_to_clipboard
         && let Some(fresh_key) = match_key(key_str)
     {
         keybinds.cut_to_clipboard = fresh_key;
     }
-
     if let Some(key_str) = raw_keybinds.paste_from_clipboard
         && let Some(fresh_key) = match_key(key_str)
     {
         keybinds.paste_from_clipboard = fresh_key;
     }
-
     if let Some(key_str) = raw_keybinds.clear_clipboard
         && let Some(fresh_key) = match_key(key_str)
     {
         keybinds.clear_clipboard = fresh_key;
     }
-
     if let Some(key_str) = raw_keybinds.delete_selections
         && let Some(fresh_key) = match_key(key_str)
     {
         keybinds.delete_selections = fresh_key;
     }
-
     if let Some(key_str) = raw_keybinds.rename_file
         && let Some(fresh_key) = match_key(key_str)
     {
         keybinds.rename_file = fresh_key;
     }
-
     if let Some(key_str) = raw_keybinds.toggle_hidden_view
         && let Some(fresh_key) = match_key(key_str)
     {
         keybinds.toggle_hidden_view = fresh_key;
     }
-
     if let Some(key_str) = raw_keybinds.create_file_path
         && let Some(fresh_key) = match_key(key_str)
     {
         keybinds.create_file_path = fresh_key;
     }
-
     if let Some(key_str) = raw_keybinds.create_folder_path
         && let Some(fresh_key) = match_key(key_str)
     {
         keybinds.create_folder_path = fresh_key;
     }
-
     if let Some(key_str) = raw_keybinds.toggle_visual_mode
         && let Some(fresh_key) = match_key(key_str)
     {
         keybinds.toggle_visual_mode = fresh_key;
+    }
+    if let Some(key_str) = raw_keybinds.refresh
+        && let Some(fresh_key) = match_key(key_str)
+    {
+        keybinds.refresh = fresh_key;
     }
 }
