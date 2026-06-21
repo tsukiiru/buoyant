@@ -107,7 +107,7 @@ type: string
 available values: name, accessed, created, type, size   
 
 **key: reversed**
-default: `false`
+default: `false`  
 type: boolean  
 
 #### [misc]
