@@ -27,6 +27,7 @@ impl Default for Config {
             sorting: Sorting::default(),
             misc: Misc {
                 format_date: String::from("%d/%m/%Y, %I:%M:%S %p"),
+                theme_path: None,
                 accurate_filesize: false,
             },
             view_hidden: false,
@@ -136,6 +137,7 @@ pub struct KeybindsConfig {
 
 pub struct Misc {
     pub format_date: String,
+    pub theme_path: Option<String>,
     pub accurate_filesize: bool,
 }
 
@@ -196,6 +198,7 @@ struct RawConfig {
 #[derive(Deserialize)]
 struct RawMiscConfig {
     format_time: Option<String>,
+    theme: Option<String>,
     accurate_filesize: Option<bool>,
 }
 
@@ -242,15 +245,12 @@ fn process_rawconfig(raw_config: RawConfig, config: &mut Config) {
     if let Some(table) = raw_config.keybinds {
         process_keybinds(table, &mut config.keybinds);
     }
-
     if let Some(table) = raw_config.view {
         process_view(table, &mut config.view);
     }
-
     if let Some(table) = raw_config.sorting {
         process_sorting(table, &mut config.sorting);
     }
-
     if let Some(table) = raw_config.misc {
         process_misc(table, &mut config.misc);
     }
@@ -260,7 +260,9 @@ fn process_misc(raw_config: RawMiscConfig, config: &mut Misc) {
     if let Some(c) = raw_config.format_time {
         config.format_date = c;
     }
-
+    if let Some(conf) = raw_config.theme {
+        config.theme_path = Some(conf);
+    }
     if let Some(conf) = raw_config.accurate_filesize {
         config.accurate_filesize = conf;
     }

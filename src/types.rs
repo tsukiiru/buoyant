@@ -170,8 +170,6 @@ impl Entries {
             });
         }
 
-        // TODO: configurable pre-allocated size
-
         Entries { children }
     }
 
