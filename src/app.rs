@@ -60,7 +60,7 @@ impl Default for States {
 
 struct ModalsState {
     opened: bool,
-    operation: bool,
+    paste: bool,
     delete: bool,
     create_file: Option<CreateModal>,
     create_folder: Option<CreateModal>,
@@ -74,7 +74,7 @@ impl Default for ModalsState {
     fn default() -> Self {
         ModalsState {
             opened: false,
-            operation: false,
+            paste: false,
             delete: false,
             create_file: None,
             create_folder: None,
@@ -778,7 +778,7 @@ impl Buoyant {
                                     return Task::none();
                                 }
 
-                                modals_state.operation = true;
+                                modals_state.paste = true;
                                 *modals_opened = true;
 
                                 self.states.modals.choices.extend(vec![
@@ -787,7 +787,7 @@ impl Buoyant {
                                 ]);
                             }
                             ModalMessage::Close => {
-                                modals_state.operation = false;
+                                modals_state.paste = false;
                                 *modals_opened = false;
 
                                 return Task::done(Message::ClearChoices);
@@ -882,7 +882,7 @@ impl Buoyant {
 
                 modals_state.opened = false;
                 modals_state.delete = false;
-                modals_state.operation = false;
+                modals_state.paste = false;
 
                 modals_state.create_file = None;
                 modals_state.create_folder = None;
@@ -940,8 +940,17 @@ impl Buoyant {
         let info_color = palette.blue;
         let accent = palette.accent;
 
-        let button_style = button::Style::default();
-        button_style.with_background(accent);
+        let mut button_style = button::Style::default();
+        button_style = button_style.with_background(Background::Color(accent));
+
+        let mut bg_style = container::Style::default();
+        bg_style = bg_style.background(Background::Color(palette.background));
+
+        let mut border = Border::default();
+        border = border.rounded(5);
+        let mut overlay_style = container::Style::default();
+        overlay_style = overlay_style.background(Background::Color(palette.overlay));
+        overlay_style = overlay_style.border(border);
 
         if self.states.is_loading {
             return container(text("loading...").color(text_color).size(17))
@@ -1332,13 +1341,24 @@ impl Buoyant {
             }
         };
 
-        let right_col = column![explorer_info, file_info].width(300).spacing(20);
+        let right_col = column![explorer_info, file_info].width(250).spacing(20);
 
-        let content = row![left_col, right_col]
-            .width(Length::Fill)
-            .height(Length::Fill)
-            .padding(30)
-            .spacing(10);
+        let content = container(
+            row![
+                container(left_col)
+                    .padding(5)
+                    .clip(true)
+                    .style(move |_| overlay_style.into()),
+                container(right_col)
+                    .clip(true)
+                    .style(move |_| overlay_style.into()),
+            ]
+            .spacing(20),
+        )
+        .width(Length::Fill)
+        .height(Length::Fill)
+        .padding(20)
+        .style(move |_| bg_style.into());
 
         let mut stack = stack![content].width(Length::Fill).height(Length::Fill);
 
@@ -1367,7 +1387,7 @@ impl Buoyant {
             stack = stack.push(overlay);
         }
 
-        if self.states.modals.operation {
+        if self.states.modals.paste {
             let row = row![
                 button(text("Replace \nreplace file if name is matched").color(text_color))
                     .on_press(Message::PasteClipboard(PasteType::Replace))
@@ -1409,7 +1429,7 @@ impl Buoyant {
                 container(
                     column![
                         text("press Esc to exit").size(13).color(info_color),
-                        text("choose an operation type").color(text_color),
+                        text("choose a response when overlapping files").color(text_color),
                         row
                     ]
                     .spacing(10),
