@@ -76,53 +76,8 @@ pub struct TempItem<'a> {
     pub hidden: bool,
 }
 
-pub trait Entry {
-    fn name(&self) -> &str;
-    fn filetype(&self) -> &str;
-    fn accessed(&self) -> i64;
-    fn created(&self) -> i64;
-    fn filesize(&self) -> u64;
-}
-
-impl Entry for Item {
-    fn name(&self) -> &str {
-        &self.name
-    }
-    fn filetype(&self) -> &str {
-        &self.filetype
-    }
-    fn accessed(&self) -> i64 {
-        self.accessed
-    }
-    fn created(&self) -> i64 {
-        self.created
-    }
-    fn filesize(&self) -> u64 {
-        self.filesize
-    }
-}
-
-impl<'a> Entry for TempItem<'a> {
-    fn name(&self) -> &str {
-        self.name
-    }
-    fn filetype(&self) -> &str {
-        self.filetype
-    }
-    fn accessed(&self) -> i64 {
-        self.accessed
-    }
-    fn created(&self) -> i64 {
-        self.created
-    }
-    fn filesize(&self) -> u64 {
-        self.filesize
-    }
-}
-
 #[derive(Debug)]
 pub struct Item {
-    pub id: usize,
     pub name: String,
     pub path: PathBuf,
 
@@ -140,7 +95,6 @@ pub struct Item {
 impl Default for Item {
     fn default() -> Self {
         Item {
-            id: 0,
             name: String::with_capacity(16),
             path: PathBuf::with_capacity(60),
             accessed: 0,
@@ -156,32 +110,32 @@ impl Default for Item {
 }
 
 pub struct Entries {
-    pub children: Vec<Item>,
+    pub children: Vec<Item>,    // stored entries
+    pub displaying: Vec<usize>, // filtered one referencing the ones in memory
 }
 
 impl Entries {
     pub fn new() -> Self {
         let mut children = Vec::with_capacity(30);
 
-        for i in 0..=30 {
+        for _ in 0..=30 {
             children.push(Item {
-                id: i,
                 ..Default::default()
             });
         }
 
-        Entries { children }
+        Entries {
+            children,
+            displaying: Vec::with_capacity(30),
+        }
     }
 
-    pub fn index(&self, id: &usize) -> usize {
-        let mut res: usize = 0;
-
-        self.children.iter().enumerate().for_each(|(index, entry)| {
-            if entry.id == *id {
-                res = index;
-            }
-        });
-
-        res
+    pub fn item(&self, index: &usize) -> Option<&Item> {
+        self.children.get(*self.displaying.get(*index).unwrap())
     }
+
+    /*
+    pub fn item_mut(&mut self, index: &usize) -> Option<&mut Item> {
+        self.children.get_mut(*self.displaying.get(*index).unwrap())
+    }*/
 }
