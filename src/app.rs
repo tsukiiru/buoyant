@@ -149,7 +149,7 @@ pub enum Message {
     Create(bool),
 
     // input
-    KeyPressed(Physical, Modifiers),
+    HandleEvent(Physical, Modifiers, Status),
     KeyModifiers(bool, bool, bool),
 
     // modals, modal choices navigation
@@ -261,7 +261,23 @@ impl Buoyant {
                 )
             }
 
-            Message::KeyPressed(physical_key, modifiers) => {
+            Message::HandleEvent(physical_key, modifiers, status) => {
+                if status == Status::Captured && self.states.modals.opened {
+                    return Task::done(Message::FocusModal);
+                }
+
+                if physical_key == Physical::Code(Code::Escape)
+                    && (self.states.modals.search.is_some() || self.states.modals.opened)
+                {
+                    return Task::done(Message::CloseModals);
+                }
+
+                if let Some(modal) = &self.states.modals.search
+                    && modal.focused
+                {
+                    return Task::none();
+                }
+
                 let keybinds = &self.config.keybinds;
 
                 if physical_key == keybinds.navigate_backward.key
@@ -835,58 +851,72 @@ impl Buoyant {
                         }
                         Task::done(Message::ClearChoices)
                     }
-                    ModalType::Search => {
-                        match msg {
-                            ModalMessage::Content(content) => {
-                                let modal = modals_state.search.as_mut().unwrap();
-                                modal.content = content;
-                                return Task::done(Message::FilterEntries(None));
-                            }
-                            ModalMessage::Open => {
-                                modals_state.search = Some(SearchModal::default());
-                                return operation::focus("search_box");
-                            }
-                            ModalMessage::Close => {
-                                // do some unfocusing and yeah thats it.
-                            }
+                    ModalType::Search => match msg {
+                        ModalMessage::Content(content) => {
+                            let modal = modals_state.search.as_mut().unwrap();
+                            modal.content = content;
+                            return Task::done(Message::FilterEntries(None));
                         }
-
-                        Task::none()
-                    }
+                        ModalMessage::Open => {
+                            modals_state.search = Some(SearchModal::default());
+                            modals_state.search.as_mut().unwrap().focused = true;
+                            return operation::focus("search_box");
+                        }
+                        ModalMessage::Close => {
+                            modals_state.search.as_mut().unwrap().focused = false;
+                            return Task::none();
+                        }
+                    },
                 }
             }
             Message::FocusModal => {
                 let mut task = Task::none();
 
-                task = task.chain(operation::is_focused("rename").then(|focused| {
-                    if !focused {
-                        return Task::done(Message::Modal(ModalType::Rename, ModalMessage::Close));
-                    } else {
-                        return Task::none();
-                    }
-                }));
-
-                task = task.chain(operation::is_focused("create").then(|focused| {
-                    if !focused {
-                        return Task::batch(vec![
-                            Task::done(Message::Modal(ModalType::CreateFile, ModalMessage::Close)),
-                            Task::done(Message::Modal(
-                                ModalType::CreateFolder,
+                if self.states.modals.rename.is_some() {
+                    task = task.chain(operation::is_focused("rename").then(|focused| {
+                        if !focused {
+                            return Task::done(Message::Modal(
+                                ModalType::Rename,
                                 ModalMessage::Close,
-                            )),
-                        ]);
-                    } else {
-                        return Task::none();
-                    }
-                }));
+                            ));
+                        } else {
+                            return Task::none();
+                        }
+                    }));
+                }
+
+                if self.states.modals.create_file.is_some()
+                    || self.states.modals.create_folder.is_some()
+                {
+                    task = task.chain(operation::is_focused("create").then(|focused| {
+                        if !focused {
+                            return Task::batch(vec![
+                                Task::done(Message::Modal(
+                                    ModalType::CreateFile,
+                                    ModalMessage::Close,
+                                )),
+                                Task::done(Message::Modal(
+                                    ModalType::CreateFolder,
+                                    ModalMessage::Close,
+                                )),
+                            ]);
+                        } else {
+                            return Task::none();
+                        }
+                    }));
+                }
 
                 task
             }
             Message::CloseModals => {
                 let modals_state = &mut self.states.modals;
 
-                if !modals_state.opened {
+                if modals_state.search.is_some() {
                     modals_state.search = None;
+                    return Task::done(Message::FilterEntries(None));
+                }
+
+                if !modals_state.opened {
                     return Task::none();
                 }
 
@@ -1367,12 +1397,18 @@ impl Buoyant {
         .width(Length::Fill);
 
         if let Some(modal) = &self.states.modals.search {
-            left_col = left_col.push(
-                text_input("", &modal.content)
-                    .on_input(|inp| Message::Modal(ModalType::Search, ModalMessage::Content(inp)))
-                    .on_submit(Message::Modal(ModalType::Search, ModalMessage::Close))
-                    .id("search_box"),
-            );
+            if modal.focused {
+                left_col = left_col.push(
+                    text_input("", &modal.content)
+                        .on_input(|inp| {
+                            Message::Modal(ModalType::Search, ModalMessage::Content(inp))
+                        })
+                        .on_submit(Message::Modal(ModalType::Search, ModalMessage::Close))
+                        .id("search_box"),
+                );
+            } else {
+                left_col = left_col.push(text(&modal.content).color(text_color));
+            }
         }
 
         let right_col = column![explorer_info].width(250).spacing(20);
@@ -1665,28 +1701,21 @@ impl Buoyant {
     }
 
     pub fn subscription(&self) -> Subscription<Message> {
-        event::listen_with(move |event, status, _| {
-            if status == Status::Captured {
-                return Some(Message::FocusModal);
-            }
+        event::listen_with(move |event, status, _| match event {
+            Event::Keyboard(keyboard::Event::ModifiersChanged(state)) => Some(
+                Message::KeyModifiers(state.control(), state.shift(), state.alt()),
+            ),
 
-            match event {
-                Event::Keyboard(keyboard::Event::ModifiersChanged(state)) => Some(
-                    Message::KeyModifiers(state.control(), state.shift(), state.alt()),
-                ),
+            Event::Keyboard(keyboard::Event::KeyPressed {
+                physical_key,
+                modifiers,
+                ..
+            }) => match (physical_key, modifiers) {
+                (key::Physical::Code(Code::Enter), _) => Some(Message::SelectChoice),
 
-                Event::Keyboard(keyboard::Event::KeyPressed {
-                    physical_key,
-                    modifiers,
-                    ..
-                }) => match (physical_key, modifiers) {
-                    (key::Physical::Code(Code::Escape), _) => Some(Message::CloseModals),
-                    (key::Physical::Code(Code::Enter), _) => Some(Message::SelectChoice),
-
-                    _ => Some(Message::KeyPressed(physical_key, modifiers)),
-                },
-                _ => None,
-            }
+                _ => Some(Message::HandleEvent(physical_key, modifiers, status)),
+            },
+            _ => None,
         })
     }
 }

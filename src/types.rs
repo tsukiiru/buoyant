@@ -22,12 +22,14 @@ pub struct CreateModal {
 
 pub struct SearchModal {
     pub content: String,
+    pub focused: bool,
 }
 
 impl Default for SearchModal {
     fn default() -> Self {
         SearchModal {
             content: String::new(),
+            focused: false,
         }
     }
 }
