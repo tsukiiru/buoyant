@@ -20,6 +20,18 @@ pub struct CreateModal {
     pub error: &'static str,
 }
 
+pub struct SearchModal {
+    pub content: String,
+}
+
+impl Default for SearchModal {
+    fn default() -> Self {
+        SearchModal {
+            content: String::new(),
+        }
+    }
+}
+
 pub struct Clipboard {
     pub entries: HashSet<PathBuf>,
     pub mode: Option<ClipboardMode>,
@@ -51,6 +63,7 @@ pub enum ModalType {
     Rename,
     Paste,
     Delete,
+    Search,
     CreateFile,
     CreateFolder,
 }

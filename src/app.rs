@@ -26,9 +26,12 @@ use iced::{
     },
 };
 
-use crate::config::{self, Displaying, SortingBy};
 use crate::path;
 use crate::theme::Theme;
+use crate::{
+    config::{self, Displaying, SortingBy},
+    types::SearchModal,
+};
 use crate::{
     theme,
     types::{
@@ -64,6 +67,7 @@ struct ModalsState {
     create_file: Option<CreateModal>,
     create_folder: Option<CreateModal>,
     rename: Option<RenameModal>,
+    search: Option<SearchModal>,
 
     choices: Vec<Message>,
     current_choice: usize,
@@ -78,6 +82,7 @@ impl Default for ModalsState {
             create_file: None,
             create_folder: None,
             rename: None,
+            search: None,
             choices: Vec::with_capacity(2),
             current_choice: 0,
         }
@@ -324,12 +329,17 @@ impl Buoyant {
                 {
                     return Task::done(Message::FetchConfig)
                         .chain(Task::done(Message::FetchEntries(None)));
+                } else if physical_key == keybinds.search.key
+                    && modifiers == keybinds.search.modifiers
+                {
+                    return Task::done(Message::Modal(ModalType::Search, ModalMessage::Open));
                 }
 
                 Task::none()
             }
 
             Message::FetchEntries(prev_path) => {
+                self.states.modals.search = None;
                 self.states.explorer.error = None;
                 // clear all entries, without reallocating
                 self.entries.children.par_iter_mut().for_each(|item| {
@@ -381,6 +391,11 @@ impl Buoyant {
                 // TODO: add some dark magic filtering here (aka searching, should be simple)
                 for (i, entry) in self.entries.children.iter().enumerate() {
                     if !entry.using || (!self.config.view_hidden && entry.hidden) {
+                        continue;
+                    }
+                    if let Some(modal) = &self.states.modals.search
+                        && !entry.name.contains(&modal.content.trim())
+                    {
                         continue;
                     }
 
@@ -820,6 +835,24 @@ impl Buoyant {
                         }
                         Task::done(Message::ClearChoices)
                     }
+                    ModalType::Search => {
+                        match msg {
+                            ModalMessage::Content(content) => {
+                                let modal = modals_state.search.as_mut().unwrap();
+                                modal.content = content;
+                                return Task::done(Message::FilterEntries(None));
+                            }
+                            ModalMessage::Open => {
+                                modals_state.search = Some(SearchModal::default());
+                                return operation::focus("search_box");
+                            }
+                            ModalMessage::Close => {
+                                // do some unfocusing and yeah thats it.
+                            }
+                        }
+
+                        Task::none()
+                    }
                 }
             }
             Message::FocusModal => {
@@ -853,6 +886,7 @@ impl Buoyant {
                 let modals_state = &mut self.states.modals;
 
                 if !modals_state.opened {
+                    modals_state.search = None;
                     return Task::none();
                 }
 
@@ -914,23 +948,35 @@ impl Buoyant {
         let text_color = palette.text;
         let text_muted_color = palette.text_muted;
         let info_color = palette.blue;
-        let accent = palette.accent;
 
-        let mut button_style = button::Style::default();
-        button_style = button_style.with_background(Background::Color(accent));
+        let button_style = button::Style {
+            background: Some(Background::Color(palette.accent_dark)),
+            ..Default::default()
+        };
 
         let mut bg_style = container::Style::default();
         bg_style = bg_style.background(Background::Color(palette.background));
 
-        let mut border = Border::default();
-        border = border.rounded(5);
-        let mut overlay_style = container::Style::default();
-        overlay_style = overlay_style.background(Background::Color(palette.overlay));
-        overlay_style = overlay_style.border(border);
+        let mut panel_style = container::Style::default();
+        panel_style = panel_style.background(Background::Color(palette.overlay));
+
+        let overlay_style = container::Style {
+            background: Some(Background::Color(palette.scrim)),
+            ..Default::default()
+        };
+
+        let text_input_style = text_input::Style {
+            background: Background::Color(palette.overlay),
+            border: Border::default(),
+            placeholder: palette.text_muted,
+            icon: palette.text,
+            value: palette.text,
+            selection: palette.accent,
+        };
 
         if self.states.is_loading {
             return container(text("loading...").color(text_color).size(17))
-                .style(move |_| palette.background.scale_alpha(0.8).into())
+                .style(move |_| overlay_style)
                 .center(Length::Fill)
                 .into();
         }
@@ -1196,23 +1242,6 @@ impl Buoyant {
                 .height(Length::Fill)
                 .into();
 
-        let left_col = column![
-            row![
-                button(text("..back").color(text_color))
-                    .style(move |_, _| button_style.into())
-                    .on_press(Message::NavigateBack),
-                container(text(format!("{}", self.current_path.display())).color(text_color))
-                    .style(move |_| { palette.text.scale_alpha(0.1).into() })
-                    .center_y(30)
-                    .center_x(Length::Fill)
-                    .padding(5),
-            ],
-            explorer_select
-        ]
-        .spacing(10)
-        .height(Length::Fill)
-        .width(Length::Fill);
-
         let mut explorer_info = column![
             container(text("explorer info").color(text_color))
                 .height(30)
@@ -1262,9 +1291,8 @@ impl Buoyant {
         let mut file_info = column![
             container(text("file metadata").color(text_color))
                 .height(30)
+                .width(Length::Fill)
                 .center_y(30)
-                .center_x(Length::Fill)
-                .padding(5),
         ]
         .spacing(10);
 
@@ -1320,18 +1348,45 @@ impl Buoyant {
             }
         };
 
-        let right_col = column![explorer_info, file_info].width(250).spacing(20);
+        let mut left_col = column![
+            row![
+                button(text("..back").color(text_color))
+                    .style(move |_, _| button_style.into())
+                    .on_press(Message::NavigateBack),
+                container(text(format!("{}", self.current_path.display())).color(text_color))
+                    .style(move |_| { palette.text.scale_alpha(0.1).into() })
+                    .center_y(30)
+                    .center_x(Length::Fill)
+                    .padding(5),
+            ],
+            explorer_select,
+            container(file_info).padding(10).height(200)
+        ]
+        .spacing(10)
+        .height(Length::Fill)
+        .width(Length::Fill);
+
+        if let Some(modal) = &self.states.modals.search {
+            left_col = left_col.push(
+                text_input("", &modal.content)
+                    .on_input(|inp| Message::Modal(ModalType::Search, ModalMessage::Content(inp)))
+                    .on_submit(Message::Modal(ModalType::Search, ModalMessage::Close))
+                    .id("search_box"),
+            );
+        }
+
+        let right_col = column![explorer_info].width(250).spacing(20);
 
         let content = container(
             row![
                 container(left_col)
                     .padding(5)
                     .clip(true)
-                    .style(move |_| overlay_style.into()),
+                    .style(move |_| panel_style.into()),
                 container(right_col)
                     .padding(5)
                     .clip(true)
-                    .style(move |_| overlay_style.into()),
+                    .style(move |_| panel_style.into()),
             ]
             .spacing(20),
         )
@@ -1346,6 +1401,7 @@ impl Buoyant {
             let input = text_input("input the new name here :3", &modal.content)
                 .on_input(|inp| Message::Modal(ModalType::Rename, ModalMessage::Content(inp)))
                 .on_submit(Message::Rename)
+                .style(move |_, _| text_input_style)
                 .padding(7)
                 .id("rename");
 
@@ -1360,7 +1416,7 @@ impl Buoyant {
 
             let overlay = opaque(float(
                 container(col)
-                    .style(move |_| palette.background.scale_alpha(0.8).into())
+                    .style(move |_| overlay_style)
                     .center(Length::Fill),
             ));
 
@@ -1414,7 +1470,7 @@ impl Buoyant {
                     ]
                     .spacing(10),
                 )
-                .style(move |_| palette.background.scale_alpha(0.8).into())
+                .style(move |_| overlay_style)
                 .center(Length::Fill),
             ));
 
@@ -1445,7 +1501,7 @@ impl Buoyant {
                     ]
                     .spacing(10),
                 )
-                .style(move |_| palette.background.scale_alpha(0.8).into())
+                .style(move |_| overlay_style)
                 .center(Length::Fill),
             ));
 
@@ -1456,6 +1512,7 @@ impl Buoyant {
             let input = text_input("input the file path here! :3", &modal.content)
                 .on_input(|inp| Message::Modal(ModalType::CreateFile, ModalMessage::Content(inp)))
                 .on_submit(Message::Create(true))
+                .style(move |_, _| text_input_style)
                 .padding(7)
                 .id("create");
 
@@ -1476,7 +1533,7 @@ impl Buoyant {
 
             let overlay = opaque(float(
                 container(col)
-                    .style(move |_| palette.background.scale_alpha(0.8).into())
+                    .style(move |_| overlay_style)
                     .center(Length::Fill),
             ));
 
@@ -1487,6 +1544,7 @@ impl Buoyant {
             let input = text_input("input the folder path here! :3", &modal.content)
                 .on_input(|inp| Message::Modal(ModalType::CreateFolder, ModalMessage::Content(inp)))
                 .on_submit(Message::Create(false))
+                .style(move |_, _| text_input_style)
                 .padding(7)
                 .id("create");
 
@@ -1507,7 +1565,7 @@ impl Buoyant {
 
             let overlay = opaque(float(
                 container(col)
-                    .style(move |_| palette.background.scale_alpha(0.8).into())
+                    .style(move |_| overlay_style)
                     .center(Length::Fill),
             ));
 

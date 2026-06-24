@@ -92,6 +92,10 @@ impl Default for Config {
                     key: Physical::Code(Code::KeyR),
                     modifiers: Modifiers::CTRL,
                 },
+                search: KeybindEntry {
+                    key: Physical::Code(Code::Slash),
+                    modifiers: Modifiers::NONE,
+                },
             },
         }
     }
@@ -133,6 +137,7 @@ pub struct KeybindsConfig {
     pub create_folder_path: KeybindEntry,
     pub toggle_visual_mode: KeybindEntry,
     pub refresh: KeybindEntry,
+    pub search: KeybindEntry,
 }
 
 pub struct Misc {
@@ -225,6 +230,7 @@ struct RawKeybindsConfig {
     create_folder_path: Option<String>,
     toggle_visual_mode: Option<String>,
     refresh: Option<String>,
+    search: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -545,5 +551,10 @@ fn process_keybinds(raw_keybinds: RawKeybindsConfig, keybinds: &mut KeybindsConf
         && let Some(fresh_key) = match_key(key_str)
     {
         keybinds.refresh = fresh_key;
+    }
+    if let Some(key_str) = raw_keybinds.search
+        && let Some(fresh_key) = match_key(key_str)
+    {
+        keybinds.search = fresh_key
     }
 }

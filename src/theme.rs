@@ -40,7 +40,7 @@ impl Default for Palette {
             text_muted: Color::from_rgb8(67, 67, 108),
             background: Color::from_rgb8(242, 236, 188),
             overlay: Color::from_rgb8(220, 213, 172),
-            scrim: Color::from_rgba8(231, 219, 160, 0.5),
+            scrim: Color::from_rgba8(231, 219, 160, 0.8),
             accent: Color::from_rgb8(199, 215, 224),
             accent_dark: Color::from_rgb8(159, 181, 201),
             red: Color::from_rgb8(232, 36, 36),
