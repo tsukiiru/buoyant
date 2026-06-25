@@ -1,7 +1,7 @@
 use std::{
     collections::{HashMap, HashSet},
     env::home_dir,
-    ops::Sub,
+    ops::{Deref, Sub},
     path::{Path, PathBuf},
     process::{Command, Stdio},
 };
@@ -22,7 +22,7 @@ use iced::{
     },
     widget::{
         button, column, container, float, mouse_area, opaque, operation, row, scrollable, selector,
-        stack, text, text_input,
+        stack, svg, text, text_input,
     },
 };
 
@@ -379,9 +379,12 @@ impl Buoyant {
                 let mut index: usize = 0;
 
                 for path in current_paths {
+                    let (file_type, icon) = &path::file_type(&path);
+
                     self.push_entry(
                         &TempItem {
-                            filetype: &path::file_type(&path),
+                            filetype: &file_type,
+                            icon: &icon,
                             accessed: path::file_accessed(&path),
                             created: path::file_created(&path),
                             filesize: path::file_size(&path),
@@ -860,7 +863,8 @@ impl Buoyant {
                         ModalMessage::Open => {
                             modals_state.search = Some(SearchModal::default());
                             modals_state.search.as_mut().unwrap().focused = true;
-                            return operation::focus("search_box");
+                            return operation::focus("search_box")
+                                .chain(Task::done(Message::FilterEntries(None)));
                         }
                         ModalMessage::Close => {
                             modals_state.search.as_mut().unwrap().focused = false;
@@ -984,11 +988,15 @@ impl Buoyant {
             ..Default::default()
         };
 
-        let mut bg_style = container::Style::default();
-        bg_style = bg_style.background(Background::Color(palette.background));
+        let bg_style = container::Style {
+            background: Some(Background::Color(palette.background)),
+            ..Default::default()
+        };
 
-        let mut panel_style = container::Style::default();
-        panel_style = panel_style.background(Background::Color(palette.overlay));
+        let panel_style = container::Style {
+            background: Some(Background::Color(palette.overlay)),
+            ..Default::default()
+        };
 
         let overlay_style = container::Style {
             background: Some(Background::Color(palette.scrim)),
@@ -1002,6 +1010,19 @@ impl Buoyant {
             icon: palette.text,
             value: palette.text,
             selection: palette.accent,
+        };
+
+        let search_input_style = text_input::Style {
+            background: Background::Color(Color::from_rgba8(0, 0, 0, 0.0)),
+            border: Border::default(),
+            placeholder: palette.text_muted,
+            icon: palette.text_muted,
+            value: palette.text,
+            selection: palette.accent,
+        };
+
+        let unfocused_search_style = text::Style {
+            color: Some(palette.text),
         };
 
         if self.states.is_loading {
@@ -1025,6 +1046,9 @@ impl Buoyant {
                 continue;
             }
 
+            row = row
+                .push(container(svg(item.icon.deref().clone()).width(16).height(16)).center_y(30));
+
             for child in &self.config.view.explorer {
                 match child {
                     Displaying::Name => {
@@ -1039,7 +1063,8 @@ impl Buoyant {
                                         text_color
                                     }),
                             )
-                            .width(300)
+                            .center(30)
+                            .align_left(300)
                             .clip(true),
                         )
                     }
@@ -1061,7 +1086,8 @@ impl Buoyant {
                                         text_color
                                     }),
                             )
-                            .width(100)
+                            .center(30)
+                            .align_left(100)
                             .clip(true),
                         );
                     }
@@ -1077,7 +1103,8 @@ impl Buoyant {
                                         text_color
                                     }),
                             )
-                            .width(150)
+                            .align_left(150)
+                            .center(30)
                             .clip(true),
                         );
                     }
@@ -1093,7 +1120,8 @@ impl Buoyant {
                                         text_color
                                     }),
                             )
-                            .width(200)
+                            .center(30)
+                            .align_left(200)
                             .clip(true),
                         );
                     }
@@ -1109,7 +1137,8 @@ impl Buoyant {
                                         text_color
                                     }),
                             )
-                            .width(200)
+                            .center(30)
+                            .align_left(200)
                             .clip(true),
                         );
                     }
@@ -1128,7 +1157,6 @@ impl Buoyant {
                         .on_enter(Message::HoverEntry(index, true))
                         .on_exit(Message::HoverEntry(index, false)),
                 )
-                .center_y(30)
                 .padding(Padding::from([0, 5]))
                 .style(move |_| {
                     let mut style = container::Style::default();
@@ -1164,6 +1192,7 @@ impl Buoyant {
             .on_scroll(Message::ExplorerOffset);
 
         let mut column_names = row![].spacing(10).padding(5);
+        column_names = column_names.push(container(text("")).width(16).height(16));
 
         for child in &self.config.view.explorer {
             match child {
@@ -1175,7 +1204,8 @@ impl Buoyant {
                                 .wrapping(Wrapping::None)
                                 .align_x(alignment::Horizontal::Left),
                         )
-                        .width(300)
+                        .align_left(300)
+                        .center_y(30)
                         .clip(true),
                     );
                 }
@@ -1188,7 +1218,8 @@ impl Buoyant {
                                 .align_x(alignment::Horizontal::Left),
                         )
                         .clip(true)
-                        .width(100),
+                        .center_y(30)
+                        .align_left(100),
                     );
                 }
                 Displaying::FileType => {
@@ -1200,7 +1231,8 @@ impl Buoyant {
                                 .align_x(alignment::Horizontal::Left),
                         )
                         .clip(true)
-                        .width(150),
+                        .center_y(30)
+                        .align_left(150),
                     );
                 }
                 Displaying::Created => {
@@ -1212,7 +1244,8 @@ impl Buoyant {
                                 .align_x(alignment::Horizontal::Left),
                         )
                         .clip(true)
-                        .width(200),
+                        .align_left(200)
+                        .center_y(30),
                     );
                 }
                 Displaying::LastAccessed => {
@@ -1223,7 +1256,8 @@ impl Buoyant {
                                 .wrapping(Wrapping::None)
                                 .align_x(alignment::Horizontal::Left),
                         )
-                        .width(200)
+                        .align_left(200)
+                        .center_y(30)
                         .clip(true),
                     );
                 }
@@ -1318,13 +1352,9 @@ impl Buoyant {
 
         explorer_info = explorer_info.push(clipboard);
 
-        let mut file_info = column![
-            container(text("file metadata").color(text_color))
-                .height(30)
-                .width(Length::Fill)
-                .center_y(30)
-        ]
-        .spacing(10);
+        let mut file_info =
+            row![container(text("file metadata").color(text_color)).width(Length::Fill)]
+                .spacing(20);
 
         if let Some(index) = self.current_index
             && let Some(item) = self.entries.item(&index)
@@ -1390,7 +1420,7 @@ impl Buoyant {
                     .padding(5),
             ],
             explorer_select,
-            container(file_info).padding(10).height(200)
+            container(file_info.wrap().vertical_spacing(20)).padding(10)
         ]
         .spacing(10)
         .height(Length::Fill)
@@ -1399,7 +1429,9 @@ impl Buoyant {
         if let Some(modal) = &self.states.modals.search {
             if modal.focused {
                 left_col = left_col.push(
-                    text_input("", &modal.content)
+                    text_input("searching...", &modal.content)
+                        .style(move |_, _| search_input_style)
+                        .padding(Padding::from([5, 10]))
                         .on_input(|inp| {
                             Message::Modal(ModalType::Search, ModalMessage::Content(inp))
                         })
@@ -1407,7 +1439,10 @@ impl Buoyant {
                         .id("search_box"),
                 );
             } else {
-                left_col = left_col.push(text(&modal.content).color(text_color));
+                left_col = left_col.push(
+                    container(text(&modal.content).style(move |_| unfocused_search_style))
+                        .padding(Padding::from([5, 10])),
+                );
             }
         }
 
@@ -1667,6 +1702,7 @@ impl Buoyant {
         let path = entry.path;
         let filetype = entry.filetype;
         let foldersize = entry.foldersize;
+        let icon = entry.icon;
 
         let item_opt = self.entries.children.get_mut(index);
 
@@ -1677,6 +1713,7 @@ impl Buoyant {
             item.created = created;
             item.using = true;
             item.foldersize = foldersize;
+            item.icon = icon;
 
             item.name.push_str(name);
             item.path.push(path);
@@ -1688,6 +1725,7 @@ impl Buoyant {
                 accessed,
                 created,
                 foldersize,
+                icon,
                 using: true,
                 ..Default::default()
             };

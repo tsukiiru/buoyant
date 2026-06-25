@@ -37,7 +37,7 @@ impl Default for Palette {
     fn default() -> Self {
         Palette {
             text: Color::from_rgb8(84, 84, 100),
-            text_muted: Color::from_rgb8(67, 67, 108),
+            text_muted: Color::from_rgba8(67, 67, 108, 0.7),
             background: Color::from_rgb8(242, 236, 188),
             overlay: Color::from_rgb8(220, 213, 172),
             scrim: Color::from_rgba8(231, 219, 160, 0.8),

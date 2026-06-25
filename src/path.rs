@@ -1,3 +1,4 @@
+use iced::advanced::svg::Handle;
 use rayon::iter::{IntoParallelRefIterator, ParallelIterator};
 use std::{
     collections::HashSet,
@@ -6,6 +7,7 @@ use std::{
     path::{Path, PathBuf},
     process::Command,
     str::from_utf8,
+    sync::LazyLock,
     time::SystemTime,
 };
 
@@ -237,34 +239,38 @@ fn is_textfile(path: &Path) -> bool {
     }
 }
 
-pub fn file_type(path: &Path) -> String {
+pub fn file_type(path: &Path) -> (String, &'static LazyLock<Handle>) {
     if path.is_dir() {
-        return String::from("Folder");
+        return (String::from("Folder"), &file_types::FOLDER);
     }
 
     let ext = file_extension(path);
     let opt_type = file_types::extension_to_filetype(ext);
     let str_type: &str;
+    let icon: &LazyLock<Handle>;
 
     if let Some(thing) = &opt_type {
-        str_type = thing;
+        str_type = &thing.0;
+        icon = &thing.1;
     } else if is_textfile(path) {
         str_type = "Text File";
+        icon = &file_types::FILE;
     } else {
         str_type = "Unknown";
+        icon = &file_types::FILE;
     }
 
     if path.is_symlink() {
         let text = "Symlink".to_owned();
 
         if str_type == "Unknown" {
-            return text + " (broken)";
+            return (text + " (broken)", &file_types::FILE);
         } else {
-            return text + " -> " + str_type;
+            return (text + " -> " + str_type, &file_types::FILE);
         };
     }
 
-    str_type.to_owned()
+    (str_type.to_owned(), icon)
 }
 
 const UNIX_EPOCH: SystemTime = SystemTime::UNIX_EPOCH;

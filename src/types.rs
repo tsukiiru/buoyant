@@ -1,7 +1,11 @@
+use crate::file_types;
 use std::{
     collections::HashSet,
     path::{Path, PathBuf},
+    sync::LazyLock,
 };
+
+use iced::advanced::svg::Handle;
 
 #[derive(Clone, Debug)]
 pub enum Direction {
@@ -82,6 +86,7 @@ pub struct TempItem<'a> {
     pub name: &'a str,
     pub filetype: &'a str,
     pub path: &'a Path,
+    pub icon: &'static LazyLock<Handle>,
 
     pub accessed: i64,
     pub created: i64,
@@ -95,6 +100,7 @@ pub struct TempItem<'a> {
 pub struct Item {
     pub name: String,
     pub path: PathBuf,
+    pub icon: &'static LazyLock<Handle>,
 
     pub accessed: i64,
     pub created: i64,
@@ -112,6 +118,7 @@ impl Default for Item {
         Item {
             name: String::with_capacity(16),
             path: PathBuf::with_capacity(60),
+            icon: &file_types::FILE,
             accessed: 0,
             created: 0,
             filetype: String::with_capacity(20),
