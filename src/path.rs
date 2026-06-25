@@ -257,16 +257,16 @@ pub fn file_type(path: &Path) -> (String, &'static LazyLock<Handle>) {
         icon = &file_types::FILE;
     } else {
         str_type = "Unknown";
-        icon = &file_types::FILE;
+        icon = &file_types::QUESTION_MARK;
     }
 
     if path.is_symlink() {
         let text = "Symlink".to_owned();
 
         if str_type == "Unknown" {
-            return (text + " (broken)", &file_types::FILE);
+            return (text + " (broken)", &file_types::BROKEN_LINK);
         } else {
-            return (text + " -> " + str_type, &file_types::FILE);
+            return (text + " -> " + str_type, &file_types::LINK);
         };
     }
 
@@ -281,7 +281,7 @@ pub fn file_accessed(path: &Path) -> i64 {
             .accessed()
             .unwrap_or(UNIX_EPOCH)
             .duration_since(UNIX_EPOCH)
-            .unwrap()
+            .unwrap_or_default()
             .as_secs()
             .try_into()
             .unwrap(),
@@ -295,7 +295,7 @@ pub fn file_created(path: &Path) -> i64 {
             .created()
             .unwrap_or(UNIX_EPOCH)
             .duration_since(UNIX_EPOCH)
-            .unwrap()
+            .unwrap_or_default()
             .as_secs()
             .try_into()
             .unwrap(),

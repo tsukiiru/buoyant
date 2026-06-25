@@ -407,7 +407,6 @@ impl Buoyant {
                 self.current_index = None;
                 self.selected.clear();
 
-                // TODO: add some dark magic filtering here (aka searching, should be simple)
                 for (i, entry) in self.entries.children.iter().enumerate() {
                     if !entry.using || (!self.config.view_hidden && entry.hidden) {
                         continue;
