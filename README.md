@@ -127,6 +127,9 @@ note: this makes it really laggy, use at your own risk (unless you got a real go
 woaw  
 can someone please, i dont wanna write the readme  
 
+### stuff
+icons from [Phosphor Icons](https://phosphoricons.com/)  
+
 <a href="https://github.com/iced-rs/iced">
     <img src="https://gist.githubusercontent.com/hecrj/ad7ecd38f6e47ff3688a38c79fd108f0/raw/74384875ecbad02ae2a926425e9bcafd0695bade/color.svg" width="130px">
 </a>

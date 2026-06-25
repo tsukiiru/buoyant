@@ -5,7 +5,12 @@ edition = "2024"
 
 [dependencies]
 chrono = "0.4.44"
-iced = { version = "0.14.0", features = ["advanced", "tiny-skia", "selector"] }
+iced = { version = "0.14.0", features = [
+  "advanced",
+  "tiny-skia",
+  "selector",
+  "svg",
+] }
 rayon = "1.12.0"
 serde = "1.0.228"
 toml = { version = "1.1.2", features = ["serde"] }
