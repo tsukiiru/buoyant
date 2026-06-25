@@ -1,68 +1,65 @@
-use iced::advanced::svg::Handle;
+use iced::advanced::image::Handle;
 use std::sync::LazyLock;
 
 pub static FOLDER: LazyLock<Handle> =
-    LazyLock::new(|| Handle::from_memory(include_bytes!("../assets/icons/folder.svg").as_ref()));
+    LazyLock::new(|| Handle::from_bytes(include_bytes!("../assets/icons/folder.png").as_ref()));
 pub static FILE: LazyLock<Handle> =
-    LazyLock::new(|| Handle::from_memory(include_bytes!("../assets/icons/file.svg").as_ref()));
+    LazyLock::new(|| Handle::from_bytes(include_bytes!("../assets/icons/file.png").as_ref()));
 pub static IMAGE: LazyLock<Handle> =
-    LazyLock::new(|| Handle::from_memory(include_bytes!("../assets/icons/image.svg").as_ref()));
-pub static VIDEO: LazyLock<Handle> = LazyLock::new(|| {
-    Handle::from_memory(include_bytes!("../assets/icons/file-video.svg").as_ref())
-});
-pub static AUDIO: LazyLock<Handle> = LazyLock::new(|| {
-    Handle::from_memory(include_bytes!("../assets/icons/file-audio.svg").as_ref())
-});
+    LazyLock::new(|| Handle::from_bytes(include_bytes!("../assets/icons/image.png").as_ref()));
+pub static VIDEO: LazyLock<Handle> =
+    LazyLock::new(|| Handle::from_bytes(include_bytes!("../assets/icons/file-video.png").as_ref()));
+pub static AUDIO: LazyLock<Handle> =
+    LazyLock::new(|| Handle::from_bytes(include_bytes!("../assets/icons/file-audio.png").as_ref()));
 
 pub static DATABASE: LazyLock<Handle> =
-    LazyLock::new(|| Handle::from_memory(include_bytes!("../assets/icons/database.svg").as_ref()));
+    LazyLock::new(|| Handle::from_bytes(include_bytes!("../assets/icons/database.png").as_ref()));
 pub static ARCHIVE: LazyLock<Handle> =
-    LazyLock::new(|| Handle::from_memory(include_bytes!("../assets/icons/archive.svg").as_ref()));
+    LazyLock::new(|| Handle::from_bytes(include_bytes!("../assets/icons/archive.png").as_ref()));
 pub static SRC: LazyLock<Handle> =
-    LazyLock::new(|| Handle::from_memory(include_bytes!("../assets/icons/file-code.svg").as_ref()));
+    LazyLock::new(|| Handle::from_bytes(include_bytes!("../assets/icons/file-code.png").as_ref()));
 pub static RUST_SRC: LazyLock<Handle> =
-    LazyLock::new(|| Handle::from_memory(include_bytes!("../assets/icons/file-rs.svg")));
+    LazyLock::new(|| Handle::from_bytes(include_bytes!("../assets/icons/file-rs.png").as_ref()));
 pub static PYTHON_SRC: LazyLock<Handle> =
-    LazyLock::new(|| Handle::from_memory(include_bytes!("../assets/icons/file-py.svg").as_ref()));
+    LazyLock::new(|| Handle::from_bytes(include_bytes!("../assets/icons/file-py.png").as_ref()));
 pub static C_SRC: LazyLock<Handle> =
-    LazyLock::new(|| Handle::from_memory(include_bytes!("../assets/icons/file-c.svg").as_ref()));
+    LazyLock::new(|| Handle::from_bytes(include_bytes!("../assets/icons/file-c.png").as_ref()));
 pub static CS_SRC: LazyLock<Handle> = LazyLock::new(|| {
-    Handle::from_memory(include_bytes!("../assets/icons/file-c-sharp.svg").as_ref())
+    Handle::from_bytes(include_bytes!("../assets/icons/file-c-sharp.png").as_ref())
 });
 pub static CPP_SRC: LazyLock<Handle> =
-    LazyLock::new(|| Handle::from_memory(include_bytes!("../assets/icons/file-cpp.svg").as_ref()));
+    LazyLock::new(|| Handle::from_bytes(include_bytes!("../assets/icons/file-cpp.png").as_ref()));
 pub static CSS_SRC: LazyLock<Handle> =
-    LazyLock::new(|| Handle::from_memory(include_bytes!("../assets/icons/file-css.svg").as_ref()));
+    LazyLock::new(|| Handle::from_bytes(include_bytes!("../assets/icons/file-css.png").as_ref()));
 pub static JAVA_SRC: LazyLock<Handle> =
-    LazyLock::new(|| Handle::from_memory(include_bytes!("../assets/icons/coffee.svg").as_ref()));
+    LazyLock::new(|| Handle::from_bytes(include_bytes!("../assets/icons/coffee.png").as_ref()));
 pub static HTML_SRC: LazyLock<Handle> =
-    LazyLock::new(|| Handle::from_memory(include_bytes!("../assets/icons/file-html.svg").as_ref()));
+    LazyLock::new(|| Handle::from_bytes(include_bytes!("../assets/icons/file-html.png").as_ref()));
 pub static JS_SRC: LazyLock<Handle> =
-    LazyLock::new(|| Handle::from_memory(include_bytes!("../assets/icons/file-js.svg").as_ref()));
+    LazyLock::new(|| Handle::from_bytes(include_bytes!("../assets/icons/file-js.png").as_ref()));
 pub static TS_SRC: LazyLock<Handle> =
-    LazyLock::new(|| Handle::from_memory(include_bytes!("../assets/icons/file-ts.svg").as_ref()));
+    LazyLock::new(|| Handle::from_bytes(include_bytes!("../assets/icons/file-ts.png").as_ref()));
 pub static JSX_SRC: LazyLock<Handle> =
-    LazyLock::new(|| Handle::from_memory(include_bytes!("../assets/icons/file-jsx.svg").as_ref()));
+    LazyLock::new(|| Handle::from_bytes(include_bytes!("../assets/icons/file-jsx.png").as_ref()));
 pub static TSX_SRC: LazyLock<Handle> =
-    LazyLock::new(|| Handle::from_memory(include_bytes!("../assets/icons/file-tsx.svg").as_ref()));
+    LazyLock::new(|| Handle::from_bytes(include_bytes!("../assets/icons/file-tsx.png").as_ref()));
 pub static MD_SRC: LazyLock<Handle> = LazyLock::new(|| {
-    Handle::from_memory(include_bytes!("../assets/icons/markdown-logo.svg").as_ref())
+    Handle::from_bytes(include_bytes!("../assets/icons/markdown-logo.png").as_ref())
 });
 pub static VUE_SRC: LazyLock<Handle> =
-    LazyLock::new(|| Handle::from_memory(include_bytes!("../assets/icons/file-vue.svg").as_ref()));
-pub static BROKEN_LINK: LazyLock<Handle> = LazyLock::new(|| {
-    Handle::from_memory(include_bytes!("../assets/icons/link-break.svg").as_ref())
-});
+    LazyLock::new(|| Handle::from_bytes(include_bytes!("../assets/icons/file-vue.png").as_ref()));
+pub static BROKEN_LINK: LazyLock<Handle> =
+    LazyLock::new(|| Handle::from_bytes(include_bytes!("../assets/icons/link-break.png").as_ref()));
 pub static LINK: LazyLock<Handle> =
-    LazyLock::new(|| Handle::from_memory(include_bytes!("../assets/icons/link.svg").as_ref()));
+    LazyLock::new(|| Handle::from_bytes(include_bytes!("../assets/icons/link.png").as_ref()));
 
 pub static QUESTION_MARK: LazyLock<Handle> = LazyLock::new(|| {
-    Handle::from_memory(include_bytes!("../assets/icons/question-mark.svg").as_ref())
+    Handle::from_bytes(include_bytes!("../assets/icons/question-mark.png").as_ref())
 });
 
 // manually matching every (common) file types (i know) because im fucking insane and unemployed
-pub fn extension_to_filetype(extension: &str) -> Option<(String, &'static LazyLock<Handle>)> {
-    let something: (&str, &LazyLock<Handle>) = match extension {
+pub fn extension_to_filetype(extension: &str) -> Option<(String, &'static Handle)> {
+    let something: (&str, &Handle) = match extension {
         // images
         "png" => ("PNG Image", &IMAGE),
         "jpg" => ("JPEG Image", &IMAGE),

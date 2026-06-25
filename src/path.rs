@@ -1,4 +1,4 @@
-use iced::advanced::svg::Handle;
+use iced::advanced::image::Handle;
 use rayon::iter::{IntoParallelRefIterator, ParallelIterator};
 use std::{
     collections::HashSet,
@@ -7,7 +7,6 @@ use std::{
     path::{Path, PathBuf},
     process::Command,
     str::from_utf8,
-    sync::LazyLock,
     time::SystemTime,
 };
 
@@ -239,15 +238,15 @@ fn is_textfile(path: &Path) -> bool {
     }
 }
 
-pub fn file_type(path: &Path) -> (String, &'static LazyLock<Handle>) {
+pub fn file_type(path: &Path) -> (String, &'static Handle) {
     if path.is_dir() {
-        return (String::from("Folder"), &file_types::FOLDER);
+        return (String::from("Folder"), &*file_types::FOLDER);
     }
 
     let ext = file_extension(path);
     let opt_type = file_types::extension_to_filetype(ext);
     let str_type: &str;
-    let icon: &LazyLock<Handle>;
+    let icon: &'static Handle;
 
     if let Some(thing) = &opt_type {
         str_type = &thing.0;

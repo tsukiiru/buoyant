@@ -1,7 +1,7 @@
 use std::{
     collections::{HashMap, HashSet},
     env::home_dir,
-    ops::{Deref, Sub},
+    ops::Sub,
     path::{Path, PathBuf},
     process::{Command, Stdio},
 };
@@ -10,7 +10,7 @@ use chrono::{DateTime, Datelike, Utc};
 use rayon::prelude::*;
 
 use iced::widget::{
-    operation::AbsoluteOffset, scrollable::Viewport, selector::Target, text::Wrapping,
+    image, operation::AbsoluteOffset, scrollable::Viewport, selector::Target, text::Wrapping,
 };
 use iced::{
     Background, Border, Color, Element, Event, Length, Padding, Subscription, Task, alignment,
@@ -22,7 +22,7 @@ use iced::{
     },
     widget::{
         button, column, container, float, mouse_area, opaque, operation, row, scrollable, selector,
-        stack, svg, text, text_input,
+        stack, text, text_input,
     },
 };
 
@@ -1045,8 +1045,11 @@ impl Buoyant {
                 continue;
             }
 
-            row = row
-                .push(container(svg(item.icon.deref().clone()).width(16).height(16)).center_y(30));
+            row = row.push(
+                container(image(item.icon.clone()).width(16).height(16))
+                    .center_y(30)
+                    .width(30),
+            );
 
             for child in &self.config.view.explorer {
                 match child {
