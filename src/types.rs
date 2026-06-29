@@ -116,7 +116,7 @@ impl Default for Item {
     fn default() -> Self {
         Item {
             name: String::with_capacity(16),
-            path: PathBuf::with_capacity(60),
+            path: PathBuf::new(),
             icon: &file_types::FILE,
             accessed: 0,
             created: 0,

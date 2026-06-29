@@ -229,13 +229,17 @@ pub fn file_name(path: &Path) -> String {
 }
 
 fn is_textfile(path: &Path) -> bool {
-    let try_read = fs::read(path);
-
-    if let Ok(contents) = try_read {
-        return contents.is_ascii();
-    } else {
+    use std::io::Read;
+    let Ok(mut file) = fs::File::open(path) else {
         return false;
-    }
+    };
+
+    let mut buf = [0u8; 512];
+    let Ok(n) = file.read(&mut buf) else {
+        return false;
+    };
+
+    buf[..n].iter().all(|&b| b.is_ascii())
 }
 
 pub fn file_type(path: &Path) -> (String, &'static Handle) {
@@ -246,7 +250,7 @@ pub fn file_type(path: &Path) -> (String, &'static Handle) {
     let ext = file_extension(path);
     let opt_type = file_types::extension_to_filetype(ext);
     let str_type: &str;
-    let icon: &'static Handle;
+    let icon: &Handle;
 
     if let Some(thing) = &opt_type {
         str_type = &thing.0;
@@ -274,31 +278,26 @@ pub fn file_type(path: &Path) -> (String, &'static Handle) {
 
 const UNIX_EPOCH: SystemTime = SystemTime::UNIX_EPOCH;
 
-pub fn file_accessed(path: &Path) -> i64 {
+pub fn accessed_and_created(path: &Path) -> (i64, i64) {
     match path.metadata() {
-        Ok(res) => res
-            .accessed()
-            .unwrap_or(UNIX_EPOCH)
-            .duration_since(UNIX_EPOCH)
-            .unwrap_or_default()
-            .as_secs()
-            .try_into()
-            .unwrap(),
-        Err(_) => 0, // TODO: add perms issues
-    }
-}
+        Ok(res) => (
+            res.accessed()
+                .unwrap_or(UNIX_EPOCH)
+                .duration_since(UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_secs()
+                .try_into()
+                .unwrap(),
+            res.created()
+                .unwrap_or(UNIX_EPOCH)
+                .duration_since(UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_secs()
+                .try_into()
+                .unwrap(),
+        ),
 
-pub fn file_created(path: &Path) -> i64 {
-    match path.metadata() {
-        Ok(res) => res
-            .created()
-            .unwrap_or(UNIX_EPOCH)
-            .duration_since(UNIX_EPOCH)
-            .unwrap_or_default()
-            .as_secs()
-            .try_into()
-            .unwrap(),
-        Err(_) => 0,
+        Err(_) => (0, 0),
     }
 }
 
@@ -351,13 +350,7 @@ pub fn folder_size(path: &Path) -> Option<usize> {
     if path.is_file() {
         return None;
     }
-
-    let read_opt = read_dir(&path);
-    if let Ok(children) = read_opt {
-        return Some(children.len());
-    }
-
-    None
+    fs::read_dir(path).ok().map(|d| d.count())
 }
 
 pub fn bytes_to_string(size: u64) -> String {
