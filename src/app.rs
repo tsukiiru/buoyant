@@ -1,7 +1,7 @@
 use std::{
-    collections::{HashMap, HashSet},
+    collections::HashSet,
     env::home_dir,
-    ops::{Deref, Sub},
+    ops::Sub,
     path::{Path, PathBuf},
     process::{Command, Stdio},
 };
@@ -10,7 +10,7 @@ use chrono::{DateTime, Datelike, Utc};
 use rayon::prelude::*;
 
 use iced::widget::{
-    operation::AbsoluteOffset, scrollable::Viewport, selector::Target, text::Wrapping,
+    Id, operation::AbsoluteOffset, scrollable::Viewport, selector::Target, text::Wrapping,
 };
 use iced::{
     Background, Border, Color, Element, Event, Length, Padding, Subscription, Task, alignment,
@@ -22,7 +22,7 @@ use iced::{
     },
     widget::{
         button, column, container, float, mouse_area, opaque, operation, row, scrollable, selector,
-        stack, svg, text, text_input,
+        stack, text, text_input,
     },
 };
 
@@ -178,6 +178,8 @@ pub struct Buoyant {
     states: States,
 }
 
+const EXPLORER_ID: Id = Id::new("scrollable");
+
 impl Buoyant {
     pub fn new(input: &str) -> (Self, Task<Message>) {
         let path_conversion = PathBuf::from(input);
@@ -256,7 +258,7 @@ impl Buoyant {
                 self.current_path.pop();
 
                 Task::done(Message::FetchEntries(path)).chain(
-                    selector::find(selector::id("scrollable"))
+                    selector::find(selector::id(EXPLORER_ID))
                         .then(|output| Task::done(Message::ExplorerScroll(output))),
                 )
             }
@@ -357,11 +359,11 @@ impl Buoyant {
             Message::FetchEntries(prev_path) => {
                 self.states.modals.search = None;
                 self.states.explorer.error = None;
-                // clear all entries, without reallocating
+                // clear entries
                 self.entries.children.par_iter_mut().for_each(|item| {
                     item.using = false;
                     item.name.clear();
-                    item.path.clear();
+                    item.path = PathBuf::new();
                     item.accessed = 0;
                     item.created = 0;
                     item.foldersize = None;
@@ -375,18 +377,18 @@ impl Buoyant {
                     return Task::none();
                 }
 
-                let current_paths = cur_paths_opt.unwrap();
                 let mut index: usize = 0;
 
-                for path in current_paths {
+                for path in cur_paths_opt.unwrap() {
                     let (file_type, icon) = &path::file_type(&path);
+                    let (accessed, created) = path::accessed_and_created(&path);
 
                     self.push_entry(
                         &TempItem {
                             filetype: &file_type,
                             icon: &icon,
-                            accessed: path::file_accessed(&path),
-                            created: path::file_created(&path),
+                            accessed,
+                            created,
                             filesize: path::file_size(&path),
                             foldersize: path::folder_size(&path),
                             hidden: path::is_hidden(&path),
@@ -398,6 +400,15 @@ impl Buoyant {
                     );
 
                     index += 1;
+                }
+
+                self.entries.children.truncate(index);
+
+                unsafe {
+                    unsafe extern "C" {
+                        fn malloc_trim(pad: usize) -> i32;
+                    }
+                    malloc_trim(0);
                 }
 
                 Task::done(Message::FilterEntries(prev_path))
@@ -501,17 +512,14 @@ impl Buoyant {
                 );
 
                 if offset <= widget_range.0 {
-                    return operation::scroll_to(
-                        "scrollable",
-                        AbsoluteOffset { x: 0.0, y: offset },
-                    );
+                    return operation::scroll_to(EXPLORER_ID, AbsoluteOffset { x: 0.0, y: offset });
                 }
 
                 // 40 is the height of the button
 
                 if widget_range.1 <= offset {
                     return operation::scroll_to(
-                        "scrollable",
+                        EXPLORER_ID,
                         AbsoluteOffset {
                             x: 0.0,
                             y: offset - height + 40.0,
@@ -555,7 +563,7 @@ impl Buoyant {
 
                 self.current_index = Some(index);
 
-                selector::find(selector::id("scrollable"))
+                selector::find(selector::id(EXPLORER_ID))
                     .then(|output| Task::done(Message::ExplorerScroll(output)))
             }
             Message::ResetSelection => {
@@ -563,6 +571,7 @@ impl Buoyant {
 
                 if !states.modifiers.ctrl || !states.is_visual_mode {
                     self.selected.clear();
+                    self.selected.shrink_to_fit();
                 }
                 Task::none()
             }
@@ -930,6 +939,7 @@ impl Buoyant {
                 modals_state.create_file = None;
                 modals_state.create_folder = None;
                 modals_state.rename = None;
+                self.states.modals.choices.clear();
                 // sloppy code
                 // i mean there has to be some state-resetting somewhere right?
 
@@ -1045,8 +1055,8 @@ impl Buoyant {
                 continue;
             }
 
-            row = row
-                .push(container(svg(item.icon.deref().clone()).width(16).height(16)).center_y(30));
+            /*           row = row
+            .push(container(svg(item.icon.deref().clone()).width(16).height(16)).center_y(30));*/
 
             for child in &self.config.view.explorer {
                 match child {
@@ -1185,7 +1195,7 @@ impl Buoyant {
         }
 
         let explorer_scroll = scrollable(explorer_column)
-            .id("scrollable")
+            .id(EXPLORER_ID)
             .width(Length::Fill)
             .height(Length::Fill)
             .on_scroll(Message::ExplorerOffset);
@@ -1656,18 +1666,21 @@ impl Buoyant {
 
         match sorting_by {
             SortingBy::Name => {
-                let lowercased: HashMap<usize, String> = displaying
+                let mut lowercased: Vec<(usize, String)> = displaying
                     .iter()
-                    .map(|entry_index| {
-                        let v = self.entries.children[*entry_index].name.to_lowercase();
-                        return (entry_index.clone(), v);
+                    .map(|&entry_index| {
+                        (
+                            entry_index,
+                            self.entries.children[entry_index].name.to_lowercase(),
+                        )
                     })
                     .collect();
 
-                displaying.par_sort_by(|a, b| {
-                    let (x, y) = (&lowercased[a], &lowercased[b]);
-                    x.cmp(y)
-                })
+                lowercased.par_sort_by(|a, b| a.1.cmp(&b.1));
+                displaying
+                    .iter_mut()
+                    .zip(lowercased.iter())
+                    .for_each(|(d, (i, _))| *d = *i);
             }
             SortingBy::Size => displaying.par_sort_by(|a, b| {
                 let (x, y) = (&reference[*a].filesize, &reference[*b].filesize);
