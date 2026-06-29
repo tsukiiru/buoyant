@@ -1,6 +1,6 @@
 use std::{
     collections::HashSet,
-    env::home_dir,
+    env,
     ops::Sub,
     path::{Path, PathBuf},
     process::{Command, Stdio},
@@ -10,7 +10,7 @@ use chrono::{DateTime, Datelike, Utc};
 use rayon::prelude::*;
 
 use iced::widget::{
-    Id, operation::AbsoluteOffset, scrollable::Viewport, selector::Target, text::Wrapping,
+    Id, operation::AbsoluteOffset, scrollable::Viewport, selector::Target, svg, text::Wrapping,
 };
 use iced::{
     Background, Border, Color, Element, Event, Length, Padding, Subscription, Task, alignment,
@@ -27,17 +27,14 @@ use iced::{
 };
 
 use crate::path;
-use crate::theme::Theme;
+use crate::theme;
+use crate::types::{
+    Clipboard, ClipboardMode, CreateModal, Direction, Entries, Item, ModalMessage, ModalType,
+    PasteType, RenameModal, TempItem,
+};
 use crate::{
     config::{self, Displaying, SortingBy},
     types::SearchModal,
-};
-use crate::{
-    theme,
-    types::{
-        Clipboard, ClipboardMode, CreateModal, Direction, Entries, Item, ModalMessage, ModalType,
-        PasteType, RenameModal, TempItem,
-    },
 };
 
 struct States {
@@ -166,7 +163,7 @@ pub enum Message {
 
 pub struct Buoyant {
     config: config::Config,
-    theme: Theme,
+    theme: theme::Theme,
 
     current_path: PathBuf,
     current_index: Option<usize>,
@@ -186,7 +183,7 @@ impl Buoyant {
         let path: PathBuf;
 
         if !path_conversion.exists() {
-            let home_directory = home_dir();
+            let home_directory = env::home_dir();
 
             if let Some(dir) = home_directory {
                 path = dir;
@@ -1055,8 +1052,7 @@ impl Buoyant {
                 continue;
             }
 
-            /*           row = row
-            .push(container(svg(item.icon.deref().clone()).width(16).height(16)).center_y(30));*/
+            row = row.push(container(svg(item.icon.clone()).width(16).height(16)).center_y(30));
 
             for child in &self.config.view.explorer {
                 match child {

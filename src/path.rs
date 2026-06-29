@@ -1,4 +1,4 @@
-use iced::advanced::image::Handle;
+use iced::advanced::svg::Handle;
 use rayon::iter::{IntoParallelRefIterator, ParallelIterator};
 use std::{
     collections::HashSet,

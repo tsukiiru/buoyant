@@ -1,10 +1,10 @@
-use crate::file_types;
 use std::{
     collections::HashSet,
     path::{Path, PathBuf},
 };
 
-use iced::advanced::image::Handle;
+use crate::file_types;
+use iced::advanced::svg::Handle;
 
 #[derive(Clone, Debug)]
 pub enum Direction {
