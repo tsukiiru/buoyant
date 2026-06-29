@@ -4,7 +4,7 @@ use std::{
     path::{Path, PathBuf},
 };
 
-use iced::advanced::svg::Handle;
+use iced::advanced::image::Handle;
 
 #[derive(Clone, Debug)]
 pub enum Direction {

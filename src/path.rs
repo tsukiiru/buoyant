@@ -1,4 +1,4 @@
-use iced::advanced::svg::Handle;
+use iced::advanced::image::Handle;
 use rayon::iter::{IntoParallelRefIterator, ParallelIterator};
 use std::{
     collections::HashSet,
@@ -244,7 +244,7 @@ fn is_textfile(path: &Path) -> bool {
 
 pub fn file_type(path: &Path) -> (String, &'static Handle) {
     if path.is_dir() {
-        return (String::from("Folder"), &file_types::FOLDER);
+        return (String::from("Folder"), &*file_types::FOLDER);
     }
 
     let ext = file_extension(path);
