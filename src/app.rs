@@ -479,7 +479,11 @@ impl Buoyant {
             }
 
             Message::HoverEntry(index, state) => {
-                let item = self.entries.children.get_mut(index).unwrap();
+                let item = self
+                    .entries
+                    .children
+                    .get_mut(self.entries.displaying[index])
+                    .unwrap();
                 item.hovered = state;
 
                 Task::none()
@@ -1070,12 +1074,12 @@ impl Buoyant {
         let rail_style = Rail {
             background: None,
             border: Border {
-                color: palette.scrim,
-                width: 2.0,
+                color: palette.background,
+                width: 0.0,
                 radius: Radius::new(0),
             },
             scroller: Scroller {
-                background: Background::Color(palette.overlay),
+                background: Background::Color(palette.accent),
                 border: Border {
                     ..Default::default()
                 },
@@ -1083,7 +1087,7 @@ impl Buoyant {
         };
 
         let explorer_style = scrollable::Style {
-            container: bg_style,
+            container: panel_style,
             vertical_rail: rail_style,
             horizontal_rail: rail_style,
             gap: None,
