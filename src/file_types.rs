@@ -1,66 +1,62 @@
 use iced::advanced::svg::Handle;
 use std::sync::LazyLock;
 
+pub static LEFT_ARROW: LazyLock<Handle> =
+    LazyLock::new(|| Handle::from_memory(include_bytes!("../assets/icons/arrow-left.svg")));
 pub static FOLDER: LazyLock<Handle> =
-    LazyLock::new(|| Handle::from_memory(include_bytes!("../assets/icons/folder.svg").as_ref()));
+    LazyLock::new(|| Handle::from_memory(include_bytes!("../assets/icons/folder.svg")));
 pub static FILE: LazyLock<Handle> =
-    LazyLock::new(|| Handle::from_memory(include_bytes!("../assets/icons/file.svg").as_ref()));
+    LazyLock::new(|| Handle::from_memory(include_bytes!("../assets/icons/file.svg")));
 pub static IMAGE: LazyLock<Handle> =
-    LazyLock::new(|| Handle::from_memory(include_bytes!("../assets/icons/image.svg").as_ref()));
-pub static VIDEO: LazyLock<Handle> = LazyLock::new(|| {
-    Handle::from_memory(include_bytes!("../assets/icons/file-video.svg").as_ref())
-});
-pub static AUDIO: LazyLock<Handle> = LazyLock::new(|| {
-    Handle::from_memory(include_bytes!("../assets/icons/file-audio.svg").as_ref())
-});
+    LazyLock::new(|| Handle::from_memory(include_bytes!("../assets/icons/image.svg")));
+pub static VIDEO: LazyLock<Handle> =
+    LazyLock::new(|| Handle::from_memory(include_bytes!("../assets/icons/file-video.svg")));
+pub static AUDIO: LazyLock<Handle> =
+    LazyLock::new(|| Handle::from_memory(include_bytes!("../assets/icons/file-audio.svg")));
 pub static SCRIPT: LazyLock<Handle> =
-    LazyLock::new(|| Handle::from_memory(include_bytes!("../assets/icons/terminal.svg").as_ref()));
+    LazyLock::new(|| Handle::from_memory(include_bytes!("../assets/icons/terminal.svg")));
 pub static DATABASE: LazyLock<Handle> =
-    LazyLock::new(|| Handle::from_memory(include_bytes!("../assets/icons/database.svg").as_ref()));
+    LazyLock::new(|| Handle::from_memory(include_bytes!("../assets/icons/database.svg")));
 pub static SQLITE: LazyLock<Handle> =
     LazyLock::new(|| Handle::from_memory(include_bytes!("../assets/icons/file-sql.svg")));
 pub static ARCHIVE: LazyLock<Handle> =
-    LazyLock::new(|| Handle::from_memory(include_bytes!("../assets/icons/archive.svg").as_ref()));
+    LazyLock::new(|| Handle::from_memory(include_bytes!("../assets/icons/archive.svg")));
 pub static SRC: LazyLock<Handle> =
-    LazyLock::new(|| Handle::from_memory(include_bytes!("../assets/icons/file-code.svg").as_ref()));
+    LazyLock::new(|| Handle::from_memory(include_bytes!("../assets/icons/file-code.svg")));
 pub static RUST_SRC: LazyLock<Handle> =
-    LazyLock::new(|| Handle::from_memory(include_bytes!("../assets/icons/file-rs.svg").as_ref()));
+    LazyLock::new(|| Handle::from_memory(include_bytes!("../assets/icons/file-rs.svg")));
 pub static PYTHON_SRC: LazyLock<Handle> =
-    LazyLock::new(|| Handle::from_memory(include_bytes!("../assets/icons/file-py.svg").as_ref()));
+    LazyLock::new(|| Handle::from_memory(include_bytes!("../assets/icons/file-py.svg")));
 pub static C_SRC: LazyLock<Handle> =
-    LazyLock::new(|| Handle::from_memory(include_bytes!("../assets/icons/file-c.svg").as_ref()));
-pub static CS_SRC: LazyLock<Handle> = LazyLock::new(|| {
-    Handle::from_memory(include_bytes!("../assets/icons/file-c-sharp.svg").as_ref())
-});
+    LazyLock::new(|| Handle::from_memory(include_bytes!("../assets/icons/file-c.svg")));
+pub static CS_SRC: LazyLock<Handle> =
+    LazyLock::new(|| Handle::from_memory(include_bytes!("../assets/icons/file-c-sharp.svg")));
 pub static CPP_SRC: LazyLock<Handle> =
-    LazyLock::new(|| Handle::from_memory(include_bytes!("../assets/icons/file-cpp.svg").as_ref()));
+    LazyLock::new(|| Handle::from_memory(include_bytes!("../assets/icons/file-cpp.svg")));
 pub static CSS_SRC: LazyLock<Handle> =
-    LazyLock::new(|| Handle::from_memory(include_bytes!("../assets/icons/file-css.svg").as_ref()));
+    LazyLock::new(|| Handle::from_memory(include_bytes!("../assets/icons/file-css.svg")));
 pub static JAVA_SRC: LazyLock<Handle> =
-    LazyLock::new(|| Handle::from_memory(include_bytes!("../assets/icons/coffee.svg").as_ref()));
+    LazyLock::new(|| Handle::from_memory(include_bytes!("../assets/icons/coffee.svg")));
 pub static HTML_SRC: LazyLock<Handle> =
-    LazyLock::new(|| Handle::from_memory(include_bytes!("../assets/icons/file-html.svg").as_ref()));
+    LazyLock::new(|| Handle::from_memory(include_bytes!("../assets/icons/file-html.svg")));
 pub static JS_SRC: LazyLock<Handle> =
-    LazyLock::new(|| Handle::from_memory(include_bytes!("../assets/icons/file-js.svg").as_ref()));
+    LazyLock::new(|| Handle::from_memory(include_bytes!("../assets/icons/file-js.svg")));
 pub static TS_SRC: LazyLock<Handle> =
-    LazyLock::new(|| Handle::from_memory(include_bytes!("../assets/icons/file-ts.svg").as_ref()));
+    LazyLock::new(|| Handle::from_memory(include_bytes!("../assets/icons/file-ts.svg")));
 pub static JSX_SRC: LazyLock<Handle> =
-    LazyLock::new(|| Handle::from_memory(include_bytes!("../assets/icons/file-jsx.svg").as_ref()));
+    LazyLock::new(|| Handle::from_memory(include_bytes!("../assets/icons/file-jsx.svg")));
 pub static TSX_SRC: LazyLock<Handle> =
-    LazyLock::new(|| Handle::from_memory(include_bytes!("../assets/icons/file-tsx.svg").as_ref()));
-pub static MD_SRC: LazyLock<Handle> = LazyLock::new(|| {
-    Handle::from_memory(include_bytes!("../assets/icons/markdown-logo.svg").as_ref())
-});
+    LazyLock::new(|| Handle::from_memory(include_bytes!("../assets/icons/file-tsx.svg")));
+pub static MD_SRC: LazyLock<Handle> =
+    LazyLock::new(|| Handle::from_memory(include_bytes!("../assets/icons/markdown-logo.svg")));
 pub static VUE_SRC: LazyLock<Handle> =
-    LazyLock::new(|| Handle::from_memory(include_bytes!("../assets/icons/file-vue.svg").as_ref()));
-pub static BROKEN_LINK: LazyLock<Handle> = LazyLock::new(|| {
-    Handle::from_memory(include_bytes!("../assets/icons/link-break.svg").as_ref())
-});
+    LazyLock::new(|| Handle::from_memory(include_bytes!("../assets/icons/file-vue.svg")));
+pub static BROKEN_LINK: LazyLock<Handle> =
+    LazyLock::new(|| Handle::from_memory(include_bytes!("../assets/icons/link-break.svg")));
 pub static LINK: LazyLock<Handle> =
-    LazyLock::new(|| Handle::from_memory(include_bytes!("../assets/icons/link.svg").as_ref()));
-pub static QUESTION_MARK: LazyLock<Handle> = LazyLock::new(|| {
-    Handle::from_memory(include_bytes!("../assets/icons/question-mark.svg").as_ref())
-});
+    LazyLock::new(|| Handle::from_memory(include_bytes!("../assets/icons/link.svg")));
+pub static QUESTION_MARK: LazyLock<Handle> =
+    LazyLock::new(|| Handle::from_memory(include_bytes!("../assets/icons/question-mark.svg")));
 
 pub fn extension_to_filetype(extension: &str) -> Option<(String, &'static Handle)> {
     let something: (&str, &Handle) = match extension {

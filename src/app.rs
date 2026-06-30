@@ -34,7 +34,6 @@ use iced::{
     },
 };
 
-use crate::path;
 use crate::theme;
 use crate::types::{
     Clipboard, ClipboardMode, CreateModal, Direction, Entries, Item, ModalMessage, ModalType,
@@ -44,6 +43,7 @@ use crate::{
     config::{self, Displaying, SortingBy},
     types::SearchModal,
 };
+use crate::{file_types, path};
 
 struct States {
     modifiers: ModifiersState,
@@ -1013,7 +1013,8 @@ impl Buoyant {
         const MODAL_ELEMENT_SPACING: f32 = 10.0;
 
         const APP_PADDING: f32 = 20.0;
-        const COLUMNS_PADDING: f32 = 5.0;
+        const LEFT_COLUMN_PADDING: f32 = 0.0;
+        const RIGHT_COLUMN_PADDING: f32 = 5.0;
         const TEXT_INPUT_MODAL_PADDING: f32 = 5.0;
 
         const MODAL_WIDTH: f32 = 500.0;
@@ -1031,6 +1032,15 @@ impl Buoyant {
         // Styles
         let button_style = button::Style {
             background: Some(Background::Color(palette.accent_dark)),
+            ..Default::default()
+        };
+
+        let return_button_style = button::Style {
+            background: None,
+            border: Border {
+                width: 0.0,
+                ..Default::default()
+            },
             ..Default::default()
         };
 
@@ -1451,8 +1461,10 @@ impl Buoyant {
 
         let mut left_col = column![
             row![
-                button(text("..back").size(NORMAL_TEXT_SIZE).color(text_color))
-                    .style(move |_, _| button_style.into())
+                button(svg(file_types::LEFT_ARROW.clone()).width(20).height(20))
+                    .height(30)
+                    .style(move |_, _| return_button_style
+                        .with_background(palette.text.scale_alpha(0.1)))
                     .on_press(Message::NavigateBack),
                 container(
                     text(format!("{}", self.current_path.display()))
@@ -1462,7 +1474,6 @@ impl Buoyant {
                 .style(move |_| { palette.text.scale_alpha(0.1).into() })
                 .center_y(30)
                 .center_x(Length::Fill)
-                .padding(5),
             ],
             explorer_select,
             container(file_info.wrap().vertical_spacing(METADATA_SPACING)).padding(10)
@@ -1584,11 +1595,11 @@ impl Buoyant {
         let content = container(
             row![
                 container(left_col)
-                    .padding(COLUMNS_PADDING)
+                    .padding(LEFT_COLUMN_PADDING)
                     .clip(true)
                     .style(move |_| panel_style.into()),
                 container(right_col)
-                    .padding(COLUMNS_PADDING)
+                    .padding(RIGHT_COLUMN_PADDING)
                     .clip(true)
                     .style(move |_| panel_style.into()),
             ]
