@@ -13,9 +13,12 @@ pub static VIDEO: LazyLock<Handle> = LazyLock::new(|| {
 pub static AUDIO: LazyLock<Handle> = LazyLock::new(|| {
     Handle::from_memory(include_bytes!("../assets/icons/file-audio.svg").as_ref())
 });
-
+pub static SCRIPT: LazyLock<Handle> =
+    LazyLock::new(|| Handle::from_memory(include_bytes!("../assets/icons/terminal.svg").as_ref()));
 pub static DATABASE: LazyLock<Handle> =
     LazyLock::new(|| Handle::from_memory(include_bytes!("../assets/icons/database.svg").as_ref()));
+pub static SQLITE: LazyLock<Handle> =
+    LazyLock::new(|| Handle::from_memory(include_bytes!("../assets/icons/file-sql.svg")));
 pub static ARCHIVE: LazyLock<Handle> =
     LazyLock::new(|| Handle::from_memory(include_bytes!("../assets/icons/archive.svg").as_ref()));
 pub static SRC: LazyLock<Handle> =
@@ -55,12 +58,10 @@ pub static BROKEN_LINK: LazyLock<Handle> = LazyLock::new(|| {
 });
 pub static LINK: LazyLock<Handle> =
     LazyLock::new(|| Handle::from_memory(include_bytes!("../assets/icons/link.svg").as_ref()));
-
 pub static QUESTION_MARK: LazyLock<Handle> = LazyLock::new(|| {
     Handle::from_memory(include_bytes!("../assets/icons/question-mark.svg").as_ref())
 });
 
-// manually matching every (common) file types (i know) because im fucking insane and unemployed
 pub fn extension_to_filetype(extension: &str) -> Option<(String, &'static Handle)> {
     let something: (&str, &Handle) = match extension {
         // images
@@ -105,6 +106,7 @@ pub fn extension_to_filetype(extension: &str) -> Option<(String, &'static Handle
         "toml" => ("TOML Document", &SRC),
         "html" => ("Hypertext Markup", &HTML_SRC),
         "vue" => ("VUE Source File", &VUE_SRC),
+        "sh" => ("Shell Script", &SCRIPT),
         // archive
         "7z" => ("7-Zip Archive", &ARCHIVE),
         "zip" => ("ZIP Archive", &ARCHIVE),
@@ -113,6 +115,9 @@ pub fn extension_to_filetype(extension: &str) -> Option<(String, &'static Handle
         "apk" => ("Android Application Package", &ARCHIVE),
         // something
         "db" => ("Database", &DATABASE),
+        "sqlite" => ("SQL Database", &SQLITE),
+        "sqlite3" => ("SQL Database", &SQLITE),
+        "sqlite-wal" => ("SQL Database", &SQLITE),
         _ => ("", &FILE),
     };
 

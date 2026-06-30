@@ -12,7 +12,7 @@ use std::{
 
 use crate::file_types;
 use crate::types::PasteType;
-pub const NONO_CHARACTERS: [&str; 3] = ["\0", "\"", "/"];
+pub const NONO_CHARACTERS: [&str; 4] = ["\0", "\"", "/", "*"];
 
 pub fn delete(path: &Path) {
     if !path.exists() {

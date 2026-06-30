@@ -9,9 +9,6 @@ use std::{
 use chrono::{DateTime, Datelike, Utc};
 use rayon::prelude::*;
 
-use iced::widget::{
-    Id, operation::AbsoluteOffset, scrollable::Viewport, selector::Target, svg, text::Wrapping,
-};
 use iced::{
     Background, Border, Color, Element, Event, Length, Padding, Subscription, Task, alignment,
     border::Radius,
@@ -23,6 +20,17 @@ use iced::{
     widget::{
         button, column, container, float, mouse_area, opaque, operation, row, scrollable, selector,
         stack, text, text_input,
+    },
+};
+use iced::{
+    Shadow,
+    widget::{
+        Id,
+        operation::AbsoluteOffset,
+        scrollable::{AutoScroll, Rail, Scroller, Viewport},
+        selector::Target,
+        svg,
+        text::Wrapping,
     },
 };
 
@@ -176,6 +184,9 @@ pub struct Buoyant {
 }
 
 const EXPLORER_ID: Id = Id::new("scrollable");
+const RENAME_MODAL_ID: Id = Id::new("rename-modal");
+const CREATE_MODAL_ID: Id = Id::new("create-modal"); // create file or folder
+const SEARCH_BOX_ID: Id = Id::new("search-box");
 
 impl Buoyant {
     pub fn new(input: &str) -> (Self, Task<Message>) {
@@ -401,6 +412,7 @@ impl Buoyant {
 
                 self.entries.children.truncate(index);
 
+                // freed some mem from the greedy alloc
                 unsafe {
                     unsafe extern "C" {
                         fn malloc_trim(pad: usize) -> i32;
@@ -749,7 +761,7 @@ impl Buoyant {
                                 }
                                 *modals_opened = true;
 
-                                return operation::focus("rename");
+                                return operation::focus(RENAME_MODAL_ID);
                             }
                             ModalMessage::Close => {
                                 modals_state.rename = None;
@@ -820,7 +832,7 @@ impl Buoyant {
                                 });
                                 *modals_opened = true;
 
-                                return operation::focus("create");
+                                return operation::focus(CREATE_MODAL_ID);
                             }
                             ModalMessage::Close => {
                                 modals_state.create_file = None;
@@ -844,7 +856,7 @@ impl Buoyant {
                                 });
                                 *modals_opened = true;
 
-                                return operation::focus("create");
+                                return operation::focus(CREATE_MODAL_ID);
                             }
                             ModalMessage::Close => {
                                 modals_state.create_folder = None;
@@ -868,7 +880,7 @@ impl Buoyant {
                         ModalMessage::Open => {
                             modals_state.search = Some(SearchModal::default());
                             modals_state.search.as_mut().unwrap().focused = true;
-                            return operation::focus("search_box")
+                            return operation::focus(SEARCH_BOX_ID)
                                 .chain(Task::done(Message::FilterEntries(None)));
                         }
                         ModalMessage::Close => {
@@ -882,7 +894,7 @@ impl Buoyant {
                 let mut task = Task::none();
 
                 if self.states.modals.rename.is_some() {
-                    task = task.chain(operation::is_focused("rename").then(|focused| {
+                    task = task.chain(operation::is_focused(RENAME_MODAL_ID).then(|focused| {
                         if !focused {
                             return Task::done(Message::Modal(
                                 ModalType::Rename,
@@ -897,7 +909,7 @@ impl Buoyant {
                 if self.states.modals.create_file.is_some()
                     || self.states.modals.create_folder.is_some()
                 {
-                    task = task.chain(operation::is_focused("create").then(|focused| {
+                    task = task.chain(operation::is_focused(CREATE_MODAL_ID).then(|focused| {
                         if !focused {
                             return Task::batch(vec![
                                 Task::done(Message::Modal(
@@ -982,13 +994,37 @@ impl Buoyant {
     }
 
     pub fn view(&self) -> Element<'_, Message> {
-        // TODO: add toasts
+        // NOTE: add toasts?
+        // Positioning & Sizing
+        const EXPLORER_ENTRY_SPACING: f32 = 10.0;
+        const EXPLORER_COLUMN_SPACING: f32 = 10.0;
+        const METADATA_SPACING: f32 = 20.0;
+        const LEFT_COLUMN_SPACING: f32 = 10.0;
 
+        const CLIPBOARD_ENTRY_SPACING: f32 = 10.0;
+        const EXPLORER_INFO_SPACING: f32 = 10.0;
+        const RIGHT_COLUMN_SPACING: f32 = 20.0;
+
+        const COLUMNS_SPACING: f32 = 20.0;
+        const MODAL_ELEMENT_SPACING: f32 = 10.0;
+
+        const APP_PADDING: f32 = 20.0;
+        const COLUMNS_PADDING: f32 = 5.0;
+        const TEXT_INPUT_MODAL_PADDING: f32 = 5.0;
+
+        const MODAL_WIDTH: f32 = 500.0;
+
+        const BIG_TEXT_SIZE: f32 = 17.0;
+        const NORMAL_TEXT_SIZE: f32 = 15.0;
+        const SMALL_TEXT_SIZE: f32 = 13.0;
+
+        // Colors
         let palette = &self.theme.palette;
         let text_color = palette.text;
         let text_muted_color = palette.text_muted;
         let info_color = palette.blue;
 
+        // Styles
         let button_style = button::Style {
             background: Some(Background::Color(palette.accent_dark)),
             ..Default::default()
@@ -1031,17 +1067,51 @@ impl Buoyant {
             color: Some(palette.text),
         };
 
+        let rail_style = Rail {
+            background: None,
+            border: Border {
+                color: palette.scrim,
+                width: 2.0,
+                radius: Radius::new(0),
+            },
+            scroller: Scroller {
+                background: Background::Color(palette.overlay),
+                border: Border {
+                    ..Default::default()
+                },
+            },
+        };
+
+        let explorer_style = scrollable::Style {
+            container: bg_style,
+            vertical_rail: rail_style,
+            horizontal_rail: rail_style,
+            gap: None,
+            auto_scroll: AutoScroll {
+                background: Background::Color(palette.background),
+                border: Border::default(),
+                shadow: Shadow {
+                    ..Default::default()
+                },
+                icon: palette.accent,
+            },
+        };
+
+        // loading overlay
         if self.states.is_loading {
-            return container(text("loading...").color(text_color).size(17))
+            return container(text("loading...").color(text_color).size(BIG_TEXT_SIZE))
                 .style(move |_| overlay_style)
                 .center(Length::Fill)
                 .into();
         }
 
-        let mut explorer_column = column![].spacing(10).width(Length::Fill);
+        // Left Column
+        let mut explorer_column = column![]
+            .spacing(EXPLORER_ENTRY_SPACING)
+            .width(Length::Fill);
 
         for (index, &entry_index) in self.entries.displaying.iter().enumerate() {
-            let mut row = row![].spacing(10);
+            let mut row = row![].spacing(EXPLORER_COLUMN_SPACING);
 
             let item_opt = &self.entries.children.get(entry_index);
             let item;
@@ -1060,6 +1130,7 @@ impl Buoyant {
                         row = row.push(
                             container(
                                 text(&item.name)
+                                    .size(NORMAL_TEXT_SIZE)
                                     .wrapping(Wrapping::None)
                                     .align_x(alignment::Horizontal::Left)
                                     .color(if item.hidden {
@@ -1083,6 +1154,7 @@ impl Buoyant {
                         row = row.push(
                             container(
                                 text(txt)
+                                    .size(NORMAL_TEXT_SIZE)
                                     .align_x(alignment::Horizontal::Left)
                                     .wrapping(Wrapping::None)
                                     .color(if item.hidden {
@@ -1100,6 +1172,7 @@ impl Buoyant {
                         row = row.push(
                             container(
                                 text(&item.filetype)
+                                    .size(NORMAL_TEXT_SIZE)
                                     .align_x(alignment::Horizontal::Left)
                                     .wrapping(Wrapping::None)
                                     .color(if item.hidden {
@@ -1117,6 +1190,7 @@ impl Buoyant {
                         row = row.push(
                             container(
                                 text(format_date(item.created))
+                                    .size(NORMAL_TEXT_SIZE)
                                     .align_x(alignment::Horizontal::Left)
                                     .wrapping(Wrapping::None)
                                     .color(if item.hidden {
@@ -1134,6 +1208,7 @@ impl Buoyant {
                         row = row.push(
                             container(
                                 text(format_date(item.accessed))
+                                    .size(NORMAL_TEXT_SIZE)
                                     .align_x(alignment::Horizontal::Left)
                                     .wrapping(Wrapping::None)
                                     .color(if item.hidden {
@@ -1191,13 +1266,18 @@ impl Buoyant {
         }
 
         let explorer_scroll = scrollable(explorer_column)
+            .style(move |_, _| explorer_style)
             .id(EXPLORER_ID)
             .width(Length::Fill)
             .height(Length::Fill)
             .on_scroll(Message::ExplorerOffset);
 
-        let mut column_names = row![].spacing(10).padding(5);
-        column_names = column_names.push(container(text("")).width(16).height(16));
+        let mut column_names = row![].spacing(EXPLORER_COLUMN_SPACING).padding(5);
+        column_names = column_names.push(
+            container(text("").size(NORMAL_TEXT_SIZE))
+                .width(16)
+                .height(16),
+        );
 
         for child in &self.config.view.explorer {
             match child {
@@ -1205,6 +1285,7 @@ impl Buoyant {
                     column_names = column_names.push(
                         container(
                             text("file name")
+                                .size(NORMAL_TEXT_SIZE)
                                 .color(text_color)
                                 .wrapping(Wrapping::None)
                                 .align_x(alignment::Horizontal::Left),
@@ -1218,6 +1299,7 @@ impl Buoyant {
                     column_names = column_names.push(
                         container(
                             text("size")
+                                .size(NORMAL_TEXT_SIZE)
                                 .color(text_color)
                                 .wrapping(Wrapping::None)
                                 .align_x(alignment::Horizontal::Left),
@@ -1231,6 +1313,7 @@ impl Buoyant {
                     column_names = column_names.push(
                         container(
                             text("type")
+                                .size(NORMAL_TEXT_SIZE)
                                 .color(text_color)
                                 .wrapping(Wrapping::None)
                                 .align_x(alignment::Horizontal::Left),
@@ -1244,6 +1327,7 @@ impl Buoyant {
                     column_names = column_names.push(
                         container(
                             text("creation date")
+                                .size(NORMAL_TEXT_SIZE)
                                 .color(text_color)
                                 .wrapping(Wrapping::None)
                                 .align_x(alignment::Horizontal::Left),
@@ -1257,6 +1341,7 @@ impl Buoyant {
                     column_names = column_names.push(
                         container(
                             text("accessed date")
+                                .size(NORMAL_TEXT_SIZE)
                                 .color(text_color)
                                 .wrapping(Wrapping::None)
                                 .align_x(alignment::Horizontal::Left),
@@ -1269,11 +1354,12 @@ impl Buoyant {
             }
         }
 
-        let mut explorer_select_col = column![column_names,].spacing(10);
+        let mut explorer_select_col = column![column_names,].spacing(EXPLORER_ENTRY_SPACING);
 
         if let Some(error) = &self.states.explorer.error {
             explorer_select_col = explorer_select_col.push(
                 text(error)
+                    .size(NORMAL_TEXT_SIZE)
                     .center()
                     .width(Length::Fill)
                     .color(palette.yellow.scale_alpha(0.5)),
@@ -1288,6 +1374,124 @@ impl Buoyant {
             .height(Length::Fill)
             .padding(20);
 
+        let mut file_info = row![
+            container(
+                text("file metadata")
+                    .size(NORMAL_TEXT_SIZE)
+                    .color(text_color)
+            )
+            .width(Length::Fill)
+        ]
+        .spacing(METADATA_SPACING);
+
+        if let Some(index) = self.current_index
+            && let Some(item) = self.entries.item(&index)
+        {
+            for v in &self.config.view.metadata {
+                match v {
+                    Displaying::Name => {
+                        file_info = file_info.push(
+                            text(format!("name: {}", item.name))
+                                .size(NORMAL_TEXT_SIZE)
+                                .color(text_color),
+                        );
+                    }
+                    Displaying::FileType => {
+                        file_info = file_info.push(
+                            text(format!("type: {}", item.filetype))
+                                .size(NORMAL_TEXT_SIZE)
+                                .color(text_color),
+                        );
+                    }
+                    Displaying::FileSize => {
+                        file_info = file_info.push(
+                            text(format!(
+                                "size: {}",
+                                path::bytes_to_string(if self.config.misc.accurate_filesize {
+                                    path::accurate_filesize(&item.path)
+                                } else {
+                                    item.filesize
+                                })
+                            ))
+                            .size(NORMAL_TEXT_SIZE)
+                            .color(text_color),
+                        );
+                    }
+                    Displaying::LastAccessed => {
+                        file_info = file_info.push(
+                            text(format!(
+                                "last accessed: {}",
+                                DateTime::from_timestamp_secs(item.accessed)
+                                    .unwrap()
+                                    .format(&self.config.misc.format_date)
+                            ))
+                            .size(NORMAL_TEXT_SIZE)
+                            .color(text_color),
+                        );
+                    }
+                    Displaying::Created => {
+                        file_info = file_info.push(
+                            text(format!(
+                                "creation date: {}",
+                                DateTime::from_timestamp_secs(item.created)
+                                    .unwrap()
+                                    .format(&self.config.misc.format_date)
+                            ))
+                            .size(NORMAL_TEXT_SIZE)
+                            .color(text_color),
+                        );
+                    }
+                };
+            }
+        };
+
+        let mut left_col = column![
+            row![
+                button(text("..back").size(NORMAL_TEXT_SIZE).color(text_color))
+                    .style(move |_, _| button_style.into())
+                    .on_press(Message::NavigateBack),
+                container(
+                    text(format!("{}", self.current_path.display()))
+                        .size(NORMAL_TEXT_SIZE)
+                        .color(text_color)
+                )
+                .style(move |_| { palette.text.scale_alpha(0.1).into() })
+                .center_y(30)
+                .center_x(Length::Fill)
+                .padding(5),
+            ],
+            explorer_select,
+            container(file_info.wrap().vertical_spacing(METADATA_SPACING)).padding(10)
+        ]
+        .spacing(LEFT_COLUMN_SPACING)
+        .height(Length::Fill)
+        .width(Length::Fill);
+
+        if let Some(modal) = &self.states.modals.search {
+            if modal.focused {
+                left_col = left_col.push(
+                    text_input("searching...", &modal.content)
+                        .style(move |_, _| search_input_style)
+                        .padding(Padding::from([5, 10]))
+                        .on_input(|inp| {
+                            Message::Modal(ModalType::Search, ModalMessage::Content(inp))
+                        })
+                        .on_submit(Message::Modal(ModalType::Search, ModalMessage::Close))
+                        .id(SEARCH_BOX_ID),
+                );
+            } else {
+                left_col = left_col.push(
+                    container(
+                        text(&modal.content)
+                            .size(NORMAL_TEXT_SIZE)
+                            .style(move |_| unfocused_search_style),
+                    )
+                    .padding(Padding::from([5, 10])),
+                );
+            }
+        }
+
+        // Right column
         let clipboard_mode = &self.clipboard.mode;
         let mut clipboard_mode_display = "";
 
@@ -1299,24 +1503,32 @@ impl Buoyant {
         }
 
         let clipboard_entries = &self.clipboard.entries;
-        let clipboard: Element<Message> =
-            column![text(clipboard_mode_display).color(palette.green)]
-                .extend(
-                    clipboard_entries
-                        .iter()
-                        .map(|e| text(e.display().to_string()).color(text_color).into()),
-                )
-                .spacing(10)
-                .width(Length::Fill)
-                .height(Length::Fill)
-                .into();
+        let clipboard: Element<Message> = column![
+            text(clipboard_mode_display)
+                .size(NORMAL_TEXT_SIZE)
+                .color(palette.green)
+        ]
+        .extend(clipboard_entries.iter().map(|e| {
+            text(e.display().to_string())
+                .size(NORMAL_TEXT_SIZE)
+                .color(text_color)
+                .into()
+        }))
+        .spacing(CLIPBOARD_ENTRY_SPACING)
+        .width(Length::Fill)
+        .height(Length::Fill)
+        .into();
 
         let mut explorer_info = column![
-            container(text("explorer info").color(text_color))
-                .height(30)
-                .center_y(30)
-                .center_x(Length::Fill)
-                .padding(5),
+            container(
+                text("explorer info")
+                    .size(NORMAL_TEXT_SIZE)
+                    .color(text_color)
+            )
+            .height(30)
+            .center_y(30)
+            .center_x(Length::Fill)
+            .padding(5),
             text(format!(
                 "sorting by: {} ({})",
                 match self.config.sorting.sorting_by {
@@ -1332,14 +1544,16 @@ impl Buoyant {
                     "↓"
                 }
             ),)
+            .size(NORMAL_TEXT_SIZE)
             .color(text_color)
         ]
-        .spacing(10)
+        .spacing(EXPLORER_INFO_SPACING)
         .height(Length::Fill);
 
         if self.states.is_visual_mode {
             explorer_info = explorer_info.push(
                 text("VISUAL MODE")
+                    .size(NORMAL_TEXT_SIZE)
                     .color(text_color)
                     .height(20)
                     .width(Length::Fill),
@@ -1349,6 +1563,7 @@ impl Buoyant {
         if self.config.view_hidden {
             explorer_info = explorer_info.push(
                 text(format!("showing hidden files",))
+                    .size(NORMAL_TEXT_SIZE)
                     .height(20)
                     .width(Length::Fill)
                     .color(text_color),
@@ -1357,120 +1572,30 @@ impl Buoyant {
 
         explorer_info = explorer_info.push(clipboard);
 
-        let mut file_info =
-            row![container(text("file metadata").color(text_color)).width(Length::Fill)]
-                .spacing(20);
+        let right_col = column![explorer_info]
+            .width(250)
+            .spacing(RIGHT_COLUMN_SPACING);
 
-        if let Some(index) = self.current_index
-            && let Some(item) = self.entries.item(&index)
-        {
-            for v in &self.config.view.metadata {
-                match v {
-                    Displaying::Name => {
-                        file_info =
-                            file_info.push(text(format!("name: {}", item.name)).color(text_color));
-                    }
-                    Displaying::FileType => {
-                        file_info = file_info
-                            .push(text(format!("type: {}", item.filetype)).color(text_color));
-                    }
-                    Displaying::FileSize => {
-                        file_info = file_info.push(
-                            text(format!(
-                                "size: {}",
-                                path::bytes_to_string(if self.config.misc.accurate_filesize {
-                                    path::accurate_filesize(&item.path)
-                                } else {
-                                    item.filesize
-                                })
-                            ))
-                            .color(text_color),
-                        );
-                    }
-                    Displaying::LastAccessed => {
-                        file_info = file_info.push(
-                            text(format!(
-                                "last accessed: {}",
-                                DateTime::from_timestamp_secs(item.accessed)
-                                    .unwrap()
-                                    .format(&self.config.misc.format_date)
-                            ))
-                            .color(text_color),
-                        );
-                    }
-                    Displaying::Created => {
-                        file_info = file_info.push(
-                            text(format!(
-                                "creation date: {}",
-                                DateTime::from_timestamp_secs(item.created)
-                                    .unwrap()
-                                    .format(&self.config.misc.format_date)
-                            ))
-                            .color(text_color),
-                        );
-                    }
-                };
-            }
-        };
-
-        let mut left_col = column![
-            row![
-                button(text("..back").color(text_color))
-                    .style(move |_, _| button_style.into())
-                    .on_press(Message::NavigateBack),
-                container(text(format!("{}", self.current_path.display())).color(text_color))
-                    .style(move |_| { palette.text.scale_alpha(0.1).into() })
-                    .center_y(30)
-                    .center_x(Length::Fill)
-                    .padding(5),
-            ],
-            explorer_select,
-            container(file_info.wrap().vertical_spacing(20)).padding(10)
-        ]
-        .spacing(10)
-        .height(Length::Fill)
-        .width(Length::Fill);
-
-        if let Some(modal) = &self.states.modals.search {
-            if modal.focused {
-                left_col = left_col.push(
-                    text_input("searching...", &modal.content)
-                        .style(move |_, _| search_input_style)
-                        .padding(Padding::from([5, 10]))
-                        .on_input(|inp| {
-                            Message::Modal(ModalType::Search, ModalMessage::Content(inp))
-                        })
-                        .on_submit(Message::Modal(ModalType::Search, ModalMessage::Close))
-                        .id("search_box"),
-                );
-            } else {
-                left_col = left_col.push(
-                    container(text(&modal.content).style(move |_| unfocused_search_style))
-                        .padding(Padding::from([5, 10])),
-                );
-            }
-        }
-
-        let right_col = column![explorer_info].width(250).spacing(20);
-
+        // the entire program
         let content = container(
             row![
                 container(left_col)
-                    .padding(5)
+                    .padding(COLUMNS_PADDING)
                     .clip(true)
                     .style(move |_| panel_style.into()),
                 container(right_col)
-                    .padding(5)
+                    .padding(COLUMNS_PADDING)
                     .clip(true)
                     .style(move |_| panel_style.into()),
             ]
-            .spacing(20),
+            .spacing(COLUMNS_SPACING),
         )
         .width(Length::Fill)
         .height(Length::Fill)
-        .padding(20)
+        .padding(APP_PADDING)
         .style(move |_| bg_style.into());
 
+        // Modals
         let mut stack = stack![content].width(Length::Fill).height(Length::Fill);
 
         if let Some(modal) = &self.states.modals.rename {
@@ -1478,17 +1603,23 @@ impl Buoyant {
                 .on_input(|inp| Message::Modal(ModalType::Rename, ModalMessage::Content(inp)))
                 .on_submit(Message::Rename)
                 .style(move |_, _| text_input_style)
-                .padding(7)
-                .id("rename");
+                .padding(TEXT_INPUT_MODAL_PADDING)
+                .id(RENAME_MODAL_ID);
 
             let col = column![
-                text("press Esc to exit, Enter to confirm :D").color(info_color),
-                text(format!("you are renaming, {}", modal.path.display())).color(text_color),
+                text("press Esc to exit, Enter to confirm :D")
+                    .size(SMALL_TEXT_SIZE)
+                    .color(info_color),
+                text(format!("you are renaming, {}", modal.path.display()))
+                    .size(SMALL_TEXT_SIZE)
+                    .color(text_color),
                 input,
-                text(modal.error).color(palette.yellow).size(13)
+                text(modal.error)
+                    .color(palette.yellow)
+                    .size(SMALL_TEXT_SIZE)
             ]
-            .width(500)
-            .spacing(10);
+            .width(MODAL_WIDTH)
+            .spacing(MODAL_ELEMENT_SPACING);
 
             let overlay = opaque(float(
                 container(col)
@@ -1501,27 +1632,32 @@ impl Buoyant {
 
         if self.states.modals.paste {
             let row = row![
-                button(text("Replace \nreplace file if name is matched").color(text_color))
-                    .on_press(Message::PasteClipboard(PasteType::Replace))
-                    .padding(7)
-                    .style(move |_, _| {
-                        let mut style = button_style;
+                button(
+                    text("Replace \nreplace file if name is matched")
+                        .size(NORMAL_TEXT_SIZE)
+                        .color(text_color)
+                )
+                .on_press(Message::PasteClipboard(PasteType::Replace))
+                .padding(TEXT_INPUT_MODAL_PADDING)
+                .style(move |_, _| {
+                    let mut style = button_style;
 
-                        if self.states.modals.current_choice == 0 {
-                            style.border = Border {
-                                color: palette.yellow,
-                                width: 2.0,
-                                radius: Radius::new(8.0),
-                            }
+                    if self.states.modals.current_choice == 0 {
+                        style.border = Border {
+                            color: palette.yellow,
+                            width: 2.0,
+                            radius: Radius::new(8.0),
                         }
-                        style
-                    }),
+                    }
+                    style
+                }),
                 button(
                     text("Duplicate \nadd (n) to the end of file name if name is matched")
+                        .size(NORMAL_TEXT_SIZE)
                         .color(text_color)
                 )
                 .on_press(Message::PasteClipboard(PasteType::Duplicate))
-                .padding(7)
+                .padding(TEXT_INPUT_MODAL_PADDING)
                 .style(move |_, _| {
                     let mut style = button_style;
 
@@ -1535,16 +1671,20 @@ impl Buoyant {
                     style
                 }),
             ]
-            .spacing(10);
+            .spacing(MODAL_ELEMENT_SPACING);
 
             let overlay = opaque(float(
                 container(
                     column![
-                        text("press Esc to exit").size(13).color(info_color),
-                        text("choose a response when overlapping files").color(text_color),
+                        text("press Esc to exit")
+                            .size(SMALL_TEXT_SIZE)
+                            .color(info_color),
+                        text("choose a response when overlapping files")
+                            .size(NORMAL_TEXT_SIZE)
+                            .color(text_color),
                         row
                     ]
-                    .spacing(10),
+                    .spacing(MODAL_ELEMENT_SPACING),
                 )
                 .style(move |_| overlay_style)
                 .center(Length::Fill),
@@ -1557,10 +1697,14 @@ impl Buoyant {
             let overlay = opaque(float(
                 container(
                     column![
-                        text("press Esc to exit").size(13).color(info_color),
-                        text("you gonna delete the selections?").color(text_color),
-                        button(text("yeah :3").color(text_color))
-                            .padding(7)
+                        text("press Esc to exit")
+                            .size(SMALL_TEXT_SIZE)
+                            .color(info_color),
+                        text("you gonna delete the selections?")
+                            .size(SMALL_TEXT_SIZE)
+                            .color(text_color),
+                        button(text("yeah :3").size(SMALL_TEXT_SIZE).color(text_color))
+                            .padding(TEXT_INPUT_MODAL_PADDING)
                             .style(move |_, _| {
                                 let mut style = button_style;
 
@@ -1575,7 +1719,7 @@ impl Buoyant {
                             })
                             .on_press(Message::Delete)
                     ]
-                    .spacing(10),
+                    .spacing(MODAL_ELEMENT_SPACING),
                 )
                 .style(move |_| overlay_style)
                 .center(Length::Fill),
@@ -1589,23 +1733,27 @@ impl Buoyant {
                 .on_input(|inp| Message::Modal(ModalType::CreateFile, ModalMessage::Content(inp)))
                 .on_submit(Message::Create(true))
                 .style(move |_, _| text_input_style)
-                .padding(7)
-                .id("create");
+                .padding(TEXT_INPUT_MODAL_PADDING)
+                .id(CREATE_MODAL_ID);
 
             let col = column![
                 text(format!(
                     "creating a new file in {}",
                     self.current_path.display()
                 ))
+                .size(SMALL_TEXT_SIZE)
                 .color(text_color),
                 input,
                 text("press Esc to exit, Enter to confirm :D")
-                    .size(13)
+                    .size(SMALL_TEXT_SIZE)
                     .color(info_color),
-                text(modal.error).color(palette.yellow)
+                text(modal.error)
+                    .size(SMALL_TEXT_SIZE)
+                    .color(palette.yellow)
+                    .size(NORMAL_TEXT_SIZE)
             ]
-            .width(497)
-            .spacing(7);
+            .width(MODAL_WIDTH)
+            .spacing(MODAL_ELEMENT_SPACING);
 
             let overlay = opaque(float(
                 container(col)
@@ -1621,23 +1769,26 @@ impl Buoyant {
                 .on_input(|inp| Message::Modal(ModalType::CreateFolder, ModalMessage::Content(inp)))
                 .on_submit(Message::Create(false))
                 .style(move |_, _| text_input_style)
-                .padding(7)
-                .id("create");
+                .padding(TEXT_INPUT_MODAL_PADDING)
+                .id(CREATE_MODAL_ID);
 
             let col = column![
                 text(format!(
                     "creating new folder(s) in {}",
                     self.current_path.display()
                 ))
+                .size(SMALL_TEXT_SIZE)
                 .color(text_color),
                 input,
                 text("press Esc to exit, Enter to confirm :D")
-                    .size(13)
+                    .size(SMALL_TEXT_SIZE)
                     .color(info_color),
-                text(modal.error).color(palette.yellow)
+                text(modal.error)
+                    .size(SMALL_TEXT_SIZE)
+                    .color(palette.yellow)
             ]
-            .width(497)
-            .spacing(7);
+            .width(MODAL_WIDTH)
+            .spacing(MODAL_ELEMENT_SPACING);
 
             let overlay = opaque(float(
                 container(col)
