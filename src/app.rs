@@ -13,6 +13,7 @@ use iced::{
     Background, Border, Color, Element, Event, Length, Padding, Subscription, Task, alignment,
     border::Radius,
     event::{self, Status},
+    font,
     keyboard::{
         self, Modifiers,
         key::{self, Code, Physical},
@@ -228,7 +229,20 @@ impl Buoyant {
             Message::FetchConfig => {
                 self.states.is_loading = true;
                 config::fetch(&mut self.config);
-                self.theme = theme::fetch(self.config.misc.theme_path.as_deref());
+                let (fonts, theme) = theme::fetch(self.config.misc.theme_path.as_deref());
+                self.theme = theme;
+
+                if let Some(paths) = fonts {
+                    let mut tasks = Vec::new();
+                    for path in paths {
+                        let bytes = std::fs::read(path).unwrap_or_default();
+                        tasks.push(font::load(bytes).discard());
+                    }
+
+                    self.states.is_loading = false;
+                    return Task::batch(tasks);
+                }
+
                 self.states.is_loading = false;
                 Task::none()
             }

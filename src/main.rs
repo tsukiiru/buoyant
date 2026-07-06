@@ -1,6 +1,7 @@
 mod app;
 mod config;
 mod file_types;
+mod fonts;
 mod path;
 mod theme;
 mod types;

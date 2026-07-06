@@ -4,6 +4,8 @@ use serde::Deserialize;
 use std::{env::home_dir, error::Error, fs};
 use toml;
 
+use crate::fonts::search_fonts;
+
 pub struct Theme {
     pub palette: Palette,
 }
@@ -55,6 +57,7 @@ impl Default for Palette {
 #[derive(Deserialize)]
 struct RawTheme {
     palette: Option<RawPalette>,
+    font: Option<String>,
 }
 
 // not following any naming conventions here because they are horrible!!
@@ -76,8 +79,9 @@ struct RawPalette {
     blue: Option<String>,
 }
 
-pub fn fetch(theme_name: Option<&str>) -> Theme {
+pub fn fetch(theme_name: Option<&str>) -> (Option<Vec<String>>, Theme) {
     let mut theme = Theme::default();
+    let mut fonts = None;
 
     if let Some(name) = theme_name {
         let home = home_dir();
@@ -95,16 +99,31 @@ pub fn fetch(theme_name: Option<&str>) -> Theme {
 
         if let Ok(content) = read_content {
             let raw_theme: RawTheme = toml::from_str(&content).unwrap();
-            process_rawtheme(raw_theme, &mut theme);
+            fonts = process_rawtheme(raw_theme, &mut theme);
         }
     }
 
-    theme
+    (fonts, theme)
 }
 
-fn process_rawtheme(raw_theme: RawTheme, theme: &mut Theme) {
+fn process_rawtheme(raw_theme: RawTheme, theme: &mut Theme) -> Option<Vec<String>> {
     if let Some(raw_palette) = raw_theme.palette {
         process_palette(raw_palette, &mut theme.palette);
+    }
+    if let Some(raw_font) = raw_theme.font {
+        return process_font(raw_font);
+    } else {
+        None
+    }
+}
+
+fn process_font(raw_font: String) -> Option<Vec<String>> {
+    let font_path = search_fonts(&raw_font);
+
+    if let Ok(paths) = font_path {
+        Some(paths)
+    } else {
+        None
     }
 }
 
