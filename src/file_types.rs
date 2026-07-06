@@ -58,7 +58,7 @@ pub static LINK: LazyLock<Handle> =
 pub static QUESTION_MARK: LazyLock<Handle> =
     LazyLock::new(|| Handle::from_memory(include_bytes!("../assets/icons/question-mark.svg")));
 
-pub fn extension_to_filetype(extension: &str) -> Option<(String, &'static Handle)> {
+pub fn extension_to_file_type(extension: &str) -> Option<(String, &'static Handle)> {
     let something: (&str, &Handle) = match extension {
         // images
         "png" => ("PNG Image", &IMAGE),
@@ -81,6 +81,7 @@ pub fn extension_to_filetype(extension: &str) -> Option<(String, &'static Handle
         "flac" => ("FLAC Audio", &AUDIO),
         "wav" => ("WAV Audio", &AUDIO),
         "aiff" => ("AIFF Audio", &AUDIO),
+        "ogg" => ("OGG Audio", &AUDIO),
         // text
         "rs" => ("Rust Source File", &RUST_SRC),
         "py" => ("Python Source File", &PYTHON_SRC),

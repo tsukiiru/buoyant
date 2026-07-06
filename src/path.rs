@@ -248,7 +248,7 @@ pub fn file_type(path: &Path) -> (String, &'static Handle) {
     }
 
     let ext = file_extension(path);
-    let opt_type = file_types::extension_to_filetype(ext);
+    let opt_type = file_types::extension_to_file_type(ext);
     let str_type: &str;
     let icon: &Handle;
 
@@ -278,30 +278,50 @@ pub fn file_type(path: &Path) -> (String, &'static Handle) {
 
 const UNIX_EPOCH: SystemTime = SystemTime::UNIX_EPOCH;
 
-pub fn accessed_and_created(path: &Path) -> (i64, i64) {
+pub fn accessed_and_created(
+    path: &Path,
+    fetch_accessed: &bool,
+    fetch_created: &bool,
+) -> (Option<i64>, Option<i64>) {
+    if !*fetch_accessed && !*fetch_created {
+        return (None, None);
+    }
+
     match path.metadata() {
         Ok(res) => (
-            res.accessed()
-                .unwrap_or(UNIX_EPOCH)
-                .duration_since(UNIX_EPOCH)
-                .unwrap_or_default()
-                .as_secs()
-                .try_into()
-                .unwrap(),
-            res.created()
-                .unwrap_or(UNIX_EPOCH)
-                .duration_since(UNIX_EPOCH)
-                .unwrap_or_default()
-                .as_secs()
-                .try_into()
-                .unwrap(),
+            if *fetch_accessed {
+                Some(
+                    res.accessed()
+                        .unwrap_or(UNIX_EPOCH)
+                        .duration_since(UNIX_EPOCH)
+                        .unwrap_or_default()
+                        .as_secs()
+                        .try_into()
+                        .unwrap(),
+                )
+            } else {
+                None
+            },
+            if *fetch_created {
+                Some(
+                    res.created()
+                        .unwrap_or(UNIX_EPOCH)
+                        .duration_since(UNIX_EPOCH)
+                        .unwrap_or_default()
+                        .as_secs()
+                        .try_into()
+                        .unwrap(),
+                )
+            } else {
+                None
+            },
         ),
 
-        Err(_) => (0, 0),
+        Err(_) => (None, None),
     }
 }
 
-pub fn accurate_filesize(path: &Path) -> u64 {
+pub fn accurate_file_size(path: &Path) -> u64 {
     if !path.exists() {
         return 0_u64;
     }
@@ -325,12 +345,13 @@ pub fn accurate_filesize(path: &Path) -> u64 {
     //
     size
 }
-// THIS IS REALLY EXPENSIVE AND SLOW WHEN THERE ARE TOO MANY FILES
-// Though similar approaches should be considered for more accurate file size.
 
-pub fn file_size(path: &Path) -> u64 {
+pub fn file_size(path: &Path, should_fetch: &bool) -> Option<u64> {
+    if !should_fetch {
+        return None;
+    }
     if !path.exists() {
-        return 0_u64;
+        return Some(0_u64);
     }
 
     let read_metadata = path.metadata();
@@ -343,11 +364,11 @@ pub fn file_size(path: &Path) -> u64 {
     }
 
     let metadata = read_metadata.unwrap();
-    metadata.size()
+    Some(metadata.size())
 }
 
-pub fn folder_size(path: &Path) -> Option<usize> {
-    if path.is_file() {
+pub fn folder_size(path: &Path, should_fetch: &bool) -> Option<usize> {
+    if path.is_file() || !*should_fetch {
         return None;
     }
     fs::read_dir(path).ok().map(|d| d.count())

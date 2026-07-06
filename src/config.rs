@@ -1,4 +1,5 @@
 // "prepare for matching hell" - tsuki May 29th 2026
+use crate::types::Property;
 use iced::keyboard::{
     Modifiers,
     key::{Code, Physical},
@@ -20,7 +21,7 @@ impl Default for Config {
         ctrl_shift_mod.insert(Modifiers::SHIFT);
 
         let mut view = View::default();
-        view.explorer.push(Displaying::Name);
+        view.explorer.push(Property::Name);
 
         Config {
             view: view,
@@ -28,7 +29,7 @@ impl Default for Config {
             misc: Misc {
                 format_date: String::from("%d/%m/%Y, %I:%M:%S %p"),
                 theme_path: None,
-                accurate_filesize: false,
+                accurate_file_size: false,
             },
             view_hidden: false,
             keybinds: KeybindsConfig {
@@ -102,8 +103,8 @@ impl Default for Config {
 }
 
 pub struct View {
-    pub explorer: Vec<Displaying>,
-    pub metadata: Vec<Displaying>,
+    pub explorer: Vec<Property>,
+    pub metadata: Vec<Property>,
 }
 
 impl Default for View {
@@ -111,11 +112,11 @@ impl Default for View {
         View {
             explorer: Vec::with_capacity(5),
             metadata: vec![
-                Displaying::Name,
-                Displaying::LastAccessed,
-                Displaying::Created,
-                Displaying::FileType,
-                Displaying::FileSize,
+                Property::Name,
+                Property::Accessed,
+                Property::Created,
+                Property::Type,
+                Property::Size,
             ],
         }
     }
@@ -143,31 +144,21 @@ pub struct KeybindsConfig {
 pub struct Misc {
     pub format_date: String,
     pub theme_path: Option<String>,
-    pub accurate_filesize: bool,
+    pub accurate_file_size: bool,
 }
 
 pub struct Sorting {
-    pub sorting_by: SortingBy,
+    pub sorting_by: Property,
     pub reversed: bool,
 }
 
 impl Default for Sorting {
     fn default() -> Self {
         Sorting {
-            sorting_by: SortingBy::default(),
+            sorting_by: Property::default(),
             reversed: false,
         }
     }
-}
-
-#[derive(Default)]
-pub enum SortingBy {
-    #[default]
-    Name,
-    Created,
-    Accessed,
-    Type,
-    Size,
 }
 
 pub struct KeybindEntry {
@@ -204,7 +195,7 @@ struct RawConfig {
 struct RawMiscConfig {
     format_time: Option<String>,
     theme: Option<String>,
-    accurate_filesize: Option<bool>,
+    accurate_file_size: Option<bool>,
 }
 
 #[derive(Deserialize)]
@@ -239,14 +230,6 @@ struct RawViewConfig {
     metadata: Option<Vec<String>>,
 }
 
-pub enum Displaying {
-    Name,
-    LastAccessed,
-    Created,
-    FileType,
-    FileSize,
-}
-
 fn process_rawconfig(raw_config: RawConfig, config: &mut Config) {
     if let Some(table) = raw_config.keybinds {
         process_keybinds(table, &mut config.keybinds);
@@ -269,19 +252,19 @@ fn process_misc(raw_config: RawMiscConfig, config: &mut Misc) {
     if let Some(conf) = raw_config.theme {
         config.theme_path = Some(conf);
     }
-    if let Some(conf) = raw_config.accurate_filesize {
-        config.accurate_filesize = conf;
+    if let Some(conf) = raw_config.accurate_file_size {
+        config.accurate_file_size = conf;
     }
 }
 
 fn process_sorting(raw_sorting: RawSortingConfig, config: &mut Sorting) {
     if let Some(c) = raw_sorting.sorting_by {
         match c.trim().to_lowercase().as_str() {
-            "name" => config.sorting_by = SortingBy::Name,
-            "created" => config.sorting_by = SortingBy::Created,
-            "accessed" => config.sorting_by = SortingBy::Accessed,
-            "type" => config.sorting_by = SortingBy::Type,
-            "size" => config.sorting_by = SortingBy::Size,
+            "name" => config.sorting_by = Property::Name,
+            "created" => config.sorting_by = Property::Created,
+            "accessed" => config.sorting_by = Property::Accessed,
+            "type" => config.sorting_by = Property::Type,
+            "size" => config.sorting_by = Property::Size,
             _ => {}
         }
     }
@@ -297,11 +280,11 @@ fn process_view(raw_view: RawViewConfig, config: &mut View) {
         let explorer_conf = &mut config.explorer;
 
         conf.iter().for_each(|child| match child.as_str() {
-            "name" => explorer_conf.push(Displaying::Name),
-            "last_accessed" => explorer_conf.push(Displaying::LastAccessed),
-            "created" => explorer_conf.push(Displaying::Created),
-            "file_type" => explorer_conf.push(Displaying::FileType),
-            "file_size" => explorer_conf.push(Displaying::FileSize),
+            "name" => explorer_conf.push(Property::Name),
+            "accessed" => explorer_conf.push(Property::Accessed),
+            "created" => explorer_conf.push(Property::Created),
+            "type" => explorer_conf.push(Property::Type),
+            "size" => explorer_conf.push(Property::Size),
             _ => {}
         })
     }
@@ -311,11 +294,11 @@ fn process_view(raw_view: RawViewConfig, config: &mut View) {
         let metadata_conf = &mut config.metadata;
 
         conf.iter().for_each(|child| match child.as_str() {
-            "name" => metadata_conf.push(Displaying::Name),
-            "last_accessed" => metadata_conf.push(Displaying::LastAccessed),
-            "created" => metadata_conf.push(Displaying::Created),
-            "file_type" => metadata_conf.push(Displaying::FileType),
-            "file_size" => metadata_conf.push(Displaying::FileSize),
+            "name" => metadata_conf.push(Property::Name),
+            "accessed" => metadata_conf.push(Property::Accessed),
+            "created" => metadata_conf.push(Property::Created),
+            "type" => metadata_conf.push(Property::Type),
+            "size" => metadata_conf.push(Property::Size),
             _ => {}
         })
     }

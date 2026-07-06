@@ -40,8 +40,8 @@ use crate::types::{
     PasteType, RenameModal, TempItem,
 };
 use crate::{
-    config::{self, Displaying, SortingBy},
-    types::SearchModal,
+    config,
+    types::{Property, SearchModal},
 };
 use crate::{file_types, path};
 
@@ -372,10 +372,10 @@ impl Buoyant {
                     item.using = false;
                     item.name.clear();
                     item.path = PathBuf::new();
-                    item.accessed = 0;
-                    item.created = 0;
+                    item.accessed = None;
+                    item.created = None;
                     item.foldersize = None;
-                    item.filetype.clear();
+                    item.file_type.clear();
                 });
 
                 let cur_paths_opt = path::read_dir(&self.current_path);
@@ -388,17 +388,23 @@ impl Buoyant {
                 let mut index: usize = 0;
 
                 for path in cur_paths_opt.unwrap() {
-                    let (file_type, icon) = &path::file_type(&path);
-                    let (accessed, created) = path::accessed_and_created(&path);
+                    let (file_type, icon) = path::file_type(&path);
+                    let (fetch_accessed, fetch_created) = (
+                        self.should_fetch(&Property::Accessed),
+                        self.should_fetch(&Property::Created),
+                    );
+                    let fetch_size = self.should_fetch(&Property::Size);
+                    let (accessed, created) =
+                        path::accessed_and_created(&path, &fetch_accessed, &fetch_created);
 
                     self.push_entry(
                         &TempItem {
-                            filetype: &file_type,
+                            file_type: &file_type,
                             icon: &icon,
                             accessed,
                             created,
-                            filesize: path::file_size(&path),
-                            foldersize: path::folder_size(&path),
+                            file_size: path::file_size(&path, &fetch_size),
+                            foldersize: path::folder_size(&path, &fetch_size),
                             hidden: path::is_hidden(&path),
                             name: path.file_name().unwrap().to_str().unwrap(),
 
@@ -1140,7 +1146,7 @@ impl Buoyant {
 
             for child in &self.config.view.explorer {
                 match child {
-                    Displaying::Name => {
+                    Property::Name => {
                         row = row.push(
                             container(
                                 text(&item.name)
@@ -1158,11 +1164,11 @@ impl Buoyant {
                             .clip(true),
                         )
                     }
-                    Displaying::FileSize => {
+                    Property::Size => {
                         let txt = if let Some(s) = item.foldersize {
                             format!("{} items", s)
                         } else {
-                            path::bytes_to_string(item.filesize)
+                            path::bytes_to_string(item.file_size.unwrap_or_default())
                         };
 
                         row = row.push(
@@ -1182,10 +1188,10 @@ impl Buoyant {
                             .clip(true),
                         );
                     }
-                    Displaying::FileType => {
+                    Property::Type => {
                         row = row.push(
                             container(
-                                text(&item.filetype)
+                                text(&item.file_type)
                                     .size(NORMAL_TEXT_SIZE)
                                     .align_x(alignment::Horizontal::Left)
                                     .wrapping(Wrapping::None)
@@ -1200,7 +1206,7 @@ impl Buoyant {
                             .clip(true),
                         );
                     }
-                    Displaying::Created => {
+                    Property::Created => {
                         row = row.push(
                             container(
                                 text(format_date(item.created))
@@ -1218,7 +1224,7 @@ impl Buoyant {
                             .clip(true),
                         );
                     }
-                    Displaying::LastAccessed => {
+                    Property::Accessed => {
                         row = row.push(
                             container(
                                 text(format_date(item.accessed))
@@ -1295,7 +1301,7 @@ impl Buoyant {
 
         for child in &self.config.view.explorer {
             match child {
-                Displaying::Name => {
+                Property::Name => {
                     column_names = column_names.push(
                         container(
                             text("file name")
@@ -1309,7 +1315,7 @@ impl Buoyant {
                         .clip(true),
                     );
                 }
-                Displaying::FileSize => {
+                Property::Size => {
                     column_names = column_names.push(
                         container(
                             text("size")
@@ -1323,7 +1329,7 @@ impl Buoyant {
                         .align_left(100),
                     );
                 }
-                Displaying::FileType => {
+                Property::Type => {
                     column_names = column_names.push(
                         container(
                             text("type")
@@ -1337,7 +1343,7 @@ impl Buoyant {
                         .align_left(150),
                     );
                 }
-                Displaying::Created => {
+                Property::Created => {
                     column_names = column_names.push(
                         container(
                             text("creation date")
@@ -1351,7 +1357,7 @@ impl Buoyant {
                         .center_y(30),
                     );
                 }
-                Displaying::LastAccessed => {
+                Property::Accessed => {
                     column_names = column_names.push(
                         container(
                             text("accessed date")
@@ -1403,39 +1409,39 @@ impl Buoyant {
         {
             for v in &self.config.view.metadata {
                 match v {
-                    Displaying::Name => {
+                    Property::Name => {
                         file_info = file_info.push(
                             text(format!("name: {}", item.name))
                                 .size(NORMAL_TEXT_SIZE)
                                 .color(text_color),
                         );
                     }
-                    Displaying::FileType => {
+                    Property::Type => {
                         file_info = file_info.push(
-                            text(format!("type: {}", item.filetype))
+                            text(format!("type: {}", item.file_type))
                                 .size(NORMAL_TEXT_SIZE)
                                 .color(text_color),
                         );
                     }
-                    Displaying::FileSize => {
+                    Property::Size => {
                         file_info = file_info.push(
                             text(format!(
                                 "size: {}",
-                                path::bytes_to_string(if self.config.misc.accurate_filesize {
-                                    path::accurate_filesize(&item.path)
+                                path::bytes_to_string(if self.config.misc.accurate_file_size {
+                                    path::accurate_file_size(&item.path)
                                 } else {
-                                    item.filesize
+                                    item.file_size.unwrap_or_default()
                                 })
                             ))
                             .size(NORMAL_TEXT_SIZE)
                             .color(text_color),
                         );
                     }
-                    Displaying::LastAccessed => {
+                    Property::Accessed => {
                         file_info = file_info.push(
                             text(format!(
                                 "last accessed: {}",
-                                DateTime::from_timestamp_secs(item.accessed)
+                                DateTime::from_timestamp_secs(item.accessed.unwrap_or_default())
                                     .unwrap()
                                     .format(&self.config.misc.format_date)
                             ))
@@ -1443,11 +1449,11 @@ impl Buoyant {
                             .color(text_color),
                         );
                     }
-                    Displaying::Created => {
+                    Property::Created => {
                         file_info = file_info.push(
                             text(format!(
                                 "creation date: {}",
-                                DateTime::from_timestamp_secs(item.created)
+                                DateTime::from_timestamp_secs(item.created.unwrap_or_default())
                                     .unwrap()
                                     .format(&self.config.misc.format_date)
                             ))
@@ -1547,11 +1553,11 @@ impl Buoyant {
             text(format!(
                 "sorting by: {} ({})",
                 match self.config.sorting.sorting_by {
-                    SortingBy::Name => "name",
-                    SortingBy::Type => "file type",
-                    SortingBy::Size => "file size",
-                    SortingBy::Created => "creation date",
-                    SortingBy::Accessed => "last accessed date",
+                    Property::Name => "name",
+                    Property::Type => "file type",
+                    Property::Size => "file size",
+                    Property::Created => "creation date",
+                    Property::Accessed => "last accessed date",
                 },
                 if self.config.sorting.reversed {
                     "↑"
@@ -1817,6 +1823,14 @@ impl Buoyant {
         stack.into()
     }
 
+    fn should_fetch(&self, property: &Property) -> bool {
+        let config = &self.config;
+
+        config.view.explorer.contains(property)
+            || config.view.metadata.contains(property)
+            || &config.sorting.sorting_by == property
+    }
+
     fn sort(&mut self, index: usize, from_start: bool) {
         let sorting_by = &self.config.sorting.sorting_by;
         let reference = &self.entries.children;
@@ -1827,7 +1841,7 @@ impl Buoyant {
         };
 
         match sorting_by {
-            SortingBy::Name => {
+            Property::Name => {
                 let mut lowercased: Vec<(usize, String)> = displaying
                     .iter()
                     .map(|&entry_index| {
@@ -1844,19 +1858,19 @@ impl Buoyant {
                     .zip(lowercased.iter())
                     .for_each(|(d, (i, _))| *d = *i);
             }
-            SortingBy::Size => displaying.par_sort_by(|a, b| {
-                let (x, y) = (&reference[*a].filesize, &reference[*b].filesize);
+            Property::Size => displaying.par_sort_by(|a, b| {
+                let (x, y) = (&reference[*a].file_size, &reference[*b].file_size);
                 x.cmp(y)
             }),
-            SortingBy::Type => displaying.par_sort_by(|a, b| {
-                let (x, y) = (&reference[*a].filetype, &reference[*b].filetype);
+            Property::Type => displaying.par_sort_by(|a, b| {
+                let (x, y) = (&reference[*a].file_type, &reference[*b].file_type);
                 x.cmp(y)
             }),
-            SortingBy::Created => displaying.par_sort_by(|a, b| {
+            Property::Created => displaying.par_sort_by(|a, b| {
                 let (x, y) = (&reference[*a].created, &reference[*b].created);
                 x.cmp(y)
             }),
-            SortingBy::Accessed => displaying.par_sort_by(|a, b| {
+            Property::Accessed => displaying.par_sort_by(|a, b| {
                 let (x, y) = (&reference[*a].accessed, &reference[*b].accessed);
                 x.cmp(y)
             }),
@@ -1868,20 +1882,20 @@ impl Buoyant {
     }
 
     pub fn push_entry(&mut self, entry: &TempItem, index: usize) {
-        let filesize = entry.filesize;
+        let file_size = entry.file_size;
         let hidden = entry.hidden;
         let accessed = entry.accessed;
         let created = entry.created;
         let name = entry.name;
         let path = entry.path;
-        let filetype = entry.filetype;
+        let file_type = entry.file_type;
         let foldersize = entry.foldersize;
         let icon = entry.icon;
 
         let item_opt = self.entries.children.get_mut(index);
 
         if let Some(item) = item_opt {
-            item.filesize = filesize;
+            item.file_size = file_size;
             item.hidden = hidden;
             item.accessed = accessed;
             item.created = created;
@@ -1891,10 +1905,10 @@ impl Buoyant {
 
             item.name.push_str(name);
             item.path.push(path);
-            item.filetype.push_str(filetype);
+            item.file_type.push_str(file_type);
         } else {
             let mut entry = Item {
-                filesize,
+                file_size,
                 hidden,
                 accessed,
                 created,
@@ -1906,7 +1920,7 @@ impl Buoyant {
 
             entry.name.push_str(name);
             entry.path.push(path);
-            entry.filetype.push_str(filetype);
+            entry.file_type.push_str(file_type);
 
             self.entries.children.push(entry);
         }
@@ -1932,9 +1946,9 @@ impl Buoyant {
     }
 }
 
-fn format_date(date: i64) -> String {
+fn format_date(date: Option<i64>) -> String {
     let current_date = Utc::now();
-    let given_date = DateTime::from_timestamp_secs(date).unwrap_or_default();
+    let given_date = DateTime::from_timestamp_secs(date.unwrap_or_default()).unwrap_or_default();
 
     let current_day = current_date.day();
     let given_day = given_date.day();
