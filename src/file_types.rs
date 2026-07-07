@@ -57,6 +57,8 @@ pub static LINK: LazyLock<Handle> =
     LazyLock::new(|| Handle::from_memory(include_bytes!("../assets/icons/link.svg")));
 pub static QUESTION_MARK: LazyLock<Handle> =
     LazyLock::new(|| Handle::from_memory(include_bytes!("../assets/icons/question-mark.svg")));
+pub static PAINTING: LazyLock<Handle> =
+    LazyLock::new(|| Handle::from_memory(include_bytes!("../assets/icons/paint-brush.svg")));
 
 pub fn extension_to_file_type(extension: &str) -> Option<(String, &'static Handle)> {
     let something: (&str, &Handle) = match extension {
@@ -68,6 +70,9 @@ pub fn extension_to_file_type(extension: &str) -> Option<(String, &'static Handl
         "avif" => ("AVIF Image", &IMAGE),
         "gif" => ("GIF Animated Image", &IMAGE),
         "svg" => ("SVG Image", &IMAGE),
+        "ase" => ("Aseprite Sprite", &PAINTING),
+        "aseprite" => ("Aseprite Sprite", &PAINTING),
+        "xcf" => ("GIMP Raw Image", &PAINTING),
         // videos
         "mp4" => ("MP4 Video", &VIDEO),
         "avi" => ("AVI Video", &VIDEO),
@@ -104,6 +109,7 @@ pub fn extension_to_file_type(extension: &str) -> Option<(String, &'static Handl
         "html" => ("Hypertext Markup", &HTML_SRC),
         "vue" => ("VUE Source File", &VUE_SRC),
         "sh" => ("Shell Script", &SCRIPT),
+        "bat" => ("Batch Script", &SCRIPT),
         // archive
         "7z" => ("7-Zip Archive", &ARCHIVE),
         "zip" => ("ZIP Archive", &ARCHIVE),

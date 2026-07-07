@@ -9,6 +9,7 @@ use std::{
 use chrono::{DateTime, Datelike, Utc};
 use rayon::prelude::*;
 
+use iced::advanced::widget::text::{self, Text};
 use iced::{
     Background, Border, Color, Element, Event, Length, Padding, Subscription, Task, alignment,
     border::Radius,
@@ -21,7 +22,7 @@ use iced::{
     theme::{Theme, palette::Extended},
     widget::{
         Themer, button, column, container, float, mouse_area, opaque, operation, row, scrollable,
-        selector, stack, text, text_input,
+        selector, stack, text_input,
     },
 };
 use iced::{
@@ -173,6 +174,7 @@ pub enum Message {
 
 pub struct Buoyant {
     config: config::Config,
+    font: Option<String>,
     theme: Theme,
 
     current_path: PathBuf,
@@ -210,6 +212,7 @@ impl Buoyant {
         (
             Buoyant {
                 config: config::Config::default(),
+                font: None,
                 theme: Theme::Light,
 
                 current_path: path,
@@ -230,8 +233,10 @@ impl Buoyant {
             Message::FetchConfig => {
                 self.states.is_loading = true;
                 config::fetch(&mut self.config);
-                let (fonts, theme) = theme::fetch(self.config.misc.theme_path.as_deref());
+                let (fonts, font_name, theme) =
+                    theme::fetch(self.config.misc.theme_path.as_deref());
                 self.theme = theme;
+                self.font = font_name;
 
                 if let Some(paths) = fonts {
                     let mut tasks = Vec::new();
@@ -1141,12 +1146,22 @@ impl Buoyant {
             },
         };
 
+        let font = if let Some(font_name) = &self.font.clone() {
+            Some(iced::Font::with_name(font_name))
+        } else {
+            None
+        };
+
         // loading overlay
         if self.states.is_loading {
-            return container(text("loading...").color(text_color).size(BIG_TEXT_SIZE))
-                .style(move |_| overlay_style)
-                .center(Length::Fill)
-                .into();
+            return container(
+                Text::new("loading...")
+                    .color(text_color)
+                    .size(BIG_TEXT_SIZE),
+            )
+            .style(move |_| overlay_style)
+            .center(Length::Fill)
+            .into();
         }
 
         // Left Column
@@ -1173,7 +1188,7 @@ impl Buoyant {
                     Property::Name => {
                         row = row.push(
                             container(
-                                text(&item.name)
+                                Text::new(&item.name)
                                     .size(NORMAL_TEXT_SIZE)
                                     .wrapping(Wrapping::None)
                                     .align_x(alignment::Horizontal::Left)
@@ -1197,7 +1212,7 @@ impl Buoyant {
 
                         row = row.push(
                             container(
-                                text(txt)
+                                Text::new(txt)
                                     .size(NORMAL_TEXT_SIZE)
                                     .align_x(alignment::Horizontal::Left)
                                     .wrapping(Wrapping::None)
@@ -1215,7 +1230,7 @@ impl Buoyant {
                     Property::Type => {
                         row = row.push(
                             container(
-                                text(&item.file_type)
+                                Text::new(&item.file_type)
                                     .size(NORMAL_TEXT_SIZE)
                                     .align_x(alignment::Horizontal::Left)
                                     .wrapping(Wrapping::None)
@@ -1233,7 +1248,7 @@ impl Buoyant {
                     Property::Created => {
                         row = row.push(
                             container(
-                                text(format_date(item.created))
+                                Text::new(format_date(item.created))
                                     .size(NORMAL_TEXT_SIZE)
                                     .align_x(alignment::Horizontal::Left)
                                     .wrapping(Wrapping::None)
@@ -1251,7 +1266,7 @@ impl Buoyant {
                     Property::Accessed => {
                         row = row.push(
                             container(
-                                text(format_date(item.accessed))
+                                Text::new(format_date(item.accessed))
                                     .size(NORMAL_TEXT_SIZE)
                                     .align_x(alignment::Horizontal::Left)
                                     .wrapping(Wrapping::None)
@@ -1318,7 +1333,7 @@ impl Buoyant {
 
         let mut column_names = row![].spacing(EXPLORER_COLUMN_SPACING).padding(5);
         column_names = column_names.push(
-            container(text("").size(NORMAL_TEXT_SIZE))
+            container(Text::new("").size(NORMAL_TEXT_SIZE))
                 .width(16)
                 .height(16),
         );
@@ -1328,7 +1343,7 @@ impl Buoyant {
                 Property::Name => {
                     column_names = column_names.push(
                         container(
-                            text("file name")
+                            Text::new("file name")
                                 .size(NORMAL_TEXT_SIZE)
                                 .color(text_color)
                                 .wrapping(Wrapping::None)
@@ -1342,7 +1357,7 @@ impl Buoyant {
                 Property::Size => {
                     column_names = column_names.push(
                         container(
-                            text("size")
+                            Text::new("size")
                                 .size(NORMAL_TEXT_SIZE)
                                 .color(text_color)
                                 .wrapping(Wrapping::None)
@@ -1356,7 +1371,7 @@ impl Buoyant {
                 Property::Type => {
                     column_names = column_names.push(
                         container(
-                            text("type")
+                            Text::new("type")
                                 .size(NORMAL_TEXT_SIZE)
                                 .color(text_color)
                                 .wrapping(Wrapping::None)
@@ -1370,7 +1385,7 @@ impl Buoyant {
                 Property::Created => {
                     column_names = column_names.push(
                         container(
-                            text("creation date")
+                            Text::new("creation date")
                                 .size(NORMAL_TEXT_SIZE)
                                 .color(text_color)
                                 .wrapping(Wrapping::None)
@@ -1384,7 +1399,7 @@ impl Buoyant {
                 Property::Accessed => {
                     column_names = column_names.push(
                         container(
-                            text("accessed date")
+                            Text::new("accessed date")
                                 .size(NORMAL_TEXT_SIZE)
                                 .color(text_color)
                                 .wrapping(Wrapping::None)
@@ -1402,7 +1417,7 @@ impl Buoyant {
 
         if let Some(error) = &self.states.explorer.error {
             explorer_select_col = explorer_select_col.push(
-                text(error)
+                Text::new(error)
                     .size(NORMAL_TEXT_SIZE)
                     .center()
                     .width(Length::Fill)
@@ -1420,7 +1435,7 @@ impl Buoyant {
 
         let mut file_info = row![
             container(
-                text("file metadata")
+                Text::new("file metadata")
                     .size(NORMAL_TEXT_SIZE)
                     .color(text_color)
             )
@@ -1435,21 +1450,21 @@ impl Buoyant {
                 match v {
                     Property::Name => {
                         file_info = file_info.push(
-                            text(format!("name: {}", item.name))
+                            Text::new(format!("name: {}", item.name))
                                 .size(NORMAL_TEXT_SIZE)
                                 .color(text_color),
                         );
                     }
                     Property::Type => {
                         file_info = file_info.push(
-                            text(format!("type: {}", item.file_type))
+                            Text::new(format!("type: {}", item.file_type))
                                 .size(NORMAL_TEXT_SIZE)
                                 .color(text_color),
                         );
                     }
                     Property::Size => {
                         file_info = file_info.push(
-                            text(format!(
+                            Text::new(format!(
                                 "size: {}",
                                 path::bytes_to_string(if self.config.misc.accurate_file_size {
                                     path::accurate_file_size(&item.path)
@@ -1463,7 +1478,7 @@ impl Buoyant {
                     }
                     Property::Accessed => {
                         file_info = file_info.push(
-                            text(format!(
+                            Text::new(format!(
                                 "last accessed: {}",
                                 DateTime::from_timestamp_secs(item.accessed.unwrap_or_default())
                                     .unwrap()
@@ -1475,7 +1490,7 @@ impl Buoyant {
                     }
                     Property::Created => {
                         file_info = file_info.push(
-                            text(format!(
+                            Text::new(format!(
                                 "creation date: {}",
                                 DateTime::from_timestamp_secs(item.created.unwrap_or_default())
                                     .unwrap()
@@ -1497,7 +1512,7 @@ impl Buoyant {
                         .with_background(secondary_text_color.scale_alpha(0.1)))
                     .on_press(Message::NavigateBack),
                 container(
-                    text(format!("{}", self.current_path.display()))
+                    Text::new(format!("{}", self.current_path.display()))
                         .size(NORMAL_TEXT_SIZE)
                         .color(text_color)
                 )
@@ -1527,7 +1542,7 @@ impl Buoyant {
             } else {
                 left_col = left_col.push(
                     container(
-                        text(&modal.content)
+                        Text::new(&modal.content)
                             .size(NORMAL_TEXT_SIZE)
                             .style(move |_| unfocused_search_style),
                     )
@@ -1549,12 +1564,12 @@ impl Buoyant {
 
         let clipboard_entries = &self.clipboard.entries;
         let clipboard: Element<Message> = column![
-            text(clipboard_mode_display)
+            Text::new(clipboard_mode_display)
                 .size(NORMAL_TEXT_SIZE)
                 .color(base_succ_color)
         ]
         .extend(clipboard_entries.iter().map(|e| {
-            text(e.display().to_string())
+            Text::new(e.display().to_string())
                 .size(NORMAL_TEXT_SIZE)
                 .color(text_color)
                 .into()
@@ -1566,7 +1581,7 @@ impl Buoyant {
 
         let mut explorer_info = column![
             container(
-                text("explorer info")
+                Text::new("explorer info")
                     .size(NORMAL_TEXT_SIZE)
                     .color(text_color)
             )
@@ -1574,7 +1589,7 @@ impl Buoyant {
             .center_y(30)
             .center_x(Length::Fill)
             .padding(5),
-            text(format!(
+            Text::new(format!(
                 "sorting by: {} ({})",
                 match self.config.sorting.sorting_by {
                     Property::Name => "name",
@@ -1597,7 +1612,7 @@ impl Buoyant {
 
         if self.states.is_visual_mode {
             explorer_info = explorer_info.push(
-                text("VISUAL MODE")
+                Text::new("VISUAL MODE")
                     .size(NORMAL_TEXT_SIZE)
                     .color(text_color)
                     .height(20)
@@ -1607,7 +1622,7 @@ impl Buoyant {
 
         if self.config.view_hidden {
             explorer_info = explorer_info.push(
-                text(format!("showing hidden files",))
+                Text::new(format!("showing hidden files",))
                     .size(NORMAL_TEXT_SIZE)
                     .height(20)
                     .width(Length::Fill)
@@ -1652,14 +1667,14 @@ impl Buoyant {
                 .id(RENAME_MODAL_ID);
 
             let col = column![
-                text("press Esc to exit, Enter to confirm :D")
+                Text::new("press Esc to exit, Enter to confirm :D")
                     .size(SMALL_TEXT_SIZE)
                     .color(info_color),
-                text(format!("you are renaming, {}", modal.path.display()))
+                Text::new(format!("you are renaming, {}", modal.path.display()))
                     .size(SMALL_TEXT_SIZE)
                     .color(text_color),
                 input,
-                text(modal.error)
+                Text::new(modal.error)
                     .color(base_warning_color)
                     .size(SMALL_TEXT_SIZE)
             ]
@@ -1678,7 +1693,7 @@ impl Buoyant {
         if self.states.modals.paste {
             let row = row![
                 button(
-                    text("Replace \nreplace file if name is matched")
+                    Text::new("Replace \nreplace file if name is matched")
                         .size(NORMAL_TEXT_SIZE)
                         .color(text_color)
                 )
@@ -1697,7 +1712,7 @@ impl Buoyant {
                     style
                 }),
                 button(
-                    text("Duplicate \nadd (n) to the end of file name if name is matched")
+                    Text::new("Duplicate \nadd (n) to the end of file name if name is matched")
                         .size(NORMAL_TEXT_SIZE)
                         .color(text_color)
                 )
@@ -1721,10 +1736,10 @@ impl Buoyant {
             let overlay = opaque(float(
                 container(
                     column![
-                        text("press Esc to exit")
+                        Text::new("press Esc to exit")
                             .size(SMALL_TEXT_SIZE)
                             .color(info_color),
-                        text("choose a response when overlapping files")
+                        Text::new("choose a response when overlapping files")
                             .size(NORMAL_TEXT_SIZE)
                             .color(text_color),
                         row
@@ -1742,13 +1757,13 @@ impl Buoyant {
             let overlay = opaque(float(
                 container(
                     column![
-                        text("press Esc to exit")
+                        Text::new("press Esc to exit")
                             .size(SMALL_TEXT_SIZE)
                             .color(info_color),
-                        text("you gonna delete the selections?")
+                        Text::new("you gonna delete the selections?")
                             .size(SMALL_TEXT_SIZE)
                             .color(text_color),
-                        button(text("yeah :3").size(SMALL_TEXT_SIZE).color(text_color))
+                        button(Text::new("yeah :3").size(SMALL_TEXT_SIZE).color(text_color))
                             .padding(TEXT_INPUT_MODAL_PADDING)
                             .style(move |_, _| {
                                 let mut style = button_style;
@@ -1782,17 +1797,17 @@ impl Buoyant {
                 .id(CREATE_MODAL_ID);
 
             let col = column![
-                text(format!(
+                Text::new(format!(
                     "creating a new file in {}",
                     self.current_path.display()
                 ))
                 .size(SMALL_TEXT_SIZE)
                 .color(text_color),
                 input,
-                text("press Esc to exit, Enter to confirm :D")
+                Text::new("press Esc to exit, Enter to confirm :D")
                     .size(SMALL_TEXT_SIZE)
                     .color(info_color),
-                text(modal.error)
+                Text::new(modal.error)
                     .size(SMALL_TEXT_SIZE)
                     .color(base_warning_color)
                     .size(NORMAL_TEXT_SIZE)
@@ -1818,17 +1833,17 @@ impl Buoyant {
                 .id(CREATE_MODAL_ID);
 
             let col = column![
-                text(format!(
+                Text::new(format!(
                     "creating new folder(s) in {}",
                     self.current_path.display()
                 ))
                 .size(SMALL_TEXT_SIZE)
                 .color(text_color),
                 input,
-                text("press Esc to exit, Enter to confirm :D")
+                Text::new("press Esc to exit, Enter to confirm :D")
                     .size(SMALL_TEXT_SIZE)
                     .color(info_color),
-                text(modal.error)
+                Text::new(modal.error)
                     .size(SMALL_TEXT_SIZE)
                     .color(base_warning_color)
             ]

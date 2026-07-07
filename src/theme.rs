@@ -23,9 +23,10 @@ struct RawPalette {
     danger: Option<String>,
 }
 
-pub fn fetch(theme_name: Option<&str>) -> (Option<Vec<String>>, Theme) {
+pub fn fetch(theme_name: Option<&str>) -> (Option<Vec<String>>, Option<String>, Theme) {
     let mut theme = Theme::Light;
     let mut fonts = None;
+    let mut font_name = None;
 
     if let Some(name) = theme_name {
         let home = home_dir();
@@ -43,15 +44,19 @@ pub fn fetch(theme_name: Option<&str>) -> (Option<Vec<String>>, Theme) {
 
         if let Ok(content) = read_content {
             let raw_theme: RawTheme = toml::from_str(&content).unwrap();
-            (fonts, theme) = process_rawtheme(raw_theme, theme);
+            (fonts, font_name, theme) = process_rawtheme(raw_theme, theme);
         }
     }
 
-    (fonts, theme)
+    (fonts, font_name, theme)
 }
 
-fn process_rawtheme(raw_theme: RawTheme, theme: Theme) -> (Option<Vec<String>>, Theme) {
+fn process_rawtheme(
+    raw_theme: RawTheme,
+    theme: Theme,
+) -> (Option<Vec<String>>, Option<String>, Theme) {
     let f;
+    let mut font_name = None;
     let mut t = Theme::Light;
 
     if let Some(raw_palette) = raw_theme.palette {
@@ -59,15 +64,16 @@ fn process_rawtheme(raw_theme: RawTheme, theme: Theme) -> (Option<Vec<String>>, 
     }
 
     if let Some(raw_font) = raw_theme.font {
-        f = process_font(raw_font);
+        f = process_font(&raw_font);
+        font_name = Some(raw_font);
     } else {
         f = None;
     }
 
-    (f, t)
+    (f, font_name, t)
 }
 
-fn process_font(raw_font: String) -> Option<Vec<String>> {
+fn process_font(raw_font: &str) -> Option<Vec<String>> {
     let font_path = search_fonts(&raw_font);
 
     if let Ok(paths) = font_path {
