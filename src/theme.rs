@@ -1,58 +1,10 @@
 // prepare for another matching hell - tsuki 22nd June 2026
-use iced::Color;
+use iced::{Color, theme::Theme};
 use serde::Deserialize;
 use std::{env::home_dir, error::Error, fs};
 use toml;
 
 use crate::fonts::search_fonts;
-
-pub struct Theme {
-    pub palette: Palette,
-}
-
-impl Default for Theme {
-    fn default() -> Self {
-        Theme {
-            palette: Palette::default(),
-        }
-    }
-}
-
-pub struct Palette {
-    pub text: Color,
-    pub text_muted: Color,
-
-    pub background: Color,
-    pub overlay: Color,
-    pub scrim: Color,
-
-    pub accent: Color,
-    pub accent_dark: Color,
-
-    pub red: Color,
-    pub yellow: Color,
-    pub green: Color,
-    pub blue: Color,
-}
-
-impl Default for Palette {
-    fn default() -> Self {
-        Palette {
-            text: Color::from_rgb8(84, 84, 100),
-            text_muted: Color::from_rgba8(67, 67, 108, 0.7),
-            background: Color::from_rgb8(242, 236, 188),
-            overlay: Color::from_rgb8(220, 213, 172),
-            scrim: Color::from_rgba8(231, 219, 160, 0.8),
-            accent: Color::from_rgb8(199, 215, 224),
-            accent_dark: Color::from_rgb8(159, 181, 201),
-            red: Color::from_rgb8(232, 36, 36),
-            yellow: Color::from_rgb8(233, 138, 0),
-            green: Color::from_rgb8(111, 137, 78),
-            blue: Color::from_rgb8(90, 119, 133),
-        }
-        // default palette is kanagawa lotus bc its so awesome
-    }
-}
 
 #[derive(Deserialize)]
 struct RawTheme {
@@ -64,23 +16,15 @@ struct RawTheme {
 #[derive(Deserialize)]
 struct RawPalette {
     text: Option<String>,
-    text_muted: Option<String>,
-
     background: Option<String>,
-    overlay: Option<String>,
-    scrim: Option<String>,
-
-    accent: Option<String>,
-    accent_dark: Option<String>,
-
-    red: Option<String>,
-    yellow: Option<String>,
-    green: Option<String>,
-    blue: Option<String>,
+    primary: Option<String>,
+    success: Option<String>,
+    warning: Option<String>,
+    danger: Option<String>,
 }
 
 pub fn fetch(theme_name: Option<&str>) -> (Option<Vec<String>>, Theme) {
-    let mut theme = Theme::default();
+    let mut theme = Theme::Light;
     let mut fonts = None;
 
     if let Some(name) = theme_name {
@@ -99,22 +43,28 @@ pub fn fetch(theme_name: Option<&str>) -> (Option<Vec<String>>, Theme) {
 
         if let Ok(content) = read_content {
             let raw_theme: RawTheme = toml::from_str(&content).unwrap();
-            fonts = process_rawtheme(raw_theme, &mut theme);
+            (fonts, theme) = process_rawtheme(raw_theme, theme);
         }
     }
 
     (fonts, theme)
 }
 
-fn process_rawtheme(raw_theme: RawTheme, theme: &mut Theme) -> Option<Vec<String>> {
+fn process_rawtheme(raw_theme: RawTheme, theme: Theme) -> (Option<Vec<String>>, Theme) {
+    let f;
+    let mut t = Theme::Light;
+
     if let Some(raw_palette) = raw_theme.palette {
-        process_palette(raw_palette, &mut theme.palette);
+        t = process_palette(raw_palette, theme);
     }
+
     if let Some(raw_font) = raw_theme.font {
-        return process_font(raw_font);
+        f = process_font(raw_font);
     } else {
-        None
+        f = None;
     }
+
+    (f, t)
 }
 
 fn process_font(raw_font: String) -> Option<Vec<String>> {
@@ -127,40 +77,28 @@ fn process_font(raw_font: String) -> Option<Vec<String>> {
     }
 }
 
-fn process_palette(raw_palette: RawPalette, palette: &mut Palette) {
+fn process_palette(raw_palette: RawPalette, theme: Theme) -> Theme {
+    let mut palette = theme.palette();
     if let Some(raw_color) = raw_palette.text {
         palette.text = match_color(&raw_color);
-    }
-    if let Some(raw_color) = raw_palette.text_muted {
-        palette.text_muted = match_color(&raw_color);
     }
     if let Some(raw_color) = raw_palette.background {
         palette.background = match_color(&raw_color);
     }
-    if let Some(raw_color) = raw_palette.overlay {
-        palette.overlay = match_color(&raw_color);
+    if let Some(raw_color) = raw_palette.primary {
+        palette.primary = match_color(&raw_color);
     }
-    if let Some(raw_color) = raw_palette.scrim {
-        palette.scrim = match_color(&raw_color);
+    if let Some(raw_color) = raw_palette.success {
+        palette.success = match_color(&raw_color);
     }
-    if let Some(raw_color) = raw_palette.accent {
-        palette.accent = match_color(&raw_color);
+    if let Some(raw_color) = raw_palette.warning {
+        palette.warning = match_color(&raw_color);
     }
-    if let Some(raw_color) = raw_palette.accent_dark {
-        palette.accent_dark = match_color(&raw_color);
+    if let Some(raw_color) = raw_palette.danger {
+        palette.danger = match_color(&raw_color);
     }
-    if let Some(raw_color) = raw_palette.red {
-        palette.red = match_color(&raw_color);
-    }
-    if let Some(raw_color) = raw_palette.yellow {
-        palette.yellow = match_color(&raw_color);
-    }
-    if let Some(raw_color) = raw_palette.green {
-        palette.green = match_color(&raw_color);
-    }
-    if let Some(raw_color) = raw_palette.blue {
-        palette.blue = match_color(&raw_color);
-    }
+
+    Theme::custom("custom", palette)
 }
 
 fn match_color(raw_color: &str) -> Color {

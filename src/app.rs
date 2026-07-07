@@ -18,9 +18,10 @@ use iced::{
         self, Modifiers,
         key::{self, Code, Physical},
     },
+    theme::{Theme, palette::Extended},
     widget::{
-        button, column, container, float, mouse_area, opaque, operation, row, scrollable, selector,
-        stack, text, text_input,
+        Themer, button, column, container, float, mouse_area, opaque, operation, row, scrollable,
+        selector, stack, text, text_input,
     },
 };
 use iced::{
@@ -172,7 +173,7 @@ pub enum Message {
 
 pub struct Buoyant {
     config: config::Config,
-    theme: theme::Theme,
+    theme: Theme,
 
     current_path: PathBuf,
     current_index: Option<usize>,
@@ -209,7 +210,7 @@ impl Buoyant {
         (
             Buoyant {
                 config: config::Config::default(),
-                theme: theme::Theme::default(),
+                theme: Theme::Light,
 
                 current_path: path,
                 current_index: None,
@@ -1044,14 +1045,21 @@ impl Buoyant {
         const SMALL_TEXT_SIZE: f32 = 13.0;
 
         // Colors
-        let palette = &self.theme.palette;
-        let text_color = palette.text;
-        let text_muted_color = palette.text_muted;
-        let info_color = palette.blue;
+        let extended_palette = Extended::generate(self.theme.palette());
+        let primary_colors = extended_palette.primary;
+        let background_colors = extended_palette.background;
+        let warning_colors = extended_palette.warning;
+        let success_colors = extended_palette.success;
+        let text_color = background_colors.base.text;
+        let text_muted_color = primary_colors.weak.text;
+        let info_color = primary_colors.strong.text;
+        let base_succ_color = success_colors.base.text;
+        let base_warning_color = warning_colors.base.text;
+        let secondary_text_color = primary_colors.weak.text;
 
         // Styles
         let button_style = button::Style {
-            background: Some(Background::Color(palette.accent_dark)),
+            background: Some(Background::Color(primary_colors.base.color)),
             ..Default::default()
         };
 
@@ -1065,51 +1073,53 @@ impl Buoyant {
         };
 
         let bg_style = container::Style {
-            background: Some(Background::Color(palette.background)),
+            background: Some(Background::Color(background_colors.base.color)),
             ..Default::default()
         };
 
         let panel_style = container::Style {
-            background: Some(Background::Color(palette.overlay)),
+            background: Some(Background::Color(background_colors.weak.color)),
             ..Default::default()
         };
 
         let overlay_style = container::Style {
-            background: Some(Background::Color(palette.scrim)),
+            background: Some(Background::Color(
+                background_colors.weak.color.scale_alpha(0.7),
+            )),
             ..Default::default()
         };
 
         let text_input_style = text_input::Style {
-            background: Background::Color(palette.overlay),
+            background: Background::Color(background_colors.strong.color),
             border: Border::default(),
-            placeholder: palette.text_muted,
-            icon: palette.text,
-            value: palette.text,
-            selection: palette.accent,
+            placeholder: background_colors.weak.text,
+            icon: background_colors.strong.text,
+            value: background_colors.strong.text,
+            selection: primary_colors.weak.color,
         };
 
         let search_input_style = text_input::Style {
             background: Background::Color(Color::from_rgba8(0, 0, 0, 0.0)),
             border: Border::default(),
-            placeholder: palette.text_muted,
-            icon: palette.text_muted,
-            value: palette.text,
-            selection: palette.accent,
+            placeholder: background_colors.weakest.text.scale_alpha(0.6),
+            icon: background_colors.neutral.text,
+            value: background_colors.neutral.text,
+            selection: primary_colors.weak.color,
         };
 
         let unfocused_search_style = text::Style {
-            color: Some(palette.text),
+            color: Some(primary_colors.weak.text),
         };
 
         let rail_style = Rail {
             background: None,
             border: Border {
-                color: palette.background,
+                color: background_colors.weakest.color,
                 width: 0.0,
                 radius: Radius::new(0),
             },
             scroller: Scroller {
-                background: Background::Color(palette.accent),
+                background: Background::Color(primary_colors.base.color),
                 border: Border {
                     ..Default::default()
                 },
@@ -1122,12 +1132,12 @@ impl Buoyant {
             horizontal_rail: rail_style,
             gap: None,
             auto_scroll: AutoScroll {
-                background: Background::Color(palette.background),
+                background: Background::Color(background_colors.strong.color),
                 border: Border::default(),
                 shadow: Shadow {
                     ..Default::default()
                 },
-                icon: palette.accent,
+                icon: primary_colors.base.color,
             },
         };
 
@@ -1396,7 +1406,7 @@ impl Buoyant {
                     .size(NORMAL_TEXT_SIZE)
                     .center()
                     .width(Length::Fill)
-                    .color(palette.yellow.scale_alpha(0.5)),
+                    .color(base_warning_color.scale_alpha(0.5)),
             );
         }
 
@@ -1484,14 +1494,14 @@ impl Buoyant {
                 button(svg(file_types::LEFT_ARROW.clone()).width(20).height(20))
                     .height(30)
                     .style(move |_, _| return_button_style
-                        .with_background(palette.text.scale_alpha(0.1)))
+                        .with_background(secondary_text_color.scale_alpha(0.1)))
                     .on_press(Message::NavigateBack),
                 container(
                     text(format!("{}", self.current_path.display()))
                         .size(NORMAL_TEXT_SIZE)
                         .color(text_color)
                 )
-                .style(move |_| { palette.text.scale_alpha(0.1).into() })
+                .style(move |_| { secondary_text_color.scale_alpha(0.1).into() })
                 .center_y(30)
                 .center_x(Length::Fill)
             ],
@@ -1541,7 +1551,7 @@ impl Buoyant {
         let clipboard: Element<Message> = column![
             text(clipboard_mode_display)
                 .size(NORMAL_TEXT_SIZE)
-                .color(palette.green)
+                .color(base_succ_color)
         ]
         .extend(clipboard_entries.iter().map(|e| {
             text(e.display().to_string())
@@ -1650,7 +1660,7 @@ impl Buoyant {
                     .color(text_color),
                 input,
                 text(modal.error)
-                    .color(palette.yellow)
+                    .color(base_warning_color)
                     .size(SMALL_TEXT_SIZE)
             ]
             .width(MODAL_WIDTH)
@@ -1679,7 +1689,7 @@ impl Buoyant {
 
                     if self.states.modals.current_choice == 0 {
                         style.border = Border {
-                            color: palette.yellow,
+                            color: base_warning_color,
                             width: 2.0,
                             radius: Radius::new(8.0),
                         }
@@ -1698,7 +1708,7 @@ impl Buoyant {
 
                     if self.states.modals.current_choice == 1 {
                         style.border = Border {
-                            color: palette.yellow,
+                            color: base_warning_color,
                             width: 2.0,
                             radius: Radius::new(8.0),
                         }
@@ -1745,7 +1755,7 @@ impl Buoyant {
 
                                 if self.states.modals.current_choice == 0 {
                                     style.border = Border {
-                                        color: palette.yellow,
+                                        color: base_warning_color,
                                         width: 2.0,
                                         radius: Radius::new(8.0),
                                     }
@@ -1784,7 +1794,7 @@ impl Buoyant {
                     .color(info_color),
                 text(modal.error)
                     .size(SMALL_TEXT_SIZE)
-                    .color(palette.yellow)
+                    .color(base_warning_color)
                     .size(NORMAL_TEXT_SIZE)
             ]
             .width(MODAL_WIDTH)
@@ -1820,7 +1830,7 @@ impl Buoyant {
                     .color(info_color),
                 text(modal.error)
                     .size(SMALL_TEXT_SIZE)
-                    .color(palette.yellow)
+                    .color(base_warning_color)
             ]
             .width(MODAL_WIDTH)
             .spacing(MODAL_ELEMENT_SPACING);
@@ -1834,7 +1844,8 @@ impl Buoyant {
             stack = stack.push(overlay);
         }
 
-        stack.into()
+        let themer = Themer::new(Some(self.theme.clone()), stack);
+        container(themer).into()
     }
 
     fn should_fetch(&self, property: &Property) -> bool {
