@@ -469,21 +469,22 @@ impl App {
             index
         };
 
-        let entry_index = self.entries.displaying[index];
+        let entry_index = self.entries.displaying.get(index).unwrap();
         for i in index.min(end_index)..=end_index.max(index) {
-            self.selected.insert(self.entries.displaying[i]);
+            self.selected
+                .insert(*self.entries.displaying.get(i).unwrap());
         } // selecting everything between the two indicies
 
         if is_ctrled {
             if self.selected.contains(&index) {
-                self.selected.remove(&entry_index);
+                self.selected.remove(entry_index);
             } else {
-                self.selected.insert(entry_index);
+                self.selected.insert(*entry_index);
             }
         }
 
         self.current_index = Some(index);
-        self.selected.insert(entry_index);
+        self.selected.insert(*entry_index);
     }
 
     fn remove_from_selected(&mut self, entry_index: usize) {
@@ -652,12 +653,15 @@ impl eframe::App for App {
                                 pending_clipboard = Some(ClipboardMode::Copy);
                             }
                         });
-                        if btn_response.inner.clicked() {
-                            pending_add_selected = Some(index);
+
+                        let mut double_clicking = false;
+                        if btn_response.inner.double_clicked() {
+                            double_clicking = true;
+                            pending_nav = Some(entry.path.clone());
                         }
 
-                        if btn_response.inner.double_clicked() {
-                            pending_nav = Some(entry.path.clone());
+                        if btn_response.inner.clicked() && !double_clicking {
+                            pending_add_selected = Some(index);
                         }
                     });
 
