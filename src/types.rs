@@ -49,6 +49,15 @@ pub struct Clipboard {
     pub mode: Option<ClipboardMode>,
 }
 
+impl Default for Clipboard {
+    fn default() -> Self {
+        Clipboard {
+            entries: HashSet::with_capacity(5),
+            mode: None,
+        }
+    }
+}
+
 #[derive(Debug)]
 pub enum ClipboardMode {
     Copy,
@@ -92,4 +101,43 @@ impl Default for Entry {
             folder_size: None,
         }
     }
+}
+
+#[derive(Debug, Clone)]
+pub struct Entries {
+    pub children: Vec<Entry>,
+    pub displaying: Vec<usize>,
+}
+/*
+impl Entries {
+    pub fn entry(&self, index: &usize) -> Option<&Entry> {
+        self.children.get(*self.displaying.get(*index).unwrap())
+    }
+}*/
+
+impl Default for Entries {
+    fn default() -> Self {
+        let mut children = Vec::with_capacity(30);
+
+        for _ in 0..=30 {
+            children.push(Entry {
+                ..Default::default()
+            });
+        }
+
+        Entries {
+            children,
+            displaying: Vec::with_capacity(30),
+        }
+    }
+}
+
+#[derive(PartialEq, Default)]
+pub enum Property {
+    #[default]
+    Name,
+    Accessed,
+    Created,
+    Type,
+    Size,
 }

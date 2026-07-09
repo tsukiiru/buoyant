@@ -26,45 +26,6 @@ fn main() -> eframe::Result {
     )
 }
 
-#[derive(Debug, Clone)]
-struct Entries {
-    children: Vec<Entry>,
-    displaying: Vec<usize>,
-}
-/*
-impl Entries {
-    pub fn entry(&self, index: &usize) -> Option<&Entry> {
-        self.children.get(*self.displaying.get(*index).unwrap())
-    }
-}*/
-
-impl Default for Entries {
-    fn default() -> Self {
-        let mut children = Vec::with_capacity(30);
-
-        for _ in 0..=30 {
-            children.push(Entry {
-                ..Default::default()
-            });
-        }
-
-        Entries {
-            children,
-            displaying: Vec::with_capacity(30),
-        }
-    }
-}
-
-#[derive(PartialEq, Default)]
-pub enum Property {
-    #[default]
-    Name,
-    Accessed,
-    Created,
-    Type,
-    Size,
-}
-
 struct App {
     ctx: Context,
     current_path: PathBuf,
@@ -75,15 +36,6 @@ struct App {
     modals: Modals,
     view_hidden: bool,
     sorting_by: Property,
-}
-
-impl Default for Clipboard {
-    fn default() -> Self {
-        Clipboard {
-            entries: HashSet::with_capacity(5),
-            mode: None,
-        }
-    }
 }
 
 impl App {
@@ -155,13 +107,15 @@ impl App {
     }
 
     fn push_entry(&mut self, entry: &TempEntry, index: usize) {
-        let file_size = entry.file_size;
-        let accessed = entry.accessed;
-        let created = entry.created;
-        let name = entry.name;
-        let is_hidden = entry.is_hidden;
-        let path = entry.path;
-        let folder_size = entry.folder_size;
+        let (file_size, accessed, created, name, is_hidden, path, folder_size) = (
+            entry.file_size,
+            entry.accessed,
+            entry.created,
+            entry.name,
+            entry.is_hidden,
+            entry.path,
+            entry.folder_size,
+        );
 
         let entry_opt = self.entries.children.get_mut(index);
 
@@ -200,7 +154,8 @@ impl App {
         for (i, entry) in self.entries.children.iter().enumerate() {
             if !entry.using || (!self.view_hidden && entry.is_hidden) {
                 continue;
-            } /*
+            }
+            /*
             if let Some(modal) = &self.states.modals.search
             && !entry.name.contains(&modal.content.trim())
             {
@@ -481,6 +436,7 @@ impl App {
 
 impl eframe::App for App {
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
+        let mut i = 0;
         egui::CentralPanel::default().show(ui, |ui| {
             ui.horizontal(|ui| {
                 let mut button = ui.add(
@@ -497,18 +453,22 @@ impl eframe::App for App {
 
             ui.heading("da buoyant file explorer!! :o");
             ui.separator();
-            let interact = egui::ScrollArea::vertical().show(ui, |ui| {
-                let bg_response = ui.interact(
-                    ui.available_rect_before_wrap(),
-                    Id::new("explorer-area"),
-                    Sense::click(),
-                );
 
-                let mut pending_rename = None;
-                let mut pending_delete = None;
-                let mut pending_clipboard = None;
-                let mut pending_add_selected = None;
-                let mut pending_remove_selected = None;
+            let bg_response = ui.interact(
+                ui.available_rect_before_wrap(),
+                Id::new(format!("explorer-area{}", i)),
+                Sense::click(),
+            );
+            i += 1;
+
+            egui::ScrollArea::vertical().show(ui, |ui| {
+                let (
+                    mut pending_rename,
+                    mut pending_delete,
+                    mut pending_clipboard,
+                    mut pending_add_selected,
+                    mut pending_remove_selected,
+                ) = (None, None, None, None, None);
 
                 for entry_index in self.entries.displaying.clone() {
                     let mut value = self.selected.contains(&entry_index);
@@ -520,13 +480,14 @@ impl eframe::App for App {
 
                     let entry = entry_opt.unwrap();
 
-                    let button = ui.horizontal(|ui| {
-                        let btn_response = ui.interact(
-                            ui.available_rect_before_wrap(),
-                            Id::new(entry_index),
-                            Sense::click(),
-                        );
+                    let btn_response = ui.interact(
+                        ui.available_rect_before_wrap(),
+                        Id::new(format!("button{}", i)),
+                        Sense::click(),
+                    );
 
+                    i += 1;
+                    ui.horizontal(|ui| {
                         if ui.checkbox(&mut value, "").clicked() {
                             if value {
                                 pending_add_selected = Some(entry_index);
@@ -535,11 +496,12 @@ impl eframe::App for App {
                             }
                         }
 
-                        let mut name = RichText::new(&entry.name).size(14.0);
-                        let mut accessed = RichText::new(format_date(entry.accessed)).size(14.0);
-                        let mut created = RichText::new(format_date(entry.created)).size(14.0);
-                        let mut file_size =
-                            RichText::new(file_system::bytes_to_string(entry.file_size.unwrap()));
+                        let (mut name, mut accessed, mut created, mut file_size) = (
+                            RichText::new(&entry.name).size(14.0),
+                            RichText::new(format_date(entry.accessed)).size(14.0),
+                            RichText::new(format_date(entry.created)).size(14.0),
+                            RichText::new(file_system::bytes_to_string(entry.file_size.unwrap())),
+                        );
 
                         if entry.is_hidden {
                             name = name.color(Color32::WHITE.gamma_multiply(0.5));
@@ -552,11 +514,9 @@ impl eframe::App for App {
                         ui.add(Label::new(file_size).selectable(false));
                         ui.add(Label::new(accessed).selectable(false));
                         ui.add(Label::new(created).selectable(false));
-
-                        btn_response
                     });
 
-                    button.inner.context_menu(|ui| {
+                    btn_response.context_menu(|ui| {
                         ui.label(entry.name.clone());
                         if ui.button("rename").clicked() {
                             pending_rename = Some(entry_index);
@@ -574,8 +534,7 @@ impl eframe::App for App {
                         }
                     });
 
-                    if button.inner.clicked() {
-                        println!("boop");
+                    if btn_response.clicked() {
                         self.nav(&entry.path.clone());
                     }
                 }
@@ -599,11 +558,9 @@ impl eframe::App for App {
                 if let Some(mode) = pending_clipboard {
                     self.add_to_clipboard(mode);
                 }
-
-                return bg_response;
             });
 
-            interact.inner.context_menu(|ui| {
+            bg_response.context_menu(|ui| {
                 ui.label("create");
                 if ui.button("create file").clicked() {
                     self.new_modal(ModalType::CreateFile, None);
@@ -615,16 +572,17 @@ impl eframe::App for App {
                 ui.separator();
                 ui.label("clipboard");
 
-                let mut cut_label = RichText::new("cut");
-                let mut copy_label = RichText::new("copy");
+                let (mut cut_label, mut copy_label) = (RichText::new("cut"), RichText::new("copy"));
 
                 if self.selected.is_empty() {
                     cut_label = cut_label.color(Color32::WHITE.gamma_multiply(0.5));
                     copy_label = copy_label.color(Color32::WHITE.gamma_multiply(0.5));
                 }
 
-                let mut cut_button = Button::new(cut_label).stroke(Stroke::NONE);
-                let mut copy_button = Button::new(copy_label).stroke(Stroke::NONE);
+                let (mut cut_button, mut copy_button) = (
+                    Button::new(cut_label).stroke(Stroke::NONE),
+                    Button::new(copy_label).stroke(Stroke::NONE),
+                );
 
                 if self.selected.is_empty() {
                     cut_button = cut_button.sense(Sense::empty());
@@ -638,16 +596,18 @@ impl eframe::App for App {
                     self.add_to_clipboard(ClipboardMode::Copy);
                 }
 
-                let mut p_text = RichText::new("paste");
-                let mut cp_text = RichText::new("clear clipboard");
+                let (mut p_text, mut cp_text) =
+                    (RichText::new("paste"), RichText::new("clear clipboard"));
 
                 if self.clipboard.entries.is_empty() {
                     p_text = p_text.color(Color32::WHITE.gamma_multiply(0.5));
                     cp_text = cp_text.color(Color32::WHITE.gamma_multiply(0.5));
                 }
 
-                let mut paste_button = Button::new(p_text).stroke(Stroke::NONE);
-                let mut clearcp_button = Button::new(cp_text).stroke(Stroke::NONE);
+                let (mut paste_button, mut clearcp_button) = (
+                    Button::new(p_text).stroke(Stroke::NONE),
+                    Button::new(cp_text).stroke(Stroke::NONE),
+                );
 
                 if self.clipboard.entries.is_empty() {
                     paste_button = paste_button.sense(Sense::empty());
