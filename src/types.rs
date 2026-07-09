@@ -131,13 +131,3 @@ impl Default for Entries {
         }
     }
 }
-
-#[derive(PartialEq, Default)]
-pub enum Property {
-    #[default]
-    Name,
-    Accessed,
-    Created,
-    Type,
-    Size,
-}

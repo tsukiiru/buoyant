@@ -22,16 +22,18 @@ pub fn rename(path: &Path, name: &str) {
     }
 }
 
-pub fn delete(path: &Path) {
-    if !path.exists() {
-        return;
-    }
+pub fn delete(paths: Vec<&Path>) {
+    paths.par_iter().for_each(|path| {
+        if !path.exists() {
+            return;
+        }
 
-    let command = Command::new("rm").arg("-rf").arg(path).output();
+        let command = Command::new("rm").arg("-rf").arg(path).output();
 
-    if let Err(e) = command {
-        println!("{}", e);
-    }
+        if let Err(e) = command {
+            println!("{}", e);
+        }
+    });
 }
 
 pub fn create(current_path: &Path, new_path: &Path, last_is_file: bool) -> Option<&'static str> {

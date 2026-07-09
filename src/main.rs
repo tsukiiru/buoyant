@@ -3,9 +3,13 @@ mod types;
 
 use chrono::{DateTime, Datelike, Utc};
 use eframe::egui::{
-    self, Button, Color32, Context, Id, Label, Modal, RichText, Sense, Stroke, TextEdit, Vec2,
+    self, Align, Button, Checkbox, Color32, Context, Id, Label, Modal, RichText, Sense, Stroke,
+    TextEdit, Vec2,
 };
-use rayon::slice::ParallelSliceMut;
+use rayon::{
+    iter::{IntoParallelRefIterator, ParallelIterator},
+    slice::ParallelSliceMut,
+};
 use std::{
     collections::HashSet,
     env,
@@ -15,6 +19,16 @@ use std::{
 };
 
 use crate::{file_system::BANNED_CHARACTERS, types::*};
+
+#[derive(PartialEq, Default)]
+pub enum Property {
+    #[default]
+    Name,
+    Accessed,
+    Created,
+    Type,
+    Size,
+}
 
 fn main() -> eframe::Result {
     let native_opts = eframe::NativeOptions::default();
@@ -271,9 +285,21 @@ impl App {
         self.fetch_entries(Some(self.current_path.clone()));
     }
 
-    fn delete(&mut self, index: usize) {
-        let path = &self.entries.children.get(index).unwrap().path;
-        file_system::delete(path);
+    fn delete(&mut self) {
+        let paths = self
+            .selected
+            .par_iter()
+            .map(|entry_index| {
+                self.entries
+                    .children
+                    .get(*entry_index)
+                    .unwrap()
+                    .path
+                    .as_ref()
+            })
+            .collect::<Vec<&Path>>();
+
+        file_system::delete(paths);
         self.fetch_entries(None);
     }
 
@@ -330,10 +356,15 @@ impl App {
         self.fetch_entries(None);
     }
 
-    fn new_modal(&mut self, modal: ModalType, index: Option<usize>) {
+    fn new_modal(&mut self, modal: ModalType, entry_index: Option<usize>) {
         match modal {
             ModalType::Rename => {
-                let path = &self.entries.children.get(index.unwrap()).unwrap().path;
+                let path = &self
+                    .entries
+                    .children
+                    .get(entry_index.unwrap())
+                    .unwrap()
+                    .path;
                 self.modals.rename = Some(InputModal {
                     content: path.file_name().unwrap().to_str().unwrap().to_string(),
                     path: Some(path.to_path_buf()),
@@ -425,12 +456,42 @@ impl App {
         self.fetch_entries(None);
     }
 
-    fn add_to_selected(&mut self, index: usize) {
-        self.selected.insert(index);
+    fn add_to_selected(&mut self, index: usize, is_ctrled: bool, is_shifted: bool) {
+        if !is_shifted && !is_ctrled {
+            self.selected.clear();
+        }
+
+        let end_index = if let Some(current_index) = self.current_index
+            && is_shifted
+        {
+            current_index
+        } else {
+            index
+        };
+
+        let entry_index = self.entries.displaying[index];
+        for i in index.min(end_index)..=end_index.max(index) {
+            self.selected.insert(self.entries.displaying[i]);
+        } // selecting everything between the two indicies
+
+        if is_ctrled {
+            if self.selected.contains(&index) {
+                self.selected.remove(&entry_index);
+            } else {
+                self.selected.insert(entry_index);
+            }
+        }
+
+        self.current_index = Some(index);
+        self.selected.insert(entry_index);
     }
 
-    fn remove_from_selected(&mut self, index: usize) {
-        self.selected.remove(&index);
+    fn remove_from_selected(&mut self, entry_index: usize) {
+        self.selected.remove(&entry_index);
+    }
+
+    fn clear_selected(&mut self) {
+        self.selected.clear();
     }
 }
 
@@ -454,14 +515,29 @@ impl eframe::App for App {
             ui.heading("da buoyant file explorer!! :o");
             ui.separator();
 
-            let bg_response = ui.interact(
-                ui.available_rect_before_wrap(),
-                Id::new(format!("explorer-area{}", i)),
-                Sense::click(),
-            );
-            i += 1;
+            ui.horizontal(|ui| {
+                ui.allocate_space(Vec2::new(45.0, 15.0));
 
-            egui::ScrollArea::vertical().show(ui, |ui| {
+                let mut grid = egui::Grid::new(i);
+                i += 1;
+                grid = grid.min_col_width(150.0);
+
+                grid.show(ui, |ui| {
+                    ui.add(Label::new("name").halign(Align::Min));
+                    ui.add(Label::new("file size").halign(Align::Min));
+                    ui.add(Label::new("accessed").halign(Align::Min));
+                    ui.add(Label::new("created").halign(Align::Min));
+                });
+            });
+
+            let bg_response = egui::ScrollArea::vertical().show(ui, |ui| {
+                let bg_response = ui.interact(
+                    ui.available_rect_before_wrap(),
+                    Id::new(format!("explorer-area{}", i)),
+                    Sense::click(),
+                );
+                i += 1;
+
                 let (
                     mut pending_rename,
                     mut pending_delete,
@@ -470,8 +546,15 @@ impl eframe::App for App {
                     mut pending_remove_selected,
                 ) = (None, None, None, None, None);
 
-                for entry_index in self.entries.displaying.clone() {
-                    let mut value = self.selected.contains(&entry_index);
+                for (index, entry_index) in self.entries.displaying.clone().into_iter().enumerate()
+                {
+                    let mut is_selected = self.selected.contains(&entry_index);
+                    let is_current_index = if let Some(i) = self.current_index {
+                        index == i
+                    } else {
+                        false
+                    };
+
                     let entry_opt = self.entries.children.get(entry_index);
 
                     if entry_opt.is_none() {
@@ -480,87 +563,152 @@ impl eframe::App for App {
 
                     let entry = entry_opt.unwrap();
 
-                    let btn_response = ui.interact(
-                        ui.available_rect_before_wrap(),
-                        Id::new(format!("button{}", i)),
-                        Sense::click(),
-                    );
+                    let mut pending_nav = None;
+                    let mut frame = egui::Frame::NONE.inner_margin(8);
+                    if is_selected {
+                        frame = frame.fill(Color32::LIGHT_GREEN.gamma_multiply(0.3));
+                    }
+                    if is_current_index {
+                        frame = frame.stroke(Stroke::new(1.0, Color32::WHITE.linear_multiply(0.3)));
+                    }
 
-                    i += 1;
-                    ui.horizontal(|ui| {
-                        if ui.checkbox(&mut value, "").clicked() {
-                            if value {
-                                pending_add_selected = Some(entry_index);
-                            } else {
-                                pending_remove_selected = Some(entry_index);
+                    frame.show(ui, |ui| {
+                        let btn_response = ui.horizontal(|ui| {
+                            let btn_response = ui.interact(
+                                ui.available_rect_before_wrap(),
+                                Id::new(format!("button{}", i)),
+                                Sense::click(),
+                            );
+
+                            i += 1;
+
+                            if ui
+                                .add_sized([40.0, 15.0], Checkbox::new(&mut is_selected, ""))
+                                .clicked()
+                            {
+                                if is_selected {
+                                    pending_add_selected = Some(index);
+                                } else {
+                                    pending_remove_selected = Some(entry_index.clone());
+                                }
                             }
+
+                            let (mut name, mut accessed, mut created, mut file_size) = (
+                                RichText::new(&entry.name).size(14.0),
+                                RichText::new(format_date(entry.accessed)).size(14.0),
+                                RichText::new(format_date(entry.created)).size(14.0),
+                                RichText::new(file_system::bytes_to_string(
+                                    entry.file_size.unwrap(),
+                                ))
+                                .size(14.0),
+                            );
+
+                            if entry.is_hidden {
+                                name = name.color(Color32::WHITE.gamma_multiply(0.3));
+                                accessed = accessed.color(Color32::WHITE.gamma_multiply(0.3));
+                                created = created.color(Color32::WHITE.gamma_multiply(0.3));
+                                file_size = file_size.color(Color32::WHITE.gamma_multiply(0.3));
+                            }
+
+                            let mut grid = egui::Grid::new(Id::new(i));
+                            i += 1;
+
+                            grid = grid.min_col_width(150.0);
+                            grid.show(ui, |ui| {
+                                ui.add(Label::new(name).selectable(false).halign(egui::Align::Min));
+                                ui.add(
+                                    Label::new(file_size)
+                                        .selectable(false)
+                                        .halign(egui::Align::Min),
+                                );
+                                ui.add(
+                                    Label::new(accessed)
+                                        .selectable(false)
+                                        .halign(egui::Align::Min),
+                                );
+                                ui.add(
+                                    Label::new(created)
+                                        .selectable(false)
+                                        .halign(egui::Align::Min),
+                                );
+                            });
+                            btn_response
+                        });
+
+                        btn_response.inner.context_menu(|ui| {
+                            ui.label(entry.name.clone());
+                            if ui.button("rename").clicked() {
+                                pending_rename = Some(entry_index);
+                            }
+                            if ui.button("delete").clicked() {
+                                pending_delete = Some(entry_index);
+                            }
+                            if ui.button("cut").clicked() {
+                                pending_add_selected = Some(index);
+                                pending_clipboard = Some(ClipboardMode::Cut);
+                            }
+                            if ui.button("copy").clicked() {
+                                pending_add_selected = Some(index);
+                                pending_clipboard = Some(ClipboardMode::Copy);
+                            }
+                        });
+                        if btn_response.inner.clicked() {
+                            pending_add_selected = Some(index);
                         }
 
-                        let (mut name, mut accessed, mut created, mut file_size) = (
-                            RichText::new(&entry.name).size(14.0),
-                            RichText::new(format_date(entry.accessed)).size(14.0),
-                            RichText::new(format_date(entry.created)).size(14.0),
-                            RichText::new(file_system::bytes_to_string(entry.file_size.unwrap())),
-                        );
-
-                        if entry.is_hidden {
-                            name = name.color(Color32::WHITE.gamma_multiply(0.5));
-                            accessed = accessed.color(Color32::WHITE.gamma_multiply(0.5));
-                            created = created.color(Color32::WHITE.gamma_multiply(0.5));
-                            file_size = file_size.color(Color32::WHITE.gamma_multiply(0.5));
+                        if btn_response.inner.double_clicked() {
+                            pending_nav = Some(entry.path.clone());
                         }
-
-                        ui.add(Label::new(name).selectable(false));
-                        ui.add(Label::new(file_size).selectable(false));
-                        ui.add(Label::new(accessed).selectable(false));
-                        ui.add(Label::new(created).selectable(false));
                     });
 
-                    btn_response.context_menu(|ui| {
-                        ui.label(entry.name.clone());
-                        if ui.button("rename").clicked() {
-                            pending_rename = Some(entry_index);
-                        }
-                        if ui.button("delete").clicked() {
-                            pending_delete = Some(entry_index);
-                        }
-                        if ui.button("cut").clicked() {
-                            pending_add_selected = Some(entry_index);
-                            pending_clipboard = Some(ClipboardMode::Cut);
-                        }
-                        if ui.button("copy").clicked() {
-                            pending_add_selected = Some(entry_index);
-                            pending_clipboard = Some(ClipboardMode::Copy);
-                        }
-                    });
-
-                    if btn_response.clicked() {
-                        self.nav(&entry.path.clone());
+                    if let Some(path) = pending_nav {
+                        self.nav(&path);
                     }
                 }
 
-                if let Some(index) = pending_rename {
-                    self.new_modal(ModalType::Rename, Some(index));
+                if let Some(entry_index) = pending_rename {
+                    self.new_modal(ModalType::Rename, Some(entry_index));
                 }
 
-                if let Some(index) = pending_delete {
-                    self.delete(index);
+                if let Some(entry_index) = pending_delete {
+                    self.add_to_selected(entry_index, false, false);
+                    self.delete();
                 }
 
                 if let Some(index) = pending_add_selected {
-                    self.add_to_selected(index);
+                    let ctrl_pressed = ui.input(|i| {
+                        i.key_down(egui::Key::ControlLeft) || i.key_down(egui::Key::ControlRight)
+                    });
+                    let shift_pressed = ui.input(|i| {
+                        i.key_down(egui::Key::ShiftLeft) || i.key_down(egui::Key::ShiftRight)
+                    });
+
+                    self.add_to_selected(index, ctrl_pressed, shift_pressed);
                 }
 
-                if let Some(index) = pending_remove_selected {
-                    self.remove_from_selected(index);
+                if let Some(entry_index) = pending_remove_selected {
+                    self.remove_from_selected(entry_index);
                 }
 
                 if let Some(mode) = pending_clipboard {
                     self.add_to_clipboard(mode);
                 }
+
+                bg_response
             });
 
-            bg_response.context_menu(|ui| {
+            if bg_response.inner.clicked()
+                && !(ui.input(|i| {
+                    i.key_pressed(egui::Key::ControlLeft)
+                        && i.key_pressed(egui::Key::ControlRight)
+                        && i.key_pressed(egui::Key::ShiftLeft)
+                        && i.key_pressed(egui::Key::ShiftRight)
+                }))
+            {
+                self.clear_selected();
+            }
+
+            bg_response.inner.context_menu(|ui| {
                 ui.label("create");
                 if ui.button("create file").clicked() {
                     self.new_modal(ModalType::CreateFile, None);
@@ -572,21 +720,28 @@ impl eframe::App for App {
                 ui.separator();
                 ui.label("clipboard");
 
-                let (mut cut_label, mut copy_label) = (RichText::new("cut"), RichText::new("copy"));
+                let (mut cut_label, mut copy_label, mut clear_s_label) = (
+                    RichText::new("cut"),
+                    RichText::new("copy"),
+                    RichText::new("clear selection"),
+                );
 
                 if self.selected.is_empty() {
                     cut_label = cut_label.color(Color32::WHITE.gamma_multiply(0.5));
                     copy_label = copy_label.color(Color32::WHITE.gamma_multiply(0.5));
+                    clear_s_label = clear_s_label.color(Color32::WHITE.gamma_multiply(0.5));
                 }
 
-                let (mut cut_button, mut copy_button) = (
+                let (mut cut_button, mut copy_button, mut clear_s_button) = (
                     Button::new(cut_label).stroke(Stroke::NONE),
                     Button::new(copy_label).stroke(Stroke::NONE),
+                    Button::new(clear_s_label).stroke(Stroke::NONE),
                 );
 
                 if self.selected.is_empty() {
                     cut_button = cut_button.sense(Sense::empty());
                     copy_button = copy_button.sense(Sense::empty());
+                    clear_s_button = clear_s_button.sense(Sense::empty());
                 }
 
                 if ui.add(cut_button).clicked() {
@@ -594,6 +749,9 @@ impl eframe::App for App {
                 }
                 if ui.add(copy_button).clicked() {
                     self.add_to_clipboard(ClipboardMode::Copy);
+                }
+                if ui.add(clear_s_button).clicked() {
+                    self.clear_selected();
                 }
 
                 let (mut p_text, mut cp_text) =
