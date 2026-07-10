@@ -355,13 +355,12 @@ impl App {
         self.fetch_entries(None);
     }
 
-    fn new_modal(&mut self, modal: ModalType, entry_index: Option<usize>) {
+    fn new_modal(&mut self, modal: ModalType) {
         match modal {
             ModalType::Rename => {
                 let path = &self
                     .entries
-                    .children
-                    .get(entry_index.unwrap())
+                    .entry(&self.current_index.unwrap())
                     .unwrap()
                     .path;
                 self.modals.rename = Some(InputModal {
@@ -386,6 +385,7 @@ impl App {
             }
             ModalType::Paste => self.modals.paste = Some(ChoiceModal {}),
             ModalType::Delete => self.modals.delete = Some(ChoiceModal {}),
+            ModalType::Metadata => self.modals.metadata = Some(InfoModal {}),
         }
     }
 
@@ -409,6 +409,7 @@ impl App {
             ModalType::CreateFolder => self.modals.create_folder = None,
             ModalType::Paste => self.modals.paste = None,
             ModalType::Delete => self.modals.delete = None,
+            ModalType::Metadata => self.modals.metadata = None,
         };
     }
 
@@ -457,13 +458,14 @@ impl App {
         self.fetch_entries(None);
     }
 
-    fn add_to_selected(&mut self, index: usize) {
+    fn swap_selected(&mut self, index: usize) {
         let entry_index_opt = self.entries.displaying.get(index);
-        if let Some(entry_index) = entry_index_opt
-            && !self.selected.contains(entry_index)
-        {
+        if let Some(entry_index) = entry_index_opt {
+            self.selected.clear();
             self.selected.insert(*entry_index);
         }
+
+        self.current_index = Some(index);
     }
 
     fn modify_selected(&mut self, index: usize, is_ctrled: bool, is_shifted: bool) {
@@ -558,9 +560,11 @@ impl eframe::App for App {
                     mut pending_rename,
                     mut pending_delete_modal,
                     mut pending_clipboard,
-                    mut pending_add_selected,
+                    mut pending_swap_selected,
+                    mut pending_modify_selected,
                     mut pending_remove_selected,
-                ) = (None, None, None, None, None);
+                    mut pending_metadata_modal,
+                ) = (None, None, None, None, None, None, None);
 
                 for (index, entry_index) in self.entries.displaying.clone().into_iter().enumerate()
                 {
@@ -603,7 +607,7 @@ impl eframe::App for App {
                                 .clicked()
                             {
                                 if is_selected {
-                                    pending_add_selected = Some(index);
+                                    pending_modify_selected = Some(index);
                                 } else {
                                     pending_remove_selected = Some(entry_index.clone());
                                 }
@@ -613,9 +617,11 @@ impl eframe::App for App {
                                 RichText::new(&entry.name).size(14.0),
                                 RichText::new(format_date(entry.accessed)).size(14.0),
                                 RichText::new(format_date(entry.created)).size(14.0),
-                                RichText::new(file_system::bytes_to_string(
-                                    entry.file_size.unwrap(),
-                                ))
+                                RichText::new(if let Some(size) = &entry.folder_size {
+                                    format!("{} items", size)
+                                } else {
+                                    file_system::bytes_to_string(entry.file_size.unwrap())
+                                })
                                 .size(14.0),
                             );
 
@@ -654,18 +660,19 @@ impl eframe::App for App {
                         btn_response.inner.context_menu(|ui| {
                             ui.label(entry.name.clone());
                             if ui.button("rename").clicked() {
-                                pending_rename = Some(entry_index);
+                                pending_rename = Some(());
                             }
                             if ui.button("delete").clicked() {
-                                pending_delete_modal = Some(index);
+                                pending_delete_modal = Some(());
                             }
                             if ui.button("cut").clicked() {
-                                pending_add_selected = Some(index);
                                 pending_clipboard = Some(ClipboardMode::Cut);
                             }
                             if ui.button("copy").clicked() {
-                                pending_add_selected = Some(index);
                                 pending_clipboard = Some(ClipboardMode::Copy);
+                            }
+                            if ui.button("info").clicked() {
+                                pending_metadata_modal = Some(());
                             }
                         });
 
@@ -676,7 +683,11 @@ impl eframe::App for App {
                         }
 
                         if btn_response.inner.clicked() && !double_clicking {
-                            pending_add_selected = Some(index);
+                            pending_modify_selected = Some(index);
+                        }
+
+                        if btn_response.inner.secondary_clicked() {
+                            pending_swap_selected = Some(index);
                         }
                     });
 
@@ -685,16 +696,19 @@ impl eframe::App for App {
                     }
                 }
 
-                if let Some(entry_index) = pending_rename {
-                    self.new_modal(ModalType::Rename, Some(entry_index));
+                if let Some(index) = pending_swap_selected {
+                    self.swap_selected(index);
                 }
 
-                if let Some(index) = pending_delete_modal {
-                    self.add_to_selected(index);
-                    self.new_modal(ModalType::Delete, None);
+                if pending_rename.is_some() {
+                    self.new_modal(ModalType::Rename);
                 }
 
-                if let Some(index) = pending_add_selected {
+                if pending_delete_modal.is_some() {
+                    self.new_modal(ModalType::Delete);
+                }
+
+                if let Some(index) = pending_modify_selected {
                     let ctrl_pressed = ui.input(|i| {
                         i.key_down(egui::Key::ControlLeft) || i.key_down(egui::Key::ControlRight)
                     });
@@ -711,6 +725,10 @@ impl eframe::App for App {
 
                 if let Some(mode) = pending_clipboard {
                     self.add_to_clipboard(mode);
+                }
+
+                if pending_metadata_modal.is_some() {
+                    self.new_modal(ModalType::Metadata);
                 }
 
                 bg_response
@@ -730,10 +748,10 @@ impl eframe::App for App {
             bg_response.inner.context_menu(|ui| {
                 ui.label("create");
                 if ui.button("create file").clicked() {
-                    self.new_modal(ModalType::CreateFile, None);
+                    self.new_modal(ModalType::CreateFile);
                 }
                 if ui.button("create folder").clicked() {
-                    self.new_modal(ModalType::CreateFolder, None);
+                    self.new_modal(ModalType::CreateFolder);
                 }
 
                 ui.separator();
@@ -768,7 +786,7 @@ impl eframe::App for App {
                 }
 
                 if ui.add(del_button).clicked() {
-                    self.new_modal(ModalType::Delete, None);
+                    self.new_modal(ModalType::Delete);
                 }
                 if ui.add(cut_button).clicked() {
                     self.add_to_clipboard(ClipboardMode::Cut);
@@ -799,7 +817,7 @@ impl eframe::App for App {
                 }
 
                 if ui.add(paste_button).clicked() {
-                    self.new_modal(ModalType::Paste, None);
+                    self.new_modal(ModalType::Paste);
                 }
                 if ui.add(clearcp_button).clicked() {
                     self.clear_clipboard();
@@ -971,6 +989,40 @@ impl eframe::App for App {
         }
         if pending_close_delete {
             self.close_modal(ModalType::Delete);
+        }
+
+        let mut pending_close_metadata = false;
+
+        if let Some(_modal) = &self.modals.metadata {
+            let modal_widget = Modal::new(Id::new("metadata_modal"));
+            let entry = &self.entries.entry(&self.current_index.unwrap()).unwrap();
+
+            modal_widget.show(&self.ctx.clone(), |m| {
+                m.label(format!("showing metadata for {}", entry.name));
+                m.separator();
+                m.label(format!("full path: {}", entry.path.display()));
+                m.label(format!(
+                    "last accessed date: {}",
+                    format_date(entry.accessed)
+                ));
+                m.label(format!("created date: {}", format_date(entry.created)));
+                m.label(if let Some(size) = &entry.folder_size {
+                    format!("folder size: {} items", size)
+                } else {
+                    format!(
+                        "file size: {}",
+                        file_system::bytes_to_string(entry.file_size.unwrap_or_default())
+                    )
+                });
+
+                if m.input(|i| i.key_pressed(egui::Key::Escape)) {
+                    pending_close_metadata = true;
+                }
+            });
+        }
+
+        if pending_close_metadata {
+            self.close_modal(ModalType::Metadata);
         }
     }
 }

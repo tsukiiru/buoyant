@@ -14,6 +14,7 @@ pub struct Modals {
     pub create_folder: Option<InputModal>,
     pub paste: Option<ChoiceModal>,
     pub delete: Option<ChoiceModal>,
+    pub metadata: Option<InfoModal>,
 }
 
 impl Default for Modals {
@@ -24,6 +25,7 @@ impl Default for Modals {
             create_folder: None,
             paste: None,
             delete: None,
+            metadata: None,
         }
     }
 }
@@ -34,6 +36,7 @@ pub enum ModalType {
     CreateFolder,
     Paste,
     Delete,
+    Metadata,
 }
 
 // modal for inputting text
@@ -45,6 +48,8 @@ pub struct InputModal {
 
 // modal with some choices
 pub struct ChoiceModal {}
+// modal with some uh... info
+pub struct InfoModal {}
 
 #[derive(Debug)]
 pub struct Clipboard {
@@ -111,12 +116,12 @@ pub struct Entries {
     pub children: Vec<Entry>,
     pub displaying: Vec<usize>,
 }
-/*
+
 impl Entries {
     pub fn entry(&self, index: &usize) -> Option<&Entry> {
         self.children.get(*self.displaying.get(*index).unwrap())
     }
-}*/
+}
 
 impl Default for Entries {
     fn default() -> Self {
