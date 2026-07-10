@@ -3,8 +3,8 @@ mod types;
 
 use chrono::{DateTime, Datelike, Utc};
 use eframe::egui::{
-    self, Align, Button, Checkbox, Color32, Context, Id, Label, Modal, RichText, Sense, Stroke,
-    TextEdit, Vec2,
+    self, Align, Button, Checkbox, Color32, Context, Frame, Id, Label, Modal, RichText, Sense,
+    Stroke, TextEdit, Vec2,
 };
 use rayon::{
     iter::{IntoParallelRefIterator, ParallelIterator},
@@ -298,7 +298,6 @@ impl App {
                     .as_ref()
             })
             .collect::<Vec<&Path>>();
-
         file_system::delete(paths);
         self.fetch_entries(None);
     }
@@ -386,6 +385,7 @@ impl App {
                 })
             }
             ModalType::Paste => self.modals.paste = Some(ChoiceModal {}),
+            ModalType::Delete => self.modals.delete = Some(ChoiceModal {}),
         }
     }
 
@@ -408,6 +408,7 @@ impl App {
             ModalType::CreateFile => self.modals.create_file = None,
             ModalType::CreateFolder => self.modals.create_folder = None,
             ModalType::Paste => self.modals.paste = None,
+            ModalType::Delete => self.modals.delete = None,
         };
     }
 
@@ -456,7 +457,16 @@ impl App {
         self.fetch_entries(None);
     }
 
-    fn add_to_selected(&mut self, index: usize, is_ctrled: bool, is_shifted: bool) {
+    fn add_to_selected(&mut self, index: usize) {
+        let entry_index_opt = self.entries.displaying.get(index);
+        if let Some(entry_index) = entry_index_opt
+            && !self.selected.contains(entry_index)
+        {
+            self.selected.insert(*entry_index);
+        }
+    }
+
+    fn modify_selected(&mut self, index: usize, is_ctrled: bool, is_shifted: bool) {
         if !is_shifted && !is_ctrled {
             self.selected.clear();
         }
@@ -469,15 +479,19 @@ impl App {
             index
         };
 
-        let entry_index = self.entries.displaying.get(index).unwrap();
-        for i in index.min(end_index)..=end_index.max(index) {
-            self.selected
-                .insert(*self.entries.displaying.get(i).unwrap());
-        } // selecting everything between the two indicies
+        if is_shifted {
+            for i in index.min(end_index)..=end_index.max(index) {
+                self.selected
+                    .insert(*self.entries.displaying.get(i).unwrap());
+            } // selecting everything between the two indicies
+        }
 
+        let entry_index = self.entries.displaying.get(index).unwrap();
         if is_ctrled {
-            if self.selected.contains(&index) {
+            if self.selected.contains(entry_index) {
                 self.selected.remove(entry_index);
+                self.current_index = Some(index);
+                return;
             } else {
                 self.selected.insert(*entry_index);
             }
@@ -499,6 +513,7 @@ impl App {
 impl eframe::App for App {
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
         let mut i = 0;
+
         egui::CentralPanel::default().show(ui, |ui| {
             ui.horizontal(|ui| {
                 let mut button = ui.add(
@@ -541,7 +556,7 @@ impl eframe::App for App {
 
                 let (
                     mut pending_rename,
-                    mut pending_delete,
+                    mut pending_delete_modal,
                     mut pending_clipboard,
                     mut pending_add_selected,
                     mut pending_remove_selected,
@@ -642,7 +657,7 @@ impl eframe::App for App {
                                 pending_rename = Some(entry_index);
                             }
                             if ui.button("delete").clicked() {
-                                pending_delete = Some(entry_index);
+                                pending_delete_modal = Some(index);
                             }
                             if ui.button("cut").clicked() {
                                 pending_add_selected = Some(index);
@@ -674,9 +689,9 @@ impl eframe::App for App {
                     self.new_modal(ModalType::Rename, Some(entry_index));
                 }
 
-                if let Some(entry_index) = pending_delete {
-                    self.add_to_selected(entry_index, false, false);
-                    self.delete();
+                if let Some(index) = pending_delete_modal {
+                    self.add_to_selected(index);
+                    self.new_modal(ModalType::Delete, None);
                 }
 
                 if let Some(index) = pending_add_selected {
@@ -687,7 +702,7 @@ impl eframe::App for App {
                         i.key_down(egui::Key::ShiftLeft) || i.key_down(egui::Key::ShiftRight)
                     });
 
-                    self.add_to_selected(index, ctrl_pressed, shift_pressed);
+                    self.modify_selected(index, ctrl_pressed, shift_pressed);
                 }
 
                 if let Some(entry_index) = pending_remove_selected {
@@ -724,30 +739,37 @@ impl eframe::App for App {
                 ui.separator();
                 ui.label("clipboard");
 
-                let (mut cut_label, mut copy_label, mut clear_s_label) = (
+                let (mut del_label, mut cut_label, mut copy_label, mut clear_s_label) = (
+                    RichText::new("delete"),
                     RichText::new("cut"),
                     RichText::new("copy"),
                     RichText::new("clear selection"),
                 );
 
                 if self.selected.is_empty() {
+                    del_label = del_label.color(Color32::WHITE.gamma_multiply(0.5));
                     cut_label = cut_label.color(Color32::WHITE.gamma_multiply(0.5));
                     copy_label = copy_label.color(Color32::WHITE.gamma_multiply(0.5));
                     clear_s_label = clear_s_label.color(Color32::WHITE.gamma_multiply(0.5));
                 }
 
-                let (mut cut_button, mut copy_button, mut clear_s_button) = (
+                let (mut del_button, mut cut_button, mut copy_button, mut clear_s_button) = (
+                    Button::new(del_label).stroke(Stroke::NONE),
                     Button::new(cut_label).stroke(Stroke::NONE),
                     Button::new(copy_label).stroke(Stroke::NONE),
                     Button::new(clear_s_label).stroke(Stroke::NONE),
                 );
 
                 if self.selected.is_empty() {
+                    del_button = del_button.sense(Sense::empty());
                     cut_button = cut_button.sense(Sense::empty());
                     copy_button = copy_button.sense(Sense::empty());
                     clear_s_button = clear_s_button.sense(Sense::empty());
                 }
 
+                if ui.add(del_button).clicked() {
+                    self.new_modal(ModalType::Delete, None);
+                }
                 if ui.add(cut_button).clicked() {
                     self.add_to_clipboard(ClipboardMode::Cut);
                 }
@@ -785,6 +807,8 @@ impl eframe::App for App {
             });
         });
 
+        // modals
+
         if let Some(modal) = &self.modals.rename {
             let modal_widget = Modal::new(Id::new("rename_modal"));
             let mut content = modal.content.clone();
@@ -814,7 +838,7 @@ impl eframe::App for App {
         if let Some(modal) = &self.modals.create_file {
             let modal_widget = Modal::new(Id::new("create_file_modal"));
             let mut content = modal.content.clone();
-            let error = &modal.error.clone();
+            let error = modal.error.clone();
 
             modal_widget.show(&self.ctx.clone(), |ui| {
                 ui.label(format!("creating file at {}", self.current_path.display()));
@@ -895,6 +919,58 @@ impl eframe::App for App {
 
         if let Some(paste_type) = pending_paste {
             self.paste(paste_type);
+        }
+
+        let mut pending_delete = false;
+        let mut pending_close_delete = false;
+
+        if let Some(_modal) = &self.modals.delete {
+            let modal_widget = Modal::new(Id::new("delete_modal"));
+            let paths = self
+                .selected
+                .par_iter()
+                .map(|entry_index| {
+                    self.entries
+                        .children
+                        .get(*entry_index)
+                        .unwrap()
+                        .path
+                        .as_ref()
+                })
+                .collect::<Vec<&Path>>();
+
+            modal_widget.show(&self.ctx.clone(), |w| {
+                w.label("are you sure you wanna delete these?");
+
+                Frame::new()
+                    .fill(Color32::BLACK.gamma_multiply(0.7))
+                    .corner_radius(4.0)
+                    .inner_margin(2.0)
+                    .show(w, |u| {
+                        egui::ScrollArea::vertical().max_height(200.0).show(u, |b| {
+                            paths.iter().for_each(|path| {
+                                b.label(format!("{}", path.display()));
+                            });
+                        });
+                    });
+
+                w.separator();
+                w.horizontal(|u| {
+                    if u.button("yeah").clicked() {
+                        pending_delete = true;
+                    }
+                    if u.button("no").clicked() || u.input(|i| i.key_pressed(egui::Key::Escape)) {
+                        pending_close_delete = true;
+                    }
+                })
+            });
+        }
+
+        if pending_delete {
+            self.delete();
+        }
+        if pending_close_delete {
+            self.close_modal(ModalType::Delete);
         }
     }
 }

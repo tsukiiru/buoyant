@@ -13,6 +13,7 @@ pub struct Modals {
     pub create_file: Option<InputModal>,
     pub create_folder: Option<InputModal>,
     pub paste: Option<ChoiceModal>,
+    pub delete: Option<ChoiceModal>,
 }
 
 impl Default for Modals {
@@ -22,6 +23,7 @@ impl Default for Modals {
             create_file: None,
             create_folder: None,
             paste: None,
+            delete: None,
         }
     }
 }
@@ -31,6 +33,7 @@ pub enum ModalType {
     CreateFile,
     CreateFolder,
     Paste,
+    Delete,
 }
 
 // modal for inputting text
