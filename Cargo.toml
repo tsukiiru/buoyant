@@ -8,6 +8,7 @@ chrono = "0.4.44"
 eframe = "0.35.0"
 rayon = "1.12.0"
 serde = "1.0.228"
+tokio = { version="1.52.3", features= ["full"] }
 toml = { version = "1.1.2", features = ["serde"] }
 
 [profile.release]

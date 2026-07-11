@@ -1,6 +1,5 @@
 use std::{
     collections::HashSet,
-    ops::{Deref, DerefMut},
     path::{Path, PathBuf},
     time::{Duration, Instant},
 };
@@ -142,14 +141,13 @@ impl Default for Entries {
     }
 }
 
-#[derive(Eq, Hash, PartialEq)]
+#[derive(Debug)]
 pub struct Toast {
     pub title: String,
     pub content: String,
     pub start_time: Instant,
     pub duration: Duration,
     pub kind: ToastKind,
-    pub id: usize,
 }
 
 impl Default for Toast {
@@ -158,15 +156,15 @@ impl Default for Toast {
             title: String::new(),
             content: String::new(),
             start_time: Instant::now(),
-            duration: Duration::from_millis(0),
+            duration: Duration::ZERO,
             kind: ToastKind::Info,
-            id: 0,
         }
     }
 }
 
-#[derive(Eq, Hash, PartialEq)]
+#[derive(Debug)]
 pub enum ToastKind {
     Info,
     Danger,
+    Success,
 }

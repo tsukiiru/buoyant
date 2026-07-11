@@ -3,11 +3,14 @@ mod types;
 
 use chrono::{DateTime, Datelike, Utc};
 use eframe::egui::{
-    Align, Button, CentralPanel, Color32, Context, Frame, Grid, Id, Key, Label, Modal, RichText,
-    ScrollArea, Sense, Stroke, TextEdit, Ui, Vec2,
+    Align, Align2, Button, CentralPanel, Color32, Context, Frame, Grid, Id, Key, Label, Modal,
+    ProgressBar, RichText, ScrollArea, Sense, Stroke, TextEdit, Ui, Vec2, Window,
 };
 use rayon::{
-    iter::{IntoParallelRefIterator, ParallelIterator},
+    iter::{
+        IndexedParallelIterator, IntoParallelRefIterator, IntoParallelRefMutIterator,
+        ParallelIterator,
+    },
     slice::ParallelSliceMut,
 };
 use std::{
@@ -16,8 +19,10 @@ use std::{
     ops::Sub,
     path::{Path, PathBuf},
     process::Command,
-    sync::Mutex,
+    sync::{Arc, Mutex},
+    time::{Duration, Instant},
 };
+use tokio;
 
 use crate::{file_system::BANNED_CHARACTERS, types::*};
 
@@ -31,7 +36,8 @@ pub enum Property {
     Size,
 }
 
-fn main() -> eframe::Result {
+#[tokio::main]
+async fn main() -> eframe::Result {
     let native_opts = eframe::NativeOptions::default();
 
     eframe::run_native(
@@ -40,6 +46,8 @@ fn main() -> eframe::Result {
         Box::new(|cc| Ok(Box::new(App::new(cc)))),
     )
 }
+
+type Toasts = Arc<Mutex<Vec<Toast>>>;
 
 struct App {
     ctx: Context,
@@ -51,7 +59,7 @@ struct App {
     modals: Modals,
     view_hidden: bool,
     sorting_by: Property,
-    toasts: Vec<Mutex<Toast>>, // mhm toasts
+    toasts: Toasts, // mhm toasts
 }
 
 impl App {
@@ -66,7 +74,7 @@ impl App {
             current_index: None,
             view_hidden: true,
             sorting_by: Property::Name,
-            toasts: Vec::with_capacity(5),
+            toasts: Arc::new(Mutex::new(Vec::with_capacity(5))),
         };
         app.fetch_entries(None);
 
@@ -87,7 +95,12 @@ impl App {
         let fetch_current_path = file_system::read_dir(&self.current_path);
 
         if let Err(err) = &fetch_current_path {
-            println!("{}", err);
+            self.new_toast(
+                String::from("Error"),
+                err.to_owned(),
+                ToastKind::Danger,
+                Duration::from_millis(5000),
+            );
         }
 
         let mut index: usize = 0;
@@ -230,7 +243,7 @@ impl App {
         match sorting_by {
             Property::Name => {
                 let mut lowercased: Vec<(usize, String)> = displaying
-                    .iter()
+                    .par_iter()
                     .map(|&entry_index| {
                         (
                             entry_index,
@@ -241,8 +254,8 @@ impl App {
 
                 lowercased.par_sort_by(|a, b| a.1.cmp(&b.1));
                 displaying
-                    .iter_mut()
-                    .zip(lowercased.iter())
+                    .par_iter_mut()
+                    .zip(lowercased.par_iter())
                     .for_each(|(d, (i, _))| *d = *i);
             }
             Property::Size => displaying.par_sort_by(|a, b| {
@@ -271,7 +284,12 @@ impl App {
         if to.is_file() {
             let res = Command::new("xdg-open").arg(to).spawn();
             if let Err(err) = res {
-                println!("{}", err);
+                self.new_toast(
+                    String::from("Error"),
+                    err.to_string(),
+                    ToastKind::Danger,
+                    Duration::from_millis(5000),
+                );
             }
             return;
         }
@@ -349,6 +367,14 @@ impl App {
                 rename_modal
                     .error
                     .push_str("Containing invalid characters!");
+                /*
+                self.new_toast(
+                    String::from("Renaming"),
+                    String::from("Containing invalid characters"),
+                    ToastKind::Danger,
+                    Duration::from_millis(10000),
+                );
+                */
                 return;
             }
         }
@@ -509,6 +535,32 @@ impl App {
 
     fn clear_selected(&mut self) {
         self.selected.clear();
+    }
+
+    fn new_toast(&self, title: String, content: String, kind: ToastKind, duration: Duration) {
+        let toasts = Arc::clone(&self.toasts);
+
+        tokio::spawn(async move {
+            let id = {
+                let mut list = toasts.lock().unwrap();
+                let toast = Toast {
+                    title,
+                    content,
+                    kind,
+                    duration,
+                    ..Default::default()
+                };
+                let instant = toast.start_time.clone();
+                list.push(toast);
+
+                instant
+            };
+
+            tokio::time::sleep(duration).await;
+
+            let mut list = toasts.lock().unwrap();
+            list.retain(|t| t.start_time != id);
+        });
     }
 }
 
@@ -989,6 +1041,52 @@ impl eframe::App for App {
 
         if pending_close_metadata {
             self.close_modal(ModalKind::Metadata);
+        }
+
+        let toasts_opt = self.toasts.clone();
+
+        if let Ok(toast_list) = toasts_opt.try_lock()
+            && toast_list.len() > 0
+        {
+            let toast_overlay = Window::new("toast")
+                .interactable(false)
+                .title_bar(false)
+                .frame(Frame::NONE)
+                .anchor(Align2::RIGHT_BOTTOM, Vec2::new(-8.0, -8.0))
+                .resizable(false);
+
+            toast_overlay.show(ui, |overlay| {
+                for toast in toast_list.iter() {
+                    let mut frame = Frame::new()
+                        .corner_radius(4.0)
+                        .stroke(Stroke::new(1.0, Color32::TRANSPARENT))
+                        .fill(Color32::BLACK)
+                        .inner_margin(4.0)
+                        .outer_margin(4.0);
+
+                    match toast.kind {
+                        ToastKind::Info => frame.stroke.color = Color32::LIGHT_BLUE,
+                        ToastKind::Danger => frame.stroke.color = Color32::LIGHT_RED,
+                        ToastKind::Success => frame.stroke.color = Color32::LIGHT_GREEN,
+                    }
+
+                    frame.show(overlay, |fr| {
+                        fr.vertical(|hor| {
+                            let instant = Instant::now();
+                            let delta = instant.duration_since(toast.start_time);
+
+                            hor.label(toast.title.clone());
+                            hor.label(toast.content.clone());
+                            hor.add(
+                                ProgressBar::new(delta.div_duration_f32(toast.duration))
+                                    .corner_radius(2.0)
+                                    .desired_height(6.0)
+                                    .fill(Color32::WHITE.gamma_multiply(0.4)),
+                            );
+                        });
+                    });
+                }
+            });
         }
     }
 }
