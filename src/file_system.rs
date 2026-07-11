@@ -1,4 +1,4 @@
-use crate::types::PasteType;
+use crate::types::PasteKind;
 use rayon::iter::{IntoParallelRefIterator, ParallelIterator};
 use std::{
     collections::HashSet,
@@ -81,7 +81,7 @@ pub fn create(current_path: &Path, new_path: &Path, last_is_file: bool) -> Optio
 fn paste<'a>(
     dest: &Path,
     prevs: &mut Vec<&'a str>,
-    paste_type: &PasteType,
+    paste_type: &PasteKind,
     path: &'a Path,
     is_cut: bool, // true - cut. false - copy
 ) {
@@ -97,7 +97,7 @@ fn paste<'a>(
     }
 
     match paste_type {
-        PasteType::Duplicate => {
+        PasteKind::Duplicate => {
             let result = file_extension(path);
             let ext = if result == "" {
                 String::new()
@@ -108,7 +108,7 @@ fn paste<'a>(
             let new_path = increment_suffix(&file_name(path), ext.as_str(), &final_path);
             move_file(path, &new_path, is_cut);
         }
-        PasteType::Replace => {
+        PasteKind::Replace => {
             if path == joined {
                 return;
                 // does nothing if trying to merge with the same destination as start
@@ -154,7 +154,7 @@ fn file_extension(path: &Path) -> &str {
     }
 }
 
-pub fn move_dir(old_files: &HashSet<PathBuf>, dest: &Path, operation: &PasteType) {
+pub fn move_dir(old_files: &HashSet<PathBuf>, dest: &Path, operation: &PasteKind) {
     if !dest.exists() || !dest.is_dir() {
         return;
     }
@@ -176,7 +176,7 @@ pub fn move_dir(old_files: &HashSet<PathBuf>, dest: &Path, operation: &PasteType
     })
 }
 
-pub fn copy_dir(old_files: &HashSet<PathBuf>, dest: &Path, operation: &PasteType) {
+pub fn copy_dir(old_files: &HashSet<PathBuf>, dest: &Path, operation: &PasteKind) {
     if !dest.exists() || !dest.is_dir() {
         return;
     }

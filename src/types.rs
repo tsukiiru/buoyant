@@ -1,9 +1,11 @@
 use std::{
     collections::HashSet,
+    ops::{Deref, DerefMut},
     path::{Path, PathBuf},
+    time::{Duration, Instant},
 };
 
-pub enum PasteType {
+pub enum PasteKind {
     Replace,
     Duplicate,
 }
@@ -30,7 +32,7 @@ impl Default for Modals {
     }
 }
 
-pub enum ModalType {
+pub enum ModalKind {
     Rename,
     CreateFile,
     CreateFolder,
@@ -138,4 +140,33 @@ impl Default for Entries {
             displaying: Vec::with_capacity(30),
         }
     }
+}
+
+#[derive(Eq, Hash, PartialEq)]
+pub struct Toast {
+    pub title: String,
+    pub content: String,
+    pub start_time: Instant,
+    pub duration: Duration,
+    pub kind: ToastKind,
+    pub id: usize,
+}
+
+impl Default for Toast {
+    fn default() -> Self {
+        Toast {
+            title: String::new(),
+            content: String::new(),
+            start_time: Instant::now(),
+            duration: Duration::from_millis(0),
+            kind: ToastKind::Info,
+            id: 0,
+        }
+    }
+}
+
+#[derive(Eq, Hash, PartialEq)]
+pub enum ToastKind {
+    Info,
+    Danger,
 }
