@@ -1,10 +1,11 @@
+mod config;
 mod file_system;
 mod types;
 
 use chrono::{DateTime, Datelike, Utc};
 use eframe::egui::{
-    Align, Align2, Button, CentralPanel, Color32, Context, Frame, Grid, Id, Key, Label, Modal,
-    ProgressBar, RichText, ScrollArea, Sense, Stroke, TextEdit, Ui, Vec2, Window,
+    Align, Align2, Button, CentralPanel, Color32, Context, Event, Frame, Grid, Id, Key, Label,
+    Modal, Modifiers, ProgressBar, RichText, ScrollArea, Sense, Stroke, TextEdit, Ui, Vec2, Window,
 };
 use rayon::{
     iter::{
@@ -24,7 +25,7 @@ use std::{
 };
 use tokio;
 
-use crate::{file_system::BANNED_CHARACTERS, types::*};
+use crate::{config::*, file_system::BANNED_CHARACTERS, types::*};
 
 #[derive(PartialEq, Default)]
 pub enum Property {
@@ -59,6 +60,7 @@ struct App {
     modals: Modals,
     view_hidden: bool,
     sorting_by: Property,
+    config: Config,
     toasts: Toasts, // mhm toasts
 }
 
@@ -74,9 +76,11 @@ impl App {
             current_index: None,
             view_hidden: true,
             sorting_by: Property::Name,
+            config: Config::default(),
             toasts: Arc::new(Mutex::new(Vec::with_capacity(5))),
         };
         app.fetch_entries(None);
+        config::fetch(&mut app.config);
 
         app
     }
@@ -280,7 +284,16 @@ impl App {
         // check if reversed
     }
 
-    fn nav(&mut self, to: &Path) {
+    fn nav_forward(&mut self) {
+        let cur_index = &self.current_index;
+
+        if cur_index.is_none() {
+            return;
+        }
+
+        let cur_index = cur_index.unwrap();
+        let to = &self.entries.entry(&cur_index).unwrap().path;
+
         if to.is_file() {
             let res = Command::new("xdg-open").arg(to).spawn();
             if let Err(err) = res {
@@ -302,8 +315,9 @@ impl App {
     }
 
     fn nav_back(&mut self) {
+        let old_path = self.current_path.clone();
         self.current_path.pop();
-        self.fetch_entries(Some(self.current_path.clone()));
+        self.fetch_entries(Some(old_path));
     }
 
     fn delete(&mut self) {
@@ -487,15 +501,50 @@ impl App {
         self.fetch_entries(None);
     }
 
-    fn swap_selected(&mut self, index: usize) {
-        let entry_index_opt = self.entries.displaying.get(index);
-        if let Some(entry_index) = entry_index_opt
-            && !self.selected.contains(entry_index)
-        {
-            self.selected.insert(*entry_index);
+    fn navigate_index(&mut self, direction: &NavigateDirection, is_ctrled: bool, is_shifted: bool) {
+        let index_opt = self.current_index.as_mut();
+        let mut current_index: usize = 0;
+
+        if index_opt.is_none() {
+            self.modify_selected(0, is_ctrled, is_shifted);
+            return;
+        } else if let Some(index) = index_opt {
+            current_index = *index;
         }
 
-        self.current_index = Some(index);
+        match direction {
+            NavigateDirection::Down => {
+                if current_index < self.entries.displaying.len() - 1 {
+                    current_index += 1;
+                }
+            }
+            NavigateDirection::Up => {
+                if !(current_index == 0) {
+                    current_index -= 1;
+                }
+            }
+        }
+
+        self.modify_selected(current_index, is_ctrled, is_shifted);
+    }
+
+    fn swap_selected(&mut self, index: &usize) {
+        // exclusively for right clicking
+        // - 1 selected: swapping
+        // - >= 2 selected: add to the selected
+        let entry_index_opt = self.entries.displaying.get(*index);
+        let selected = &mut self.selected;
+
+        if let Some(entry_index) = entry_index_opt
+            && !selected.contains(entry_index)
+        {
+            if selected.len() == 1 {
+                selected.clear();
+            }
+            selected.insert(*entry_index);
+        }
+
+        self.current_index = Some(*index);
     }
 
     fn modify_selected(&mut self, index: usize, is_ctrled: bool, is_shifted: bool) {
@@ -565,8 +614,102 @@ impl App {
 }
 
 impl eframe::App for App {
+    fn logic(&mut self, ctx: &eframe::egui::Context, _frame: &mut eframe::Frame) {
+        ctx.clone().input_mut(|i| {
+            for event in &i.events {
+                if let Event::Copy = event {
+                    println!("poop");
+                }
+            }
+
+            let keybinds = &self.config.keybinds;
+            let modifiers = &i.modifiers;
+            let (is_ctrled, is_shifted) = (i.modifiers.ctrl, i.modifiers.shift);
+
+            /*           for event in &i.events {
+                            if let egui::Event::Key {
+                                key,
+                                pressed,
+                                modifiers,
+                                ..
+                            } = event
+                            {
+                                println!("k={:?} p={:?} m={:?}", key, pressed, modifiers);
+                            }
+                        }
+            */
+            if modifiers.matches_logically(keybinds.navigate_up.modifiers)
+                && i.key_pressed(keybinds.navigate_up.logical_key)
+            {
+                self.navigate_index(&NavigateDirection::Up, is_ctrled, is_shifted);
+            } else if modifiers.matches_logically(keybinds.navigate_down.modifiers)
+                && i.key_pressed(keybinds.navigate_down.logical_key)
+            {
+                self.navigate_index(&NavigateDirection::Down, is_ctrled, is_shifted);
+            } else if modifiers.matches_logically(keybinds.navigate_forward.modifiers)
+                && i.key_pressed(keybinds.navigate_forward.logical_key)
+            {
+                self.nav_forward();
+            } else if modifiers.matches_logically(keybinds.navigate_backward.modifiers)
+                && i.key_pressed(keybinds.navigate_backward.logical_key)
+            {
+                self.nav_back();
+            } else if modifiers.matches_logically(keybinds.copy_to_clipboard.modifiers)
+                && i.key_pressed(keybinds.copy_to_clipboard.logical_key)
+            {
+                println!("clip");
+                self.add_to_clipboard(ClipboardMode::Copy);
+            } else if modifiers.matches_logically(keybinds.cut_to_clipboard.modifiers)
+                && i.key_pressed(keybinds.cut_to_clipboard.logical_key)
+            {
+                println!("clipped");
+                self.add_to_clipboard(ClipboardMode::Cut);
+            } else if modifiers.matches_logically(keybinds.paste_from_clipboard.modifiers)
+                && i.key_pressed(keybinds.paste_from_clipboard.logical_key)
+            {
+                println!("pat");
+                self.new_modal(ModalKind::Paste);
+            } else if modifiers.matches_logically(keybinds.clear_clipboard.modifiers)
+                && i.key_pressed(keybinds.clear_clipboard.logical_key)
+            {
+                self.clear_clipboard();
+            } else if modifiers.matches_logically(keybinds.delete_selections.modifiers)
+                && i.key_pressed(keybinds.delete_selections.logical_key)
+            {
+                self.new_modal(ModalKind::Delete);
+            } else if modifiers.matches_logically(keybinds.rename_file.modifiers)
+                && i.key_pressed(keybinds.rename_file.logical_key)
+            {
+                self.new_modal(ModalKind::Rename);
+            } else if modifiers.matches_logically(keybinds.toggle_hidden_view.modifiers)
+                && i.key_pressed(keybinds.toggle_hidden_view.logical_key)
+            {
+                self.view_hidden = !self.view_hidden;
+                self.filter_entries(None);
+            } else if modifiers.matches_logically(keybinds.create_file_path.modifiers)
+                && i.key_pressed(keybinds.create_file_path.logical_key)
+            {
+                self.new_modal(ModalKind::CreateFile);
+            } else if modifiers.matches_logically(keybinds.create_folder_path.modifiers)
+                && i.key_pressed(keybinds.create_folder_path.logical_key)
+            {
+                self.new_modal(ModalKind::CreateFolder);
+            } else if modifiers.matches_logically(keybinds.toggle_visual_mode.modifiers)
+                && i.key_pressed(keybinds.toggle_visual_mode.logical_key)
+            {
+            } else if modifiers.matches_logically(keybinds.refresh.modifiers)
+                && i.key_pressed(keybinds.refresh.logical_key)
+            {
+            } else if modifiers.matches_logically(keybinds.search.modifiers)
+                && i.key_pressed(keybinds.search.logical_key)
+            {
+            }
+        });
+    }
+
     fn ui(&mut self, ui: &mut Ui, _frame: &mut eframe::Frame) {
         let mut i = 0;
+        let ctx = self.ctx.clone();
 
         CentralPanel::default().show(ui, |ui| {
             ui.horizontal(|ui| {
@@ -614,7 +757,8 @@ impl eframe::App for App {
                     mut pending_swap_selected,
                     mut pending_modify_selected,
                     mut pending_metadata_modal,
-                ) = (None, None, None, None, None, None);
+                    mut pending_nav,
+                ) = (None, None, None, None, None, None, false);
 
                 for (index, entry_index) in self.entries.displaying.clone().into_iter().enumerate()
                 {
@@ -633,7 +777,6 @@ impl eframe::App for App {
 
                     let entry = entry_opt.unwrap();
 
-                    let mut pending_nav = None;
                     ui.horizontal(|ui| {
                         let mut frame = Frame::NONE
                             .inner_margin(8.0)
@@ -700,28 +843,22 @@ impl eframe::App for App {
                             }
                         });
 
-                        let mut double_clicking = false;
-                        if btn_response.double_clicked() {
-                            double_clicking = true;
-                            pending_nav = Some(entry.path.clone());
+                        if btn_response.clicked() {
+                            pending_modify_selected = Some(index);
                         }
 
-                        if btn_response.clicked() && !double_clicking {
-                            pending_modify_selected = Some(index);
+                        if btn_response.double_clicked() {
+                            pending_nav = true;
                         }
 
                         if btn_response.secondary_clicked() {
                             pending_swap_selected = Some(index);
                         }
                     });
-
-                    if let Some(path) = pending_nav {
-                        self.nav(&path);
-                    }
                 }
 
                 if let Some(index) = pending_swap_selected {
-                    self.swap_selected(index);
+                    self.swap_selected(&index);
                 }
 
                 if pending_rename.is_some() {
@@ -739,6 +876,10 @@ impl eframe::App for App {
                         ui.input(|i| i.key_down(Key::ShiftLeft) || i.key_down(Key::ShiftRight));
 
                     self.modify_selected(index, ctrl_pressed, shift_pressed);
+                }
+
+                if pending_nav {
+                    self.nav_forward();
                 }
 
                 if let Some(mode) = pending_clipboard {
@@ -850,7 +991,7 @@ impl eframe::App for App {
             let mut content = modal.content.clone();
             let error = &modal.error.clone();
 
-            modal_widget.show(&self.ctx.clone(), |ui| {
+            modal_widget.show(&ctx, |ui| {
                 ui.heading("renaming");
                 let input = ui.add(TextEdit::singleline(&mut content));
                 ui.add(Label::new(RichText::new(error).color(Color32::LIGHT_RED)));
@@ -876,7 +1017,7 @@ impl eframe::App for App {
             let mut content = modal.content.clone();
             let error = modal.error.clone();
 
-            modal_widget.show(&self.ctx.clone(), |ui| {
+            modal_widget.show(&ctx, |ui| {
                 ui.label(format!("creating file at {}", self.current_path.display()));
                 let input = ui.add(TextEdit::singleline(&mut content));
                 ui.add(Label::new(RichText::new(error).color(Color32::LIGHT_RED)));
@@ -902,7 +1043,7 @@ impl eframe::App for App {
             let mut content = modal.content.clone();
             let error = &modal.error.clone();
 
-            modal_widget.show(&self.ctx.clone(), |ui| {
+            modal_widget.show(&ctx, |ui| {
                 ui.label(format!(
                     "creating folder at {}",
                     self.current_path.display()
@@ -931,7 +1072,7 @@ impl eframe::App for App {
         if let Some(_modal) = &self.modals.paste {
             let modal_widget = Modal::new(Id::new("paste_modal"));
 
-            modal_widget.show(&self.ctx.clone(), |ui| {
+            modal_widget.show(&ctx, |ui| {
                 ui.heading("choose pasting type");
 
                 ui.vertical(|ui| {
@@ -975,7 +1116,7 @@ impl eframe::App for App {
                 })
                 .collect::<Vec<&Path>>();
 
-            modal_widget.show(&self.ctx.clone(), |w| {
+            modal_widget.show(&ctx, |w| {
                 w.label("are you sure you wanna delete these?");
 
                 Frame::new()
@@ -1015,7 +1156,7 @@ impl eframe::App for App {
             let modal_widget = Modal::new(Id::new("metadata_modal"));
             let entry = &self.entries.entry(&self.current_index.unwrap()).unwrap();
 
-            modal_widget.show(&self.ctx.clone(), |m| {
+            modal_widget.show(&ctx, |m| {
                 m.label(format!("showing metadata for {}", entry.name));
                 m.separator();
                 m.label(format!("full path: {}", entry.path.display()));

@@ -1,0 +1,334 @@
+use std::{env, fs};
+
+use eframe::egui::{Key, KeyboardShortcut, Modifiers};
+use serde::Deserialize;
+
+pub struct Config {
+    pub keybinds: Keybinds,
+}
+
+impl Default for Config {
+    fn default() -> Self {
+        Config {
+            keybinds: Keybinds::default(),
+        }
+    }
+}
+
+pub struct Keybinds {
+    pub navigate_up: KeyboardShortcut,
+    pub navigate_down: KeyboardShortcut,
+    pub navigate_forward: KeyboardShortcut,
+    pub navigate_backward: KeyboardShortcut,
+    pub copy_to_clipboard: KeyboardShortcut,
+    pub cut_to_clipboard: KeyboardShortcut,
+    pub paste_from_clipboard: KeyboardShortcut,
+    pub clear_clipboard: KeyboardShortcut,
+    pub delete_selections: KeyboardShortcut,
+    pub rename_file: KeyboardShortcut,
+    pub toggle_hidden_view: KeyboardShortcut,
+    pub create_file_path: KeyboardShortcut,
+    pub create_folder_path: KeyboardShortcut,
+    pub toggle_visual_mode: KeyboardShortcut,
+    pub refresh: KeyboardShortcut,
+    pub search: KeyboardShortcut,
+}
+
+const NONE: Modifiers = Modifiers::NONE;
+pub const CTRL: Modifiers = Modifiers::CTRL.plus(Modifiers::COMMAND);
+// egui registers ctrl as ctrl + command
+const SHIFT: Modifiers = Modifiers::SHIFT;
+const ALT: Modifiers = Modifiers::ALT;
+const CTRL_SHIFT: Modifiers = Modifiers::CTRL.plus(SHIFT);
+
+impl Default for Keybinds {
+    fn default() -> Self {
+        Keybinds {
+            navigate_up: bind(NONE, Key::ArrowUp),
+            navigate_down: bind(NONE, Key::ArrowDown),
+            navigate_forward: bind(NONE, Key::ArrowRight),
+            navigate_backward: bind(NONE, Key::ArrowLeft),
+            copy_to_clipboard: bind(CTRL, Key::C),
+            cut_to_clipboard: bind(CTRL, Key::X),
+            paste_from_clipboard: bind(CTRL, Key::V),
+            clear_clipboard: bind(CTRL_SHIFT, Key::V),
+            delete_selections: bind(NONE, Key::Delete),
+            rename_file: bind(NONE, Key::F2),
+            toggle_hidden_view: bind(CTRL, Key::H),
+            create_file_path: bind(CTRL, Key::N),
+            create_folder_path: bind(ALT, Key::N),
+            toggle_visual_mode: bind(NONE, Key::V),
+            refresh: bind(CTRL, Key::R),
+            search: bind(NONE, Key::Slash),
+        }
+    }
+}
+
+fn bind(modifiers: Modifiers, key: Key) -> KeyboardShortcut {
+    KeyboardShortcut::new(modifiers, key)
+}
+
+pub fn fetch(config: &mut Config) {
+    let home_dir = env::home_dir();
+
+    if home_dir.is_none() {
+        println!("cannot get HOME directory!");
+    }
+
+    let config_dir = home_dir.unwrap().join(".config/buoyant/buoyant.toml");
+    let read_content = fs::read_to_string(&config_dir);
+
+    if let Ok(content) = read_content {
+        let raw_config: RawConfig = toml::from_str(&content).unwrap();
+        process_raw_config(&raw_config, config);
+    }
+}
+
+#[derive(Deserialize)]
+struct RawConfig {
+    keybinds: Option<RawKeybinds>,
+}
+
+fn process_raw_config(raw_config: &RawConfig, config: &mut Config) {
+    if let Some(table) = &raw_config.keybinds {
+        process_raw_keybinds(&table, &mut config.keybinds);
+    }
+}
+
+#[derive(Deserialize)]
+struct RawKeybinds {
+    pub navigate_up: Option<String>,
+    pub navigate_down: Option<String>,
+    pub navigate_forward: Option<String>,
+    pub navigate_backward: Option<String>,
+    pub copy_to_clipboard: Option<String>,
+    pub cut_to_clipboard: Option<String>,
+    pub paste_from_clipboard: Option<String>,
+    pub clear_clipboard: Option<String>,
+    pub delete_selections: Option<String>,
+    pub rename_file: Option<String>,
+    pub toggle_hidden_view: Option<String>,
+    pub create_file_path: Option<String>,
+    pub create_folder_path: Option<String>,
+    pub toggle_visual_mode: Option<String>,
+    pub refresh: Option<String>,
+    pub search: Option<String>,
+}
+
+fn process_raw_keybinds(raw_keybinds: &RawKeybinds, kb_config: &mut Keybinds) {
+    if let Some(key_str) = &raw_keybinds.navigate_up
+        && let Some(fresh_key) = match_key(key_str)
+    {
+        kb_config.navigate_up = fresh_key;
+    }
+    if let Some(key_str) = &raw_keybinds.navigate_down
+        && let Some(fresh_key) = match_key(key_str)
+    {
+        kb_config.navigate_down = fresh_key;
+    }
+    if let Some(key_str) = &raw_keybinds.navigate_forward
+        && let Some(fresh_key) = match_key(key_str)
+    {
+        kb_config.navigate_forward = fresh_key;
+    }
+    if let Some(key_str) = &raw_keybinds.navigate_backward
+        && let Some(fresh_key) = match_key(key_str)
+    {
+        kb_config.navigate_backward = fresh_key;
+    }
+    if let Some(key_str) = &raw_keybinds.copy_to_clipboard
+        && let Some(fresh_key) = match_key(key_str)
+    {
+        kb_config.copy_to_clipboard = fresh_key;
+    }
+    if let Some(key_str) = &raw_keybinds.cut_to_clipboard
+        && let Some(fresh_key) = match_key(key_str)
+    {
+        kb_config.cut_to_clipboard = fresh_key;
+    }
+    if let Some(key_str) = &raw_keybinds.paste_from_clipboard
+        && let Some(fresh_key) = match_key(key_str)
+    {
+        kb_config.paste_from_clipboard = fresh_key;
+    }
+    if let Some(key_str) = &raw_keybinds.clear_clipboard
+        && let Some(fresh_key) = match_key(key_str)
+    {
+        kb_config.clear_clipboard = fresh_key;
+    }
+    if let Some(key_str) = &raw_keybinds.delete_selections
+        && let Some(fresh_key) = match_key(key_str)
+    {
+        kb_config.delete_selections = fresh_key;
+    }
+    if let Some(key_str) = &raw_keybinds.rename_file
+        && let Some(fresh_key) = match_key(key_str)
+    {
+        kb_config.rename_file = fresh_key;
+    }
+    if let Some(key_str) = &raw_keybinds.toggle_hidden_view
+        && let Some(fresh_key) = match_key(key_str)
+    {
+        kb_config.toggle_hidden_view = fresh_key;
+    }
+    if let Some(key_str) = &raw_keybinds.create_file_path
+        && let Some(fresh_key) = match_key(key_str)
+    {
+        kb_config.create_file_path = fresh_key;
+    }
+    if let Some(key_str) = &raw_keybinds.create_folder_path
+        && let Some(fresh_key) = match_key(key_str)
+    {
+        kb_config.create_folder_path = fresh_key;
+    }
+    if let Some(key_str) = &raw_keybinds.toggle_visual_mode
+        && let Some(fresh_key) = match_key(key_str)
+    {
+        kb_config.toggle_visual_mode = fresh_key;
+    }
+    if let Some(key_str) = &raw_keybinds.refresh
+        && let Some(fresh_key) = match_key(key_str)
+    {
+        kb_config.refresh = fresh_key;
+    }
+    if let Some(key_str) = &raw_keybinds.search
+        && let Some(fresh_key) = match_key(key_str)
+    {
+        kb_config.search = fresh_key
+    }
+}
+
+fn match_key(raw_key: &str) -> Option<KeyboardShortcut> {
+    // keybind format: [whatever modifiers you have here, separated by "+"] + [main key (the last one)]
+    let raw_key = raw_key.to_lowercase();
+    let mut splitted = raw_key.split("+").map(|s| s.trim()).collect::<Vec<&str>>();
+
+    if splitted.len() <= 0 {
+        println!("keybind cannot be 0 character long");
+        return None;
+    }
+
+    let mut result = bind(NONE, Key::F35);
+    let raw_key = splitted.pop().unwrap();
+
+    result.logical_key = match raw_key.to_lowercase().as_str() {
+        "a" => Key::A,
+        "b" => Key::B,
+        "c" => Key::C,
+        "d" => Key::D,
+        "e" => Key::E,
+        "f" => Key::F,
+        "g" => Key::G,
+        "h" => Key::H,
+        "i" => Key::I,
+        "j" => Key::J,
+        "k" => Key::K,
+        "l" => Key::L,
+        "m" => Key::M,
+        "n" => Key::N,
+        "o" => Key::O,
+        "p" => Key::P,
+        "q" => Key::Q,
+        "r" => Key::R,
+        "t" => Key::T,
+        "u" => Key::U,
+        "v" => Key::V,
+        "y" => Key::Y,
+        "w" => Key::W,
+        "z" => Key::Z,
+        "arrowup" => Key::ArrowUp,
+        "arrowdown" => Key::ArrowDown,
+        "arrowright" => Key::ArrowRight,
+        "arrowleft" => Key::ArrowLeft,
+        "`" => Key::Backtick,
+        "[" => Key::OpenBracket,
+        "]" => Key::CloseBracket,
+        "," => Key::Comma,
+        "=" => Key::Equals,
+        "-" => Key::Minus,
+        "." => Key::Period,
+        "'" => Key::Quote,
+        ";" => Key::Semicolon,
+        "/" => Key::Slash,
+        "?" => Key::Questionmark,
+        "|" => Key::Pipe,
+        "backspace" => Key::Backspace,
+        "enter" => Key::Enter,
+        "space" => Key::Space,
+        "tab" => Key::Tab,
+        "delete" => Key::Delete,
+        "end" => Key::End,
+        "home" => Key::Home,
+        "insert" => Key::Insert,
+        "pagedown" => Key::PageDown,
+        "pageup" => Key::PageUp,
+        "escape" => Key::Escape,
+        "0" => Key::Num0,
+        "1" => Key::Num1,
+        "2" => Key::Num2,
+        "3" => Key::Num3,
+        "4" => Key::Num4,
+        "5" => Key::Num5,
+        "6" => Key::Num6,
+        "7" => Key::Num7,
+        "8" => Key::Num8,
+        "9" => Key::Num9,
+        "f1" => Key::F1,
+        "f2" => Key::F2,
+        "f3" => Key::F3,
+        "f4" => Key::F4,
+        "f5" => Key::F5,
+        "f6" => Key::F6,
+        "f7" => Key::F7,
+        "f8" => Key::F8,
+        "f9" => Key::F9,
+        "f10" => Key::F10,
+        "f11" => Key::F11,
+        "f12" => Key::F12,
+        "f13" => Key::F13,
+        "f14" => Key::F14,
+        "f15" => Key::F15,
+        "f16" => Key::F16,
+        "f17" => Key::F17,
+        "f18" => Key::F18,
+        "f19" => Key::F19,
+        "f20" => Key::F20,
+        "f21" => Key::F21,
+        "f22" => Key::F22,
+        "f23" => Key::F23,
+        "f24" => Key::F24,
+        "f25" => Key::F25,
+        "f26" => Key::F26,
+        "f27" => Key::F27,
+        "f28" => Key::F28,
+        "f29" => Key::F29,
+        "f30" => Key::F30,
+        "f31" => Key::F31,
+        "f32" => Key::F32,
+        "f33" => Key::F33,
+        "f34" => Key::F34,
+        "f35" => Key::F35,
+        _ => Key::F35,
+    };
+
+    let raw_modifiers = splitted;
+
+    if raw_modifiers.is_empty() {
+        return Some(result);
+    }
+
+    let fresh_modifiers = NONE;
+
+    for raw_mod in raw_modifiers.iter() {
+        fresh_modifiers.plus(match *raw_mod {
+            "ctrl" => CTRL,
+            "shift" => SHIFT,
+            "alt" => ALT,
+            _ => NONE,
+        });
+    }
+
+    result.modifiers = fresh_modifiers;
+
+    Some(result)
+}

@@ -168,3 +168,8 @@ pub enum ToastKind {
     Danger,
     Success,
 }
+
+pub enum NavigateDirection {
+    Up,
+    Down,
+}
