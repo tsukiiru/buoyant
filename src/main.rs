@@ -1,5 +1,6 @@
 mod config;
 mod file_system;
+mod file_types;
 mod types;
 
 use chrono::{DateTime, Datelike, Utc};
@@ -34,7 +35,7 @@ pub enum Property {
     Name,
     Accessed,
     Created,
-    Kind,
+    Type,
     Size,
 }
 
@@ -122,6 +123,7 @@ impl App {
             KeybindAction::NavigateUp => {
                 self.navigate_index(&NavigateDirection::Up, is_ctrled, is_shifted)
             }
+
             KeybindAction::NavigateDown => {
                 self.navigate_index(&NavigateDirection::Down, is_ctrled, is_shifted);
             }
@@ -219,6 +221,7 @@ impl App {
         // clear entries
         self.entries.children.iter_mut().for_each(|e| {
             e.name.clear();
+            e.file_type.clear();
             e.path = PathBuf::new();
             e.using = false;
             e.accessed = None;
@@ -245,6 +248,7 @@ impl App {
             self.push_entry(
                 &TempEntry {
                     name: path.file_name().unwrap().to_str().unwrap(),
+                    file_type: &file_system::file_type(&path),
                     is_hidden: file_system::is_hidden(&path),
                     path: &path,
                     accessed,
@@ -271,8 +275,9 @@ impl App {
     }
 
     fn push_entry(&mut self, entry: &TempEntry, index: usize) {
-        let (file_size, accessed, created, name, is_hidden, path, folder_size) = (
+        let (file_size, file_type, accessed, created, name, is_hidden, path, folder_size) = (
             entry.file_size,
+            entry.file_type,
             entry.accessed,
             entry.created,
             entry.name,
@@ -292,6 +297,7 @@ impl App {
             entry.folder_size = folder_size;
 
             entry.name.push_str(name);
+            entry.file_type.push_str(file_type);
             entry.path.push(path);
         } else {
             let mut entry = Entry {
@@ -304,6 +310,7 @@ impl App {
                 ..Default::default()
             };
             entry.name.push_str(name);
+            entry.file_type.push_str(file_type);
             entry.path.push(path);
 
             self.entries.children.push(entry);
@@ -404,11 +411,10 @@ impl App {
                 let (x, y) = (&reference[*a].accessed, &reference[*b].accessed);
                 x.cmp(y)
             }),
-            _ => {} /*
-                    Property::Kind => displaying.par_sort_by(|a, b| {
-                        let (x, y) = (&reference[*a].file_type, &reference[*b].file_type);
-                        x.cmp(y)
-                    }),*/
+            Property::Type => displaying.par_sort_by(|a, b| {
+                let (x, y) = (&reference[*a].file_type, &reference[*b].file_type);
+                x.cmp(y)
+            }),
         }
 
         // check if reversed
