@@ -3,19 +3,60 @@ use std::{env, fs};
 use eframe::egui::{Key, KeyboardShortcut, Modifiers};
 use serde::Deserialize;
 
+pub type Keybind = (KeybindAction, KeyboardShortcut);
+
+#[derive(Clone, Debug)]
+pub struct Actions {
+    pub copy: KeybindAction,
+    pub cut: KeybindAction,
+    pub paste: KeybindAction,
+}
+
+impl Default for Actions {
+    fn default() -> Self {
+        Actions {
+            copy: KeybindAction::Copy,
+            cut: KeybindAction::Cut,
+            paste: KeybindAction::Paste,
+        }
+    }
+}
+
 pub struct Config {
-    pub keybinds: Keybinds,
+    keybinds: Keybinds,
+    pub keybinds_list: Vec<Keybind>,
 }
 
 impl Default for Config {
     fn default() -> Self {
         Config {
             keybinds: Keybinds::default(),
+            keybinds_list: Vec::with_capacity(16),
         }
     }
 }
 
-pub struct Keybinds {
+#[derive(Clone, Copy, Debug)]
+pub enum KeybindAction {
+    NavigateUp,
+    NavigateDown,
+    NavigateForward,
+    NavigateBackward,
+    Copy,
+    Cut,
+    Paste,
+    ClearClipboard,
+    Delete,
+    Rename,
+    ToggleHidden,
+    CreateFile,
+    CreateFolder,
+    ToggleVisual,
+    Refresh,
+    Search,
+}
+
+struct Keybinds {
     pub navigate_up: KeyboardShortcut,
     pub navigate_down: KeyboardShortcut,
     pub navigate_forward: KeyboardShortcut,
@@ -82,6 +123,8 @@ pub fn fetch(config: &mut Config) {
         let raw_config: RawConfig = toml::from_str(&content).unwrap();
         process_raw_config(&raw_config, config);
     }
+
+    listing_keybinds(&config.keybinds, &mut config.keybinds_list);
 }
 
 #[derive(Deserialize)]
@@ -331,4 +374,29 @@ fn match_key(raw_key: &str) -> Option<KeyboardShortcut> {
     result.modifiers = fresh_modifiers;
 
     Some(result)
+}
+
+fn listing_keybinds(keybinds: &Keybinds, list: &mut Vec<Keybind>) {
+    list.clear();
+
+    list.push((KeybindAction::NavigateUp, keybinds.navigate_up));
+    list.push((KeybindAction::NavigateDown, keybinds.navigate_down));
+    list.push((KeybindAction::NavigateForward, keybinds.navigate_forward));
+    list.push((KeybindAction::NavigateBackward, keybinds.navigate_backward));
+
+    list.push((KeybindAction::Copy, keybinds.copy_to_clipboard));
+    list.push((KeybindAction::Cut, keybinds.cut_to_clipboard));
+    list.push((KeybindAction::Paste, keybinds.paste_from_clipboard));
+    list.push((KeybindAction::ClearClipboard, keybinds.clear_clipboard));
+
+    list.push((KeybindAction::Delete, keybinds.delete_selections));
+    list.push((KeybindAction::Rename, keybinds.rename_file));
+    list.push((KeybindAction::ToggleHidden, keybinds.toggle_hidden_view));
+
+    list.push((KeybindAction::CreateFile, keybinds.create_file_path));
+    list.push((KeybindAction::CreateFolder, keybinds.create_folder_path));
+
+    list.push((KeybindAction::ToggleVisual, keybinds.toggle_visual_mode));
+    list.push((KeybindAction::Refresh, keybinds.refresh));
+    list.push((KeybindAction::Search, keybinds.search));
 }

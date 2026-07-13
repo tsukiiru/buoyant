@@ -4,8 +4,9 @@ mod types;
 
 use chrono::{DateTime, Datelike, Utc};
 use eframe::egui::{
-    Align, Align2, Button, CentralPanel, Color32, Context, Event, Frame, Grid, Id, Key, Label,
-    Modal, Modifiers, ProgressBar, RichText, ScrollArea, Sense, Stroke, TextEdit, Ui, Vec2, Window,
+    Align, Align2, Button, CentralPanel, Color32, Context, Event, Frame, Grid, Id, Key,
+    KeyboardShortcut, Label, Modal, ProgressBar, RichText, ScrollArea, Sense, Stroke, TextEdit, Ui,
+    Vec2, Window,
 };
 use rayon::{
     iter::{
@@ -61,6 +62,7 @@ struct App {
     view_hidden: bool,
     sorting_by: Property,
     config: Config,
+    actions: Actions,
     toasts: Toasts, // mhm toasts
 }
 
@@ -77,12 +79,140 @@ impl App {
             view_hidden: true,
             sorting_by: Property::Name,
             config: Config::default(),
+            actions: Actions::default(),
             toasts: Arc::new(Mutex::new(Vec::with_capacity(5))),
         };
         app.fetch_entries(None);
         config::fetch(&mut app.config);
+        app.bind_keybinds();
 
         app
+    }
+
+    fn bind_keybinds(&mut self) {
+        let keybinds_list = &mut self.config.keybinds_list;
+        let actions = &mut self.actions;
+        let copy_sc = KeyboardShortcut::new(CTRL, Key::C);
+        let cut_sc = KeyboardShortcut::new(CTRL, Key::X);
+        let paste_sc = KeyboardShortcut::new(CTRL, Key::V);
+
+        for (action, sc) in keybinds_list {
+            if sc.modifiers.matches_logically(copy_sc.modifiers)
+                && sc.logical_key == copy_sc.logical_key
+            {
+                actions.copy = action.clone();
+            }
+
+            if sc.modifiers.matches_logically(cut_sc.modifiers)
+                && sc.logical_key == cut_sc.logical_key
+            {
+                actions.cut = action.clone();
+            }
+
+            if sc.modifiers.matches_logically(paste_sc.modifiers)
+                && sc.logical_key == paste_sc.logical_key
+            {
+                actions.paste = action.clone();
+            }
+        }
+    }
+
+    fn handle_actions(&mut self, action: &KeybindAction, is_ctrled: bool, is_shifted: bool) {
+        match action {
+            KeybindAction::NavigateUp => {
+                self.navigate_index(&NavigateDirection::Up, is_ctrled, is_shifted)
+            }
+            KeybindAction::NavigateDown => {
+                self.navigate_index(&NavigateDirection::Down, is_ctrled, is_shifted);
+            }
+            KeybindAction::NavigateForward => self.nav_forward(),
+            KeybindAction::NavigateBackward => self.nav_back(),
+
+            KeybindAction::Copy => {
+                if self.selected.len() < 1 {
+                    self.new_toast(
+                        String::from("Clipboard"),
+                        String::from("nothing is selected to be copied!"),
+                        ToastKind::Info,
+                        Duration::from_secs(3),
+                    );
+                    return;
+                }
+
+                self.add_to_clipboard(ClipboardMode::Copy);
+            }
+            KeybindAction::Cut => {
+                if self.selected.len() < 1 {
+                    self.new_toast(
+                        String::from("Clipboard"),
+                        String::from("nothing is selected to be cut!"),
+                        ToastKind::Info,
+                        Duration::from_secs(3),
+                    );
+                    return;
+                }
+
+                self.add_to_clipboard(ClipboardMode::Cut);
+            }
+            KeybindAction::Paste => {
+                if self.clipboard.entries.len() < 1 {
+                    self.new_toast(
+                        String::from("Clipboard"),
+                        String::from("nothing is in clipboard to be pasted!"),
+                        ToastKind::Info,
+                        Duration::from_secs(3),
+                    );
+                    return;
+                }
+
+                self.new_modal(ModalKind::Paste);
+            }
+
+            KeybindAction::Delete => {
+                if self.selected.len() < 1 {
+                    self.new_toast(
+                        String::from("Delete"),
+                        String::from("nothing is selected to be deleted!"),
+                        ToastKind::Info,
+                        Duration::from_secs(3),
+                    );
+                    return;
+                }
+
+                self.new_modal(ModalKind::Delete);
+            }
+            KeybindAction::Rename => {
+                if self.current_index.is_none() {
+                    self.new_toast(
+                        String::from("Rename"),
+                        String::from("nothing is selected to rename!"),
+                        ToastKind::Info,
+                        Duration::from_secs(3),
+                    );
+                    return;
+                }
+
+                self.new_modal(ModalKind::Rename);
+            }
+
+            KeybindAction::ClearClipboard => {
+                self.clear_clipboard();
+                self.new_toast(
+                    String::from("Success!"),
+                    String::from("successfully cleared clipboard!"),
+                    ToastKind::Success,
+                    Duration::from_secs(3),
+                );
+            }
+
+            KeybindAction::ToggleHidden => {
+                self.view_hidden = !self.view_hidden;
+                self.fetch_entries(None);
+            }
+            KeybindAction::CreateFile => self.new_modal(ModalKind::CreateFile),
+            KeybindAction::CreateFolder => self.new_modal(ModalKind::CreateFolder),
+            _ => {}
+        }
     }
 
     fn fetch_entries(&mut self, prev_path: Option<PathBuf>) {
@@ -615,96 +745,35 @@ impl App {
 
 impl eframe::App for App {
     fn logic(&mut self, ctx: &eframe::egui::Context, _frame: &mut eframe::Frame) {
+        let mut action_to_handle: Option<KeybindAction> = None;
+        let (mut is_ctrled, mut is_shifted) = (false, false);
         ctx.clone().input_mut(|i| {
+            let actions = self.actions.clone();
+            is_ctrled = i.modifiers.ctrl;
+            is_shifted = i.modifiers.shift;
+
             for event in &i.events {
                 if let Event::Copy = event {
-                    println!("poop");
+                    action_to_handle = Some(actions.copy);
+                }
+                if let Event::Cut = event {
+                    action_to_handle = Some(actions.cut);
+                }
+                if let Event::Paste { .. } = event {
+                    action_to_handle = Some(actions.paste);
                 }
             }
 
-            let keybinds = &self.config.keybinds;
-            let modifiers = &i.modifiers;
-            let (is_ctrled, is_shifted) = (i.modifiers.ctrl, i.modifiers.shift);
-
-            /*           for event in &i.events {
-                            if let egui::Event::Key {
-                                key,
-                                pressed,
-                                modifiers,
-                                ..
-                            } = event
-                            {
-                                println!("k={:?} p={:?} m={:?}", key, pressed, modifiers);
-                            }
-                        }
-            */
-            if modifiers.matches_logically(keybinds.navigate_up.modifiers)
-                && i.key_pressed(keybinds.navigate_up.logical_key)
-            {
-                self.navigate_index(&NavigateDirection::Up, is_ctrled, is_shifted);
-            } else if modifiers.matches_logically(keybinds.navigate_down.modifiers)
-                && i.key_pressed(keybinds.navigate_down.logical_key)
-            {
-                self.navigate_index(&NavigateDirection::Down, is_ctrled, is_shifted);
-            } else if modifiers.matches_logically(keybinds.navigate_forward.modifiers)
-                && i.key_pressed(keybinds.navigate_forward.logical_key)
-            {
-                self.nav_forward();
-            } else if modifiers.matches_logically(keybinds.navigate_backward.modifiers)
-                && i.key_pressed(keybinds.navigate_backward.logical_key)
-            {
-                self.nav_back();
-            } else if modifiers.matches_logically(keybinds.copy_to_clipboard.modifiers)
-                && i.key_pressed(keybinds.copy_to_clipboard.logical_key)
-            {
-                println!("clip");
-                self.add_to_clipboard(ClipboardMode::Copy);
-            } else if modifiers.matches_logically(keybinds.cut_to_clipboard.modifiers)
-                && i.key_pressed(keybinds.cut_to_clipboard.logical_key)
-            {
-                println!("clipped");
-                self.add_to_clipboard(ClipboardMode::Cut);
-            } else if modifiers.matches_logically(keybinds.paste_from_clipboard.modifiers)
-                && i.key_pressed(keybinds.paste_from_clipboard.logical_key)
-            {
-                println!("pat");
-                self.new_modal(ModalKind::Paste);
-            } else if modifiers.matches_logically(keybinds.clear_clipboard.modifiers)
-                && i.key_pressed(keybinds.clear_clipboard.logical_key)
-            {
-                self.clear_clipboard();
-            } else if modifiers.matches_logically(keybinds.delete_selections.modifiers)
-                && i.key_pressed(keybinds.delete_selections.logical_key)
-            {
-                self.new_modal(ModalKind::Delete);
-            } else if modifiers.matches_logically(keybinds.rename_file.modifiers)
-                && i.key_pressed(keybinds.rename_file.logical_key)
-            {
-                self.new_modal(ModalKind::Rename);
-            } else if modifiers.matches_logically(keybinds.toggle_hidden_view.modifiers)
-                && i.key_pressed(keybinds.toggle_hidden_view.logical_key)
-            {
-                self.view_hidden = !self.view_hidden;
-                self.filter_entries(None);
-            } else if modifiers.matches_logically(keybinds.create_file_path.modifiers)
-                && i.key_pressed(keybinds.create_file_path.logical_key)
-            {
-                self.new_modal(ModalKind::CreateFile);
-            } else if modifiers.matches_logically(keybinds.create_folder_path.modifiers)
-                && i.key_pressed(keybinds.create_folder_path.logical_key)
-            {
-                self.new_modal(ModalKind::CreateFolder);
-            } else if modifiers.matches_logically(keybinds.toggle_visual_mode.modifiers)
-                && i.key_pressed(keybinds.toggle_visual_mode.logical_key)
-            {
-            } else if modifiers.matches_logically(keybinds.refresh.modifiers)
-                && i.key_pressed(keybinds.refresh.logical_key)
-            {
-            } else if modifiers.matches_logically(keybinds.search.modifiers)
-                && i.key_pressed(keybinds.search.logical_key)
-            {
+            for (action, shortcut) in &self.config.keybinds_list {
+                if i.consume_shortcut(shortcut) {
+                    action_to_handle = Some(*action);
+                }
             }
         });
+
+        if let Some(action) = action_to_handle {
+            self.handle_actions(&action, is_ctrled, is_shifted);
+        }
     }
 
     fn ui(&mut self, ui: &mut Ui, _frame: &mut eframe::Frame) {
