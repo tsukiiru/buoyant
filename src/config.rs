@@ -23,7 +23,7 @@ impl Default for Actions {
 }
 
 pub struct Config {
-    keybinds: Keybinds,
+    pub keybinds: Keybinds,
     pub keybinds_list: Vec<Keybind>,
 }
 
@@ -53,10 +53,11 @@ pub enum KeybindAction {
     CreateFolder,
     ToggleVisual,
     Refresh,
+    Info,
     Search,
 }
 
-struct Keybinds {
+pub struct Keybinds {
     pub navigate_up: KeyboardShortcut,
     pub navigate_down: KeyboardShortcut,
     pub navigate_forward: KeyboardShortcut,
@@ -72,6 +73,7 @@ struct Keybinds {
     pub create_folder_path: KeyboardShortcut,
     pub toggle_visual_mode: KeyboardShortcut,
     pub refresh: KeyboardShortcut,
+    pub view_info: KeyboardShortcut,
     pub search: KeyboardShortcut,
 }
 
@@ -101,6 +103,7 @@ impl Default for Keybinds {
             toggle_visual_mode: bind(NONE, Key::V),
             refresh: bind(CTRL, Key::R),
             search: bind(NONE, Key::Slash),
+            view_info: bind(NONE, Key::F12),
         }
     }
 }
@@ -156,6 +159,7 @@ struct RawKeybinds {
     pub toggle_visual_mode: Option<String>,
     pub refresh: Option<String>,
     pub search: Option<String>,
+    pub view_info: Option<String>,
 }
 
 fn process_raw_keybinds(raw_keybinds: &RawKeybinds, kb_config: &mut Keybinds) {
@@ -238,6 +242,11 @@ fn process_raw_keybinds(raw_keybinds: &RawKeybinds, kb_config: &mut Keybinds) {
         && let Some(fresh_key) = match_key(key_str)
     {
         kb_config.search = fresh_key
+    }
+    if let Some(key_str) = &raw_keybinds.view_info
+        && let Some(fresh_key) = match_key(key_str)
+    {
+        kb_config.view_info = fresh_key
     }
 }
 
@@ -399,4 +408,5 @@ fn listing_keybinds(keybinds: &Keybinds, list: &mut Vec<Keybind>) {
     list.push((KeybindAction::ToggleVisual, keybinds.toggle_visual_mode));
     list.push((KeybindAction::Refresh, keybinds.refresh));
     list.push((KeybindAction::Search, keybinds.search));
+    list.push((KeybindAction::Info, keybinds.view_info));
 }

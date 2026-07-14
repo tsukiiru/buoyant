@@ -13,6 +13,7 @@ pub struct Modals {
     pub rename: Option<InputModal>,
     pub create_file: Option<InputModal>,
     pub create_folder: Option<InputModal>,
+    pub search: Option<SearchModal>,
     pub paste: Option<ChoiceModal>,
     pub delete: Option<ChoiceModal>,
     pub metadata: Option<InfoModal>,
@@ -24,6 +25,7 @@ impl Default for Modals {
             rename: None,
             create_file: None,
             create_folder: None,
+            search: None,
             paste: None,
             delete: None,
             metadata: None,
@@ -35,9 +37,16 @@ pub enum ModalKind {
     Rename,
     CreateFile,
     CreateFolder,
+    Search,
     Paste,
     Delete,
     Metadata,
+}
+
+// modal for searching
+pub struct SearchModal {
+    pub content: String,
+    pub focused: bool,
 }
 
 // modal for inputting text
@@ -77,7 +86,7 @@ pub enum ClipboardMode {
 // temporary entry that doesnt allocate memory
 pub struct TempEntry<'a> {
     pub name: &'a str,
-    pub file_type: &'a str,
+    pub file_type: &'static str,
     pub path: &'a Path,
     pub is_hidden: bool,
     pub accessed: Option<i64>,
@@ -89,7 +98,7 @@ pub struct TempEntry<'a> {
 #[derive(Clone, Debug)]
 pub struct Entry {
     pub name: String,
-    pub file_type: String,
+    pub file_type: &'static str,
     pub path: PathBuf,
     pub using: bool,
     pub is_hidden: bool,
@@ -103,7 +112,7 @@ impl Default for Entry {
     fn default() -> Self {
         Entry {
             name: String::with_capacity(16),
-            file_type: String::with_capacity(20),
+            file_type: "",
             path: PathBuf::new(),
             using: false,
             is_hidden: false,

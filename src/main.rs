@@ -141,6 +141,15 @@ impl App {
                     return;
                 }
 
+                self.new_toast(
+                    String::from("Clipboard"),
+                    format!(
+                        "successfully add {} items for copying!",
+                        self.selected.len()
+                    ),
+                    ToastKind::Success,
+                    Duration::from_secs(3),
+                );
                 self.add_to_clipboard(ClipboardMode::Copy);
             }
             KeybindAction::Cut => {
@@ -154,6 +163,12 @@ impl App {
                     return;
                 }
 
+                self.new_toast(
+                    String::from("Clipboard"),
+                    format!("successfully cut {} items!", self.selected.len()),
+                    ToastKind::Success,
+                    Duration::from_secs(3),
+                );
                 self.add_to_clipboard(ClipboardMode::Cut);
             }
             KeybindAction::Paste => {
@@ -167,6 +182,12 @@ impl App {
                     return;
                 }
 
+                self.new_toast(
+                    String::from("Clipboard"),
+                    format!("successfully pasted {} items!", self.selected.len()),
+                    ToastKind::Success,
+                    Duration::from_secs(3),
+                );
                 self.new_modal(ModalKind::Paste);
             }
 
@@ -213,15 +234,30 @@ impl App {
             }
             KeybindAction::CreateFile => self.new_modal(ModalKind::CreateFile),
             KeybindAction::CreateFolder => self.new_modal(ModalKind::CreateFolder),
+            KeybindAction::Info => {
+                if self.current_index.is_none() {
+                    self.new_toast(
+                        String::from("Metadata"),
+                        String::from("failed to open metadata modal (nothing is selected!)"),
+                        ToastKind::Danger,
+                        Duration::from_secs(3),
+                    );
+                    return;
+                }
+
+                self.new_modal(ModalKind::Metadata);
+            }
+            KeybindAction::Search => self.new_modal(ModalKind::Search),
             _ => {}
         }
     }
 
     fn fetch_entries(&mut self, prev_path: Option<PathBuf>) {
+        self.modals.search = None;
         // clear entries
         self.entries.children.iter_mut().for_each(|e| {
             e.name.clear();
-            e.file_type.clear();
+            e.file_type = "";
             e.path = PathBuf::new();
             e.using = false;
             e.accessed = None;
@@ -295,9 +331,9 @@ impl App {
             entry.accessed = accessed;
             entry.created = created;
             entry.folder_size = folder_size;
+            entry.file_type = file_type;
 
             entry.name.push_str(name);
-            entry.file_type.push_str(file_type);
             entry.path.push(path);
         } else {
             let mut entry = Entry {
@@ -306,11 +342,11 @@ impl App {
                 file_size,
                 accessed,
                 created,
+                file_type,
                 using: true,
                 ..Default::default()
             };
             entry.name.push_str(name);
-            entry.file_type.push_str(file_type);
             entry.path.push(path);
 
             self.entries.children.push(entry);
@@ -326,12 +362,12 @@ impl App {
             if !entry.using || (!self.view_hidden && entry.is_hidden) {
                 continue;
             }
-            /*
-            if let Some(modal) = &self.states.modals.search
-            && !entry.name.contains(&modal.content.trim())
+
+            if let Some(modal) = &self.modals.search
+                && !entry.name.contains(&modal.content.trim())
             {
-            continue;
-            }*/
+                continue;
+            }
 
             self.entries.displaying.push(i);
         }
@@ -565,6 +601,13 @@ impl App {
             ModalKind::Paste => self.modals.paste = Some(ChoiceModal {}),
             ModalKind::Delete => self.modals.delete = Some(ChoiceModal {}),
             ModalKind::Metadata => self.modals.metadata = Some(InfoModal {}),
+            ModalKind::Search => {
+                self.modals.search = Some(SearchModal {
+                    content: String::new(),
+                    focused: true,
+                });
+                self.filter_entries(None);
+            }
         }
     }
 
@@ -576,6 +619,10 @@ impl App {
             }
             ModalKind::CreateFolder => {
                 self.modals.create_folder.as_mut().unwrap().content = new_content
+            }
+            ModalKind::Search => {
+                self.modals.search.as_mut().unwrap().content = new_content;
+                self.filter_entries(None);
             }
             _ => {}
         }
@@ -589,6 +636,7 @@ impl App {
             ModalKind::Paste => self.modals.paste = None,
             ModalKind::Delete => self.modals.delete = None,
             ModalKind::Metadata => self.modals.metadata = None,
+            ModalKind::Search => self.modals.search = None,
         };
     }
 
@@ -799,6 +847,42 @@ impl eframe::App for App {
                 ui.label(format!("{}", self.current_path.display()));
             });
 
+            let mut pending_close_search = false;
+            let mut pending_upd_search = None;
+
+            if let Some(modal) = &mut self.modals.search {
+                let mut content = modal.content.clone();
+                let input = ui.add(
+                    TextEdit::singleline(&mut content)
+                        .background_color(Color32::TRANSPARENT)
+                        .hint_text("input search entry :3")
+                        .frame(Frame::NONE),
+                );
+
+                if input.changed() {
+                    pending_upd_search = Some(content);
+                }
+
+                if input.lost_focus() {
+                    modal.focused = false;
+                }
+
+                if ui.input(|i| i.key_pressed(Key::Escape)) {
+                    pending_close_search = true;
+                }
+
+                if modal.focused {
+                    input.request_focus();
+                }
+            }
+
+            if pending_close_search {
+                self.close_modal(ModalKind::Search);
+            }
+            if let Some(content) = pending_upd_search {
+                self.update_modal(ModalKind::Search, content);
+            }
+
             ui.heading("da buoyant file explorer!! :o");
             ui.separator();
 
@@ -807,7 +891,7 @@ impl eframe::App for App {
 
                 let mut grid = Grid::new(i);
                 i += 1;
-                grid = grid.min_col_width(150.0);
+                grid = grid.min_col_width(200.0);
 
                 grid.show(ui, |ui| {
                     ui.add(Label::new("name").halign(Align::Min));
@@ -835,6 +919,7 @@ impl eframe::App for App {
                     mut pending_nav,
                 ) = (None, None, None, None, None, None, false);
 
+                let keybinds = &self.config.keybinds;
                 for (index, entry_index) in self.entries.displaying.clone().into_iter().enumerate()
                 {
                     let is_selected = self.selected.contains(&entry_index);
@@ -886,7 +971,7 @@ impl eframe::App for App {
                             let mut grid = Grid::new(Id::new(i));
                             i += 1;
 
-                            grid = grid.min_col_width(150.0);
+                            grid = grid.min_col_width(200.0);
                             grid.show(f, |g| {
                                 g.add(Label::new(name).selectable(false).halign(Align::Min));
                                 g.add(Label::new(file_size).selectable(false).halign(Align::Min));
@@ -899,21 +984,54 @@ impl eframe::App for App {
                             ui.interact(fr.response.rect, Id::new(i), Sense::click());
                         i += 1;
 
+                        if is_current_index {
+                            btn_response.scroll_to_me(None);
+                        }
+
                         btn_response.context_menu(|ui| {
                             ui.label(entry.name.clone());
-                            if ui.button("rename").clicked() {
+                            if ui
+                                .add(
+                                    Button::new("rename")
+                                        .shortcut_text(ctx.format_shortcut(&keybinds.rename_file)),
+                                )
+                                .clicked()
+                            {
                                 pending_rename = Some(());
                             }
-                            if ui.button("delete").clicked() {
+                            if ui
+                                .add(Button::new("delete").shortcut_text(
+                                    ctx.format_shortcut(&keybinds.delete_selections),
+                                ))
+                                .clicked()
+                            {
                                 pending_delete_modal = Some(());
                             }
-                            if ui.button("cut").clicked() {
+                            if ui
+                                .add(
+                                    Button::new("cut").shortcut_text(
+                                        ctx.format_shortcut(&keybinds.cut_to_clipboard),
+                                    ),
+                                )
+                                .clicked()
+                            {
                                 pending_clipboard = Some(ClipboardMode::Cut);
                             }
-                            if ui.button("copy").clicked() {
+                            if ui
+                                .add(Button::new("copy").shortcut_text(
+                                    ctx.format_shortcut(&keybinds.copy_to_clipboard),
+                                ))
+                                .clicked()
+                            {
                                 pending_clipboard = Some(ClipboardMode::Copy);
                             }
-                            if ui.button("info").clicked() {
+                            if ui
+                                .add(
+                                    Button::new("info")
+                                        .shortcut_text(ctx.format_shortcut(&keybinds.view_info)),
+                                )
+                                .clicked()
+                            {
                                 pending_metadata_modal = Some(());
                             }
                         });
@@ -979,13 +1097,32 @@ impl eframe::App for App {
                 self.clear_selected();
             }
 
+            let mut pending_new_modal = None;
+            let mut pending_add_to_cb = None;
+            let mut pending_clear_cb = None;
+            let mut pending_clear_selected = None;
+
             bg_response.inner.context_menu(|ui| {
+                let keybinds = &self.config.keybinds;
                 ui.label("create");
-                if ui.button("create file").clicked() {
-                    self.new_modal(ModalKind::CreateFile);
+
+                if ui
+                    .add(
+                        Button::new("create file")
+                            .shortcut_text(ctx.format_shortcut(&keybinds.create_file_path)),
+                    )
+                    .clicked()
+                {
+                    pending_new_modal = Some(ModalKind::CreateFile);
                 }
-                if ui.button("create folder").clicked() {
-                    self.new_modal(ModalKind::CreateFolder);
+                if ui
+                    .add(
+                        Button::new("create folder")
+                            .shortcut_text(ctx.format_shortcut(&keybinds.create_folder_path)),
+                    )
+                    .clicked()
+                {
+                    pending_new_modal = Some(ModalKind::CreateFolder);
                 }
 
                 ui.separator();
@@ -1006,9 +1143,15 @@ impl eframe::App for App {
                 }
 
                 let (mut del_button, mut cut_button, mut copy_button, mut clear_s_button) = (
-                    Button::new(del_label).stroke(Stroke::NONE),
-                    Button::new(cut_label).stroke(Stroke::NONE),
-                    Button::new(copy_label).stroke(Stroke::NONE),
+                    Button::new(del_label)
+                        .stroke(Stroke::NONE)
+                        .shortcut_text(ctx.format_shortcut(&keybinds.delete_selections)),
+                    Button::new(cut_label)
+                        .stroke(Stroke::NONE)
+                        .shortcut_text(ctx.format_shortcut(&keybinds.cut_to_clipboard)),
+                    Button::new(copy_label)
+                        .stroke(Stroke::NONE)
+                        .shortcut_text(ctx.format_shortcut(&keybinds.copy_to_clipboard)),
                     Button::new(clear_s_label).stroke(Stroke::NONE),
                 );
 
@@ -1020,16 +1163,16 @@ impl eframe::App for App {
                 }
 
                 if ui.add(del_button).clicked() {
-                    self.new_modal(ModalKind::Delete);
+                    pending_new_modal = Some(ModalKind::Delete);
                 }
                 if ui.add(cut_button).clicked() {
-                    self.add_to_clipboard(ClipboardMode::Cut);
+                    pending_add_to_cb = Some(ClipboardMode::Cut);
                 }
                 if ui.add(copy_button).clicked() {
-                    self.add_to_clipboard(ClipboardMode::Copy);
+                    pending_add_to_cb = Some(ClipboardMode::Copy);
                 }
                 if ui.add(clear_s_button).clicked() {
-                    self.clear_selected();
+                    pending_clear_selected = Some(());
                 }
 
                 let (mut p_text, mut cp_text) =
@@ -1041,8 +1184,12 @@ impl eframe::App for App {
                 }
 
                 let (mut paste_button, mut clearcp_button) = (
-                    Button::new(p_text).stroke(Stroke::NONE),
-                    Button::new(cp_text).stroke(Stroke::NONE),
+                    Button::new(p_text)
+                        .stroke(Stroke::NONE)
+                        .shortcut_text(ctx.format_shortcut(&keybinds.paste_from_clipboard)),
+                    Button::new(cp_text)
+                        .stroke(Stroke::NONE)
+                        .shortcut_text(ctx.format_shortcut(&keybinds.clear_clipboard)),
                 );
 
                 if self.clipboard.entries.is_empty() {
@@ -1054,9 +1201,25 @@ impl eframe::App for App {
                     self.new_modal(ModalKind::Paste);
                 }
                 if ui.add(clearcp_button).clicked() {
-                    self.clear_clipboard();
+                    pending_clear_cb = Some(());
                 }
             });
+
+            if let Some(kind) = pending_new_modal {
+                self.new_modal(kind);
+            }
+
+            if pending_clear_cb.is_some() {
+                self.clear_clipboard();
+            }
+
+            if pending_clear_selected.is_some() {
+                self.clear_selected();
+            }
+
+            if let Some(mode) = pending_add_to_cb {
+                self.add_to_clipboard(mode);
+            }
         });
 
         // modals
@@ -1148,6 +1311,22 @@ impl eframe::App for App {
             let modal_widget = Modal::new(Id::new("paste_modal"));
 
             modal_widget.show(&ctx, |ui| {
+                ui.heading(format!(
+                    "you are {} these:",
+                    match self.clipboard.mode.as_ref().unwrap() {
+                        ClipboardMode::Copy => "copying",
+                        ClipboardMode::Cut => "cutting",
+                    }
+                ));
+                let frame = Frame::NONE.fill(Color32::BLACK);
+                frame.show(ui, |f| {
+                    self.clipboard.entries.iter().for_each(|item| {
+                        f.label(format!("{}", item.display()));
+                    });
+                });
+
+                ui.separator();
+
                 ui.heading("choose pasting type");
 
                 ui.vertical(|ui| {
@@ -1220,6 +1399,7 @@ impl eframe::App for App {
 
         if pending_delete {
             self.delete();
+            pending_close_delete = true;
         }
         if pending_close_delete {
             self.close_modal(ModalKind::Delete);
@@ -1235,6 +1415,7 @@ impl eframe::App for App {
                 m.label(format!("showing metadata for {}", entry.name));
                 m.separator();
                 m.label(format!("full path: {}", entry.path.display()));
+                m.label(format!("type: {}", entry.file_type));
                 m.label(format!(
                     "last accessed date: {}",
                     format_date(entry.accessed)
@@ -1265,7 +1446,6 @@ impl eframe::App for App {
             && toast_list.len() > 0
         {
             let toast_overlay = Window::new("toast")
-                .interactable(false)
                 .title_bar(false)
                 .frame(Frame::NONE)
                 .anchor(Align2::RIGHT_BOTTOM, Vec2::new(-8.0, -8.0))

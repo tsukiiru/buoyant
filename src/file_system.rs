@@ -1,5 +1,4 @@
 use crate::{file_types, types::PasteKind};
-use eframe::egui::TextBuffer;
 use rayon::iter::{IntoParallelRefIterator, ParallelIterator};
 use std::{
     collections::HashSet,
@@ -169,9 +168,9 @@ fn is_textfile(path: &Path) -> bool {
     buf[..n].iter().all(|&b| b.is_ascii())
 }
 
-pub fn file_type(path: &Path) -> String {
+pub fn file_type(path: &Path) -> &'static str {
     if path.is_dir() {
-        return String::from("Folder");
+        return "Folder";
     }
 
     let ext = file_extension(path);
@@ -187,16 +186,10 @@ pub fn file_type(path: &Path) -> String {
     }
 
     if path.is_symlink() {
-        let text = "Symlink".to_owned();
-
-        if str_type == "Unknown" {
-            return text + " (broken)";
-        } else {
-            return text + " -> " + str_type;
-        };
+        return "Symlink";
     }
 
-    str_type.to_owned()
+    str_type
 }
 
 pub fn move_dir(old_files: &HashSet<PathBuf>, dest: &Path, operation: &PasteKind) {
@@ -309,55 +302,7 @@ pub fn is_hidden(path: &Path) -> bool {
 
     point_to_file.unwrap().to_str().unwrap().starts_with(".")
 }
-/*
-fn is_textfile(path: &Path) -> bool {
-    use std::io::Read;
-    let Ok(mut file) = fs::File::open(path) else {
-        return false;
-    };
 
-    let mut buf = [0u8; 512];
-    let Ok(n) = file.read(&mut buf) else {
-        return false;
-    };
-
-    buf[..n].iter().all(|&b| b.is_ascii())
-}*/
-/*
-pub fn file_type(path: &Path) -> (String, &'static Handle) {
-    if path.is_dir() {
-        return (String::from("Folder"), &*file_types::FOLDER);
-    }
-
-    let ext = file_extension(path);
-    let opt_type = file_types::extension_to_file_type(ext);
-    let str_type: &str;
-    let icon: &Handle;
-
-    if let Some(thing) = &opt_type {
-        str_type = &thing.0;
-        icon = &thing.1;
-    } else if is_textfile(path) {
-        str_type = "Text File";
-        icon = &file_types::FILE;
-    } else {
-        str_type = "Unknown";
-        icon = &file_types::QUESTION_MARK;
-    }
-
-    if path.is_symlink() {
-        let text = "Symlink".to_owned();
-
-        if str_type == "Unknown" {
-            return (text + " (broken)", &file_types::BROKEN_LINK);
-        } else {
-            return (text + " -> " + str_type, &file_types::LINK);
-        };
-    }
-
-    (str_type.to_owned(), icon)
-}
-*/
 const UNIX_EPOCH: SystemTime = SystemTime::UNIX_EPOCH;
 
 pub fn accessed_and_created(
