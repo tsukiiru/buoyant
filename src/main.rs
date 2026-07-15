@@ -19,6 +19,7 @@ use rayon::{
 use std::{
     collections::HashSet,
     env,
+    fmt::Display,
     ops::Sub,
     path::{Path, PathBuf},
     process::Command,
@@ -37,6 +38,22 @@ pub enum Property {
     Created,
     Type,
     Size,
+}
+
+impl Display for Property {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let thing;
+
+        match self {
+            Property::Name => thing = "name",
+            Property::Accessed => thing = "accessed",
+            Property::Created => thing = "created",
+            Property::Type => thing = "type",
+            Property::Size => thing = "size",
+        };
+
+        write!(f, "{}", thing)
+    }
 }
 
 #[tokio::main]
@@ -59,9 +76,9 @@ struct App {
     current_index: Option<usize>,
     selected: HashSet<usize>,
     clipboard: Clipboard,
-    modals: Modals,
+    overlay: Overlay,
+    field: Field,
     view_hidden: bool,
-    sorting_by: Property,
     config: Config,
     actions: Actions,
     toasts: Toasts, // mhm toasts
@@ -72,22 +89,26 @@ impl App {
         let mut app = App {
             ctx: cc.egui_ctx.clone(),
             current_path: env::home_dir().unwrap(),
-            modals: Modals::default(),
+            overlay: Overlay::default(),
+            field: Field::default(),
             entries: Entries::default(),
             clipboard: Clipboard::default(),
             selected: HashSet::with_capacity(20),
             current_index: None,
             view_hidden: true,
-            sorting_by: Property::Name,
             config: Config::default(),
             actions: Actions::default(),
             toasts: Arc::new(Mutex::new(Vec::with_capacity(5))),
         };
-        app.fetch_entries(None);
-        config::fetch(&mut app.config);
+        app.fetch_config();
         app.bind_keybinds();
 
         app
+    }
+
+    fn fetch_config(&mut self) {
+        config::fetch(&mut self.config);
+        self.fetch_entries(None);
     }
 
     fn bind_keybinds(&mut self) {
@@ -119,17 +140,20 @@ impl App {
     }
 
     fn handle_actions(&mut self, action: &KeybindAction, is_ctrled: bool, is_shifted: bool) {
+        if self.field.focused || self.overlay.kind.is_some() {
+            return;
+            // block input
+        }
+
         match action {
             KeybindAction::NavigateUp => {
                 self.navigate_index(&NavigateDirection::Up, is_ctrled, is_shifted)
             }
-
             KeybindAction::NavigateDown => {
                 self.navigate_index(&NavigateDirection::Down, is_ctrled, is_shifted);
             }
             KeybindAction::NavigateForward => self.nav_forward(),
             KeybindAction::NavigateBackward => self.nav_back(),
-
             KeybindAction::Copy => {
                 if self.selected.len() < 1 {
                     self.new_toast(
@@ -182,13 +206,7 @@ impl App {
                     return;
                 }
 
-                self.new_toast(
-                    String::from("Clipboard"),
-                    format!("successfully pasted {} items!", self.selected.len()),
-                    ToastKind::Success,
-                    Duration::from_secs(3),
-                );
-                self.new_modal(ModalKind::Paste);
+                self.new_overlay(OverlayKind::Paste);
             }
 
             KeybindAction::Delete => {
@@ -202,7 +220,7 @@ impl App {
                     return;
                 }
 
-                self.new_modal(ModalKind::Delete);
+                self.new_overlay(OverlayKind::Delete);
             }
             KeybindAction::Rename => {
                 if self.current_index.is_none() {
@@ -215,7 +233,7 @@ impl App {
                     return;
                 }
 
-                self.new_modal(ModalKind::Rename);
+                self.new_overlay(OverlayKind::Rename);
             }
 
             KeybindAction::ClearClipboard => {
@@ -232,8 +250,8 @@ impl App {
                 self.view_hidden = !self.view_hidden;
                 self.fetch_entries(None);
             }
-            KeybindAction::CreateFile => self.new_modal(ModalKind::CreateFile),
-            KeybindAction::CreateFolder => self.new_modal(ModalKind::CreateFolder),
+            KeybindAction::CreateFile => self.new_overlay(OverlayKind::CreateFile),
+            KeybindAction::CreateFolder => self.new_overlay(OverlayKind::CreateFolder),
             KeybindAction::Info => {
                 if self.current_index.is_none() {
                     self.new_toast(
@@ -245,15 +263,16 @@ impl App {
                     return;
                 }
 
-                self.new_modal(ModalKind::Metadata);
+                self.new_overlay(OverlayKind::Metadata);
             }
-            KeybindAction::Search => self.new_modal(ModalKind::Search),
+            KeybindAction::Search => self.new_field(FieldKind::Search),
+            KeybindAction::Refresh => self.fetch_config(),
             _ => {}
         }
     }
 
     fn fetch_entries(&mut self, prev_path: Option<PathBuf>) {
-        self.modals.search = None;
+        self.close_overlay();
         // clear entries
         self.entries.children.iter_mut().for_each(|e| {
             e.name.clear();
@@ -358,13 +377,18 @@ impl App {
         self.current_index = None;
         self.selected.clear();
 
-        for (i, entry) in self.entries.children.iter().enumerate() {
-            if !entry.using || (!self.view_hidden && entry.is_hidden) {
-                continue;
-            }
+        let mut filter = "";
 
-            if let Some(modal) = &self.modals.search
-                && !entry.name.contains(&modal.content.trim())
+        if let Some(kind) = &self.field.kind
+            && kind == &FieldKind::Search
+        {
+            filter = self.field.buffer.trim();
+        }
+
+        for (i, entry) in self.entries.children.iter().enumerate() {
+            if !entry.using
+                || (!self.view_hidden && entry.is_hidden)
+                || !entry.name.contains(&filter)
             {
                 continue;
             }
@@ -409,7 +433,7 @@ impl App {
     }
 
     fn sort(&mut self, index: usize, is_from_start: bool) {
-        let sorting_by = &self.sorting_by;
+        let sorting_by = &self.config.sorting.sorting_by;
         let reference = &self.entries.children;
         let displaying = if is_from_start {
             &mut self.entries.displaying[..index]
@@ -453,7 +477,9 @@ impl App {
             }),
         }
 
-        // check if reversed
+        if self.config.sorting.reversed {
+            displaying.reverse();
+        }
     }
 
     fn nav_forward(&mut self) {
@@ -513,13 +539,8 @@ impl App {
         // true: file
         // false: folder
 
-        let overlay = if mode {
-            self.modals.create_file.as_mut().unwrap()
-        } else {
-            self.modals.create_folder.as_mut().unwrap()
-        };
-
-        let mut content = overlay.content.trim();
+        let overlay = &mut self.overlay;
+        let mut content = overlay.buffer.trim();
         if content.starts_with("/") {
             content = &content[1..];
         }
@@ -532,112 +553,90 @@ impl App {
             return;
         }
 
-        self.close_modal(ModalKind::CreateFile);
-        self.close_modal(ModalKind::CreateFolder);
+        self.close_overlay();
         self.fetch_entries(None);
         return;
     }
 
     fn rename(&mut self) {
-        let rename_modal_opt = self.modals.rename.as_mut();
-        if rename_modal_opt.is_none() {
+        let overlay = &mut self.overlay;
+        if overlay.kind != Some(OverlayKind::Rename) {
             return;
         }
 
-        let rename_modal = rename_modal_opt.unwrap();
-
-        let content = rename_modal.content.trim();
+        let content = overlay.buffer.trim();
         for char in BANNED_CHARACTERS {
             if content.contains(char) {
-                rename_modal.error.clear();
-                rename_modal
-                    .error
-                    .push_str("Containing invalid characters!");
-                /*
-                self.new_toast(
-                    String::from("Renaming"),
-                    String::from("Containing invalid characters"),
-                    ToastKind::Danger,
-                    Duration::from_millis(10000),
-                );
-                */
+                overlay.error.clear();
+                overlay.error.push_str("Containing invalid characters!");
                 return;
             }
         }
 
-        file_system::rename(&rename_modal.path.as_ref().unwrap(), &rename_modal.content);
-        self.close_modal(ModalKind::Rename);
+        file_system::rename(&overlay.path.as_ref().unwrap(), &overlay.buffer);
+        self.close_overlay();
         self.fetch_entries(None);
     }
 
-    fn new_modal(&mut self, modal: ModalKind) {
-        match modal {
-            ModalKind::Rename => {
+    fn new_field(&mut self, kind: FieldKind) {
+        let field = &mut self.field;
+
+        field.focused = true;
+
+        if field.kind.is_some() {
+            field.buffer = String::new();
+            self.filter_entries(None);
+            return;
+        }
+
+        field.kind = Some(kind.clone());
+    }
+
+    fn close_field(&mut self) {
+        self.field.kind = None;
+        self.field.buffer = String::new();
+        self.field.focused = false;
+
+        self.filter_entries(None);
+    }
+
+    fn update_field_buffer(&mut self, buffer: String) {
+        self.field.buffer = buffer;
+    }
+
+    fn logic_field(&mut self, kind: FieldKind) {
+        match kind {
+            FieldKind::Search => self.filter_entries(None),
+        }
+    }
+
+    fn new_overlay(&mut self, kind: OverlayKind) {
+        let overlay = &mut self.overlay;
+        overlay.kind = Some(kind.clone());
+
+        match kind {
+            OverlayKind::Rename => {
                 let path = &self
                     .entries
                     .entry(&self.current_index.unwrap())
                     .unwrap()
                     .path;
-                self.modals.rename = Some(InputModal {
-                    content: path.file_name().unwrap().to_str().unwrap().to_string(),
-                    path: Some(path.to_path_buf()),
-                    error: String::new(),
-                })
-            }
-            ModalKind::CreateFile => {
-                self.modals.create_file = Some(InputModal {
-                    content: String::new(),
-                    path: None,
-                    error: String::new(),
-                })
-            }
-            ModalKind::CreateFolder => {
-                self.modals.create_folder = Some(InputModal {
-                    content: String::new(),
-                    path: None,
-                    error: String::new(),
-                })
-            }
-            ModalKind::Paste => self.modals.paste = Some(ChoiceModal {}),
-            ModalKind::Delete => self.modals.delete = Some(ChoiceModal {}),
-            ModalKind::Metadata => self.modals.metadata = Some(InfoModal {}),
-            ModalKind::Search => {
-                self.modals.search = Some(SearchModal {
-                    content: String::new(),
-                    focused: true,
-                });
-                self.filter_entries(None);
-            }
-        }
-    }
 
-    fn update_modal(&mut self, modal: ModalKind, new_content: String) {
-        match modal {
-            ModalKind::Rename => self.modals.rename.as_mut().unwrap().content = new_content,
-            ModalKind::CreateFile => {
-                self.modals.create_file.as_mut().unwrap().content = new_content
-            }
-            ModalKind::CreateFolder => {
-                self.modals.create_folder.as_mut().unwrap().content = new_content
-            }
-            ModalKind::Search => {
-                self.modals.search.as_mut().unwrap().content = new_content;
-                self.filter_entries(None);
+                overlay.path = Some(path.to_path_buf());
+                overlay.buffer = path.file_name().unwrap().to_str().unwrap().to_string();
             }
             _ => {}
         }
     }
 
-    fn close_modal(&mut self, modal: ModalKind) {
-        match modal {
-            ModalKind::Rename => self.modals.rename = None,
-            ModalKind::CreateFile => self.modals.create_file = None,
-            ModalKind::CreateFolder => self.modals.create_folder = None,
-            ModalKind::Paste => self.modals.paste = None,
-            ModalKind::Delete => self.modals.delete = None,
-            ModalKind::Metadata => self.modals.metadata = None,
-            ModalKind::Search => self.modals.search = None,
-        };
+    fn update_overlay_buffer(&mut self, buffer: String) {
+        self.overlay.buffer = buffer;
+    }
+
+    fn close_overlay(&mut self) {
+        self.overlay.kind = None;
+        self.overlay.error.clear();
+        self.overlay.buffer = String::new();
     }
 
     fn add_to_clipboard(&mut self, clipboard_mode: ClipboardMode) {
@@ -681,7 +680,15 @@ impl App {
             }
         }
 
-        self.close_modal(ModalKind::Paste);
+        self.close_overlay();
+
+        self.new_toast(
+            String::from("Clipboard"),
+            format!("successfully pasted {} items!", self.selected.len()),
+            ToastKind::Success,
+            Duration::from_secs(3),
+        );
+
         self.fetch_entries(None);
     }
 
@@ -847,46 +854,51 @@ impl eframe::App for App {
                 ui.label(format!("{}", self.current_path.display()));
             });
 
-            let mut pending_close_search = false;
-            let mut pending_upd_search = None;
+            {
+                let mut content = self.field.buffer.clone();
+                let bol = if let Some(kind) = self.field.kind
+                    && kind == FieldKind::Search
+                {
+                    true
+                } else {
+                    false
+                };
 
-            if let Some(modal) = &mut self.modals.search {
-                let mut content = modal.content.clone();
                 let input = ui.add(
                     TextEdit::singleline(&mut content)
                         .background_color(Color32::TRANSPARENT)
                         .hint_text("input search entry :3")
-                        .frame(Frame::NONE),
+                        .frame(Frame::NONE)
+                        .desired_width(f32::INFINITY),
                 );
 
+                if input.gained_focus() && !bol {
+                    self.new_field(FieldKind::Search);
+                }
+
                 if input.changed() {
-                    pending_upd_search = Some(content);
+                    self.update_field_buffer(content);
+                    self.logic_field(FieldKind::Search);
                 }
 
                 if input.lost_focus() {
-                    modal.focused = false;
+                    self.field.focused = false;
                 }
 
-                if ui.input(|i| i.key_pressed(Key::Escape)) {
-                    pending_close_search = true;
+                if self.field.kind.is_some() && ui.input(|i| i.key_pressed(Key::Escape)) {
+                    self.close_field();
                 }
 
-                if modal.focused {
+                if self.field.focused {
                     input.request_focus();
                 }
-            }
-
-            if pending_close_search {
-                self.close_modal(ModalKind::Search);
-            }
-            if let Some(content) = pending_upd_search {
-                self.update_modal(ModalKind::Search, content);
             }
 
             ui.heading("da buoyant file explorer!! :o");
             ui.separator();
 
             ui.horizontal(|ui| {
+                let view = &self.config.view.explorer;
                 ui.allocate_space(Vec2::new(2.0, 0.0));
 
                 let mut grid = Grid::new(i);
@@ -894,14 +906,13 @@ impl eframe::App for App {
                 grid = grid.min_col_width(200.0);
 
                 grid.show(ui, |ui| {
-                    ui.add(Label::new("name").halign(Align::Min));
-                    ui.add(Label::new("file size").halign(Align::Min));
-                    ui.add(Label::new("accessed").halign(Align::Min));
-                    ui.add(Label::new("created").halign(Align::Min));
+                    view.iter().for_each(|p| {
+                        ui.add(Label::new(p.to_string()).halign(Align::Min));
+                    });
                 });
             });
 
-            let bg_response = ScrollArea::vertical().max_width(700.0).show(ui, |ui| {
+            let bg_response = ScrollArea::vertical().show(ui, |ui| {
                 let bg_response = ui.interact(
                     ui.available_rect_before_wrap(),
                     Id::new(format!("explorer-area{}", i)),
@@ -938,6 +949,7 @@ impl eframe::App for App {
                     let entry = entry_opt.unwrap();
 
                     ui.horizontal(|ui| {
+                        let view = &self.config.view.explorer;
                         let mut frame = Frame::NONE
                             .inner_margin(8.0)
                             .stroke(Stroke::new(1.0, Color32::TRANSPARENT));
@@ -949,34 +961,45 @@ impl eframe::App for App {
                         }
 
                         let fr = frame.show(ui, |f| {
-                            let (mut name, mut accessed, mut created, mut file_size) = (
-                                RichText::new(&entry.name).size(14.0),
-                                RichText::new(format_date(entry.accessed)).size(14.0),
-                                RichText::new(format_date(entry.created)).size(14.0),
-                                RichText::new(if let Some(size) = &entry.folder_size {
-                                    format!("{} items", size)
-                                } else {
-                                    file_system::bytes_to_string(entry.file_size.unwrap())
-                                })
-                                .size(14.0),
-                            );
-
+                            let mut color = Color32::WHITE.gamma_multiply(0.5);
                             if entry.is_hidden {
-                                name = name.color(Color32::WHITE.gamma_multiply(0.3));
-                                accessed = accessed.color(Color32::WHITE.gamma_multiply(0.3));
-                                created = created.color(Color32::WHITE.gamma_multiply(0.3));
-                                file_size = file_size.color(Color32::WHITE.gamma_multiply(0.3));
+                                color = Color32::WHITE.gamma_multiply(0.3);
                             }
-
                             let mut grid = Grid::new(Id::new(i));
                             i += 1;
 
                             grid = grid.min_col_width(200.0);
                             grid.show(f, |g| {
-                                g.add(Label::new(name).selectable(false).halign(Align::Min));
-                                g.add(Label::new(file_size).selectable(false).halign(Align::Min));
-                                g.add(Label::new(accessed).selectable(false).halign(Align::Min));
-                                g.add(Label::new(created).selectable(false).halign(Align::Min));
+                                view.iter().for_each(|p| match p {
+                                    Property::Name => {
+                                        g.add(Label::new(RichText::new(&entry.name).color(color)));
+                                    }
+                                    Property::Accessed => {
+                                        g.add(Label::new(
+                                            RichText::new(format_date(entry.accessed)).color(color),
+                                        ));
+                                    }
+                                    Property::Created => {
+                                        g.add(Label::new(
+                                            RichText::new(format_date(entry.created)).color(color),
+                                        ));
+                                    }
+                                    Property::Size => {
+                                        g.add(Label::new(
+                                            RichText::new(if let Some(size) = &entry.folder_size {
+                                                format!("{} items", size)
+                                            } else {
+                                                file_system::bytes_to_string(
+                                                    entry.file_size.unwrap(),
+                                                )
+                                            })
+                                            .color(color),
+                                        ));
+                                    }
+                                    Property::Type => {
+                                        g.add(Label::new(RichText::new(entry.file_type)));
+                                    }
+                                });
                             });
                         });
 
@@ -1055,11 +1078,11 @@ impl eframe::App for App {
                 }
 
                 if pending_rename.is_some() {
-                    self.new_modal(ModalKind::Rename);
+                    self.new_overlay(OverlayKind::Rename);
                 }
 
                 if pending_delete_modal.is_some() {
-                    self.new_modal(ModalKind::Delete);
+                    self.new_overlay(OverlayKind::Delete);
                 }
 
                 if let Some(index) = pending_modify_selected {
@@ -1080,7 +1103,7 @@ impl eframe::App for App {
                 }
 
                 if pending_metadata_modal.is_some() {
-                    self.new_modal(ModalKind::Metadata);
+                    self.new_overlay(OverlayKind::Metadata);
                 }
 
                 bg_response
@@ -1097,7 +1120,7 @@ impl eframe::App for App {
                 self.clear_selected();
             }
 
-            let mut pending_new_modal = None;
+            let mut pending_new_overlay = None;
             let mut pending_add_to_cb = None;
             let mut pending_clear_cb = None;
             let mut pending_clear_selected = None;
@@ -1113,7 +1136,7 @@ impl eframe::App for App {
                     )
                     .clicked()
                 {
-                    pending_new_modal = Some(ModalKind::CreateFile);
+                    pending_new_overlay = Some(OverlayKind::CreateFile);
                 }
                 if ui
                     .add(
@@ -1122,7 +1145,7 @@ impl eframe::App for App {
                     )
                     .clicked()
                 {
-                    pending_new_modal = Some(ModalKind::CreateFolder);
+                    pending_new_overlay = Some(OverlayKind::CreateFolder);
                 }
 
                 ui.separator();
@@ -1163,7 +1186,7 @@ impl eframe::App for App {
                 }
 
                 if ui.add(del_button).clicked() {
-                    pending_new_modal = Some(ModalKind::Delete);
+                    pending_new_overlay = Some(OverlayKind::Delete);
                 }
                 if ui.add(cut_button).clicked() {
                     pending_add_to_cb = Some(ClipboardMode::Cut);
@@ -1198,15 +1221,15 @@ impl eframe::App for App {
                 }
 
                 if ui.add(paste_button).clicked() {
-                    self.new_modal(ModalKind::Paste);
+                    self.new_overlay(OverlayKind::Paste);
                 }
                 if ui.add(clearcp_button).clicked() {
                     pending_clear_cb = Some(());
                 }
             });
 
-            if let Some(kind) = pending_new_modal {
-                self.new_modal(kind);
+            if let Some(kind) = pending_new_overlay {
+                self.new_overlay(kind);
             }
 
             if pending_clear_cb.is_some() {
@@ -1224,10 +1247,22 @@ impl eframe::App for App {
 
         // modals
 
-        if let Some(modal) = &self.modals.rename {
+        let overlay = &self.overlay;
+        let overlay_kind = overlay.kind;
+
+        let (
+            mut pending_upd_overlay_buffer,
+            mut pending_rename,
+            mut pending_create,
+            mut pending_close_overlay,
+        ) = (None, false, None, false);
+
+        if let Some(kind) = overlay_kind
+            && kind == OverlayKind::Rename
+        {
             let modal_widget = Modal::new(Id::new("rename_modal"));
-            let mut content = modal.content.clone();
-            let error = &modal.error.clone();
+            let mut content = overlay.buffer.clone();
+            let error = &overlay.error.clone();
 
             modal_widget.show(&ctx, |ui| {
                 ui.heading("renaming");
@@ -1235,14 +1270,14 @@ impl eframe::App for App {
                 ui.add(Label::new(RichText::new(error).color(Color32::LIGHT_RED)));
 
                 if input.changed() {
-                    self.update_modal(ModalKind::Rename, content);
+                    pending_upd_overlay_buffer = Some(content);
                 }
 
                 if input.lost_focus() {
                     if ui.input(|i| i.key_pressed(Key::Enter)) {
-                        self.rename();
+                        pending_rename = true;
                     } else {
-                        self.close_modal(ModalKind::Rename);
+                        pending_close_overlay = true;
                     }
                 }
 
@@ -1250,10 +1285,12 @@ impl eframe::App for App {
             });
         }
 
-        if let Some(modal) = &self.modals.create_file {
+        if let Some(kind) = overlay_kind
+            && kind == OverlayKind::CreateFile
+        {
             let modal_widget = Modal::new(Id::new("create_file_modal"));
-            let mut content = modal.content.clone();
-            let error = modal.error.clone();
+            let mut content = overlay.buffer.clone();
+            let error = &overlay.error.clone();
 
             modal_widget.show(&ctx, |ui| {
                 ui.label(format!("creating file at {}", self.current_path.display()));
@@ -1261,14 +1298,14 @@ impl eframe::App for App {
                 ui.add(Label::new(RichText::new(error).color(Color32::LIGHT_RED)));
 
                 if input.changed() {
-                    self.update_modal(ModalKind::CreateFile, content);
+                    pending_upd_overlay_buffer = Some(content);
                 }
 
                 if input.lost_focus() {
                     if ui.input(|i| i.key_pressed(Key::Enter)) {
-                        self.create(true);
+                        pending_create = Some(true);
                     } else {
-                        self.close_modal(ModalKind::CreateFile);
+                        pending_close_overlay = true;
                     }
                 }
 
@@ -1276,10 +1313,12 @@ impl eframe::App for App {
             });
         }
 
-        if let Some(modal) = &self.modals.create_folder {
+        if let Some(kind) = overlay_kind
+            && kind == OverlayKind::CreateFolder
+        {
             let modal_widget = Modal::new(Id::new("create_folder_modal"));
-            let mut content = modal.content.clone();
-            let error = &modal.error.clone();
+            let mut content = overlay.buffer.clone();
+            let error = &overlay.error.clone();
 
             modal_widget.show(&ctx, |ui| {
                 ui.label(format!(
@@ -1290,14 +1329,14 @@ impl eframe::App for App {
                 ui.add(Label::new(RichText::new(error).color(Color32::LIGHT_RED)));
 
                 if input.changed() {
-                    self.update_modal(ModalKind::CreateFolder, content);
+                    pending_upd_overlay_buffer = Some(content);
                 }
 
                 if input.lost_focus() {
                     if ui.input(|i| i.key_pressed(Key::Enter)) {
-                        self.create(false);
+                        pending_create = Some(false);
                     } else {
-                        self.close_modal(ModalKind::CreateFolder);
+                        pending_close_overlay = true;
                     }
                 }
 
@@ -1305,9 +1344,27 @@ impl eframe::App for App {
             });
         }
 
+        if let Some(buffer) = pending_upd_overlay_buffer {
+            self.update_overlay_buffer(buffer);
+        }
+
+        if pending_close_overlay {
+            self.close_overlay();
+        }
+
+        if let Some(kind) = pending_create {
+            self.create(kind);
+        }
+
+        if pending_rename {
+            self.rename();
+        }
+
         let mut pending_paste = None;
 
-        if let Some(_modal) = &self.modals.paste {
+        if let Some(kind) = overlay_kind
+            && kind == OverlayKind::Paste
+        {
             let modal_widget = Modal::new(Id::new("paste_modal"));
 
             modal_widget.show(&ctx, |ui| {
@@ -1343,7 +1400,7 @@ impl eframe::App for App {
                 });
 
                 if ui.input(|i| i.key_pressed(Key::Escape)) {
-                    self.close_modal(ModalKind::Paste);
+                    self.close_overlay();
                 }
             });
         };
@@ -1355,7 +1412,9 @@ impl eframe::App for App {
         let mut pending_delete = false;
         let mut pending_close_delete = false;
 
-        if let Some(_modal) = &self.modals.delete {
+        if let Some(kind) = overlay_kind
+            && kind == OverlayKind::Delete
+        {
             let modal_widget = Modal::new(Id::new("delete_modal"));
             let paths = self
                 .selected
@@ -1402,12 +1461,14 @@ impl eframe::App for App {
             pending_close_delete = true;
         }
         if pending_close_delete {
-            self.close_modal(ModalKind::Delete);
+            self.close_overlay();
         }
 
         let mut pending_close_metadata = false;
 
-        if let Some(_modal) = &self.modals.metadata {
+        if let Some(kind) = overlay_kind
+            && kind == OverlayKind::Metadata
+        {
             let modal_widget = Modal::new(Id::new("metadata_modal"));
             let entry = &self.entries.entry(&self.current_index.unwrap()).unwrap();
 
@@ -1437,7 +1498,7 @@ impl eframe::App for App {
         }
 
         if pending_close_metadata {
-            self.close_modal(ModalKind::Metadata);
+            self.close_overlay();
         }
 
         let toasts_opt = self.toasts.clone();

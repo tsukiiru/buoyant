@@ -3,6 +3,8 @@ use std::{env, fs};
 use eframe::egui::{Key, KeyboardShortcut, Modifiers};
 use serde::Deserialize;
 
+use crate::Property;
+
 pub type Keybind = (KeybindAction, KeyboardShortcut);
 
 #[derive(Clone, Debug)]
@@ -25,6 +27,8 @@ impl Default for Actions {
 pub struct Config {
     pub keybinds: Keybinds,
     pub keybinds_list: Vec<Keybind>,
+    pub sorting: Sorting,
+    pub view: View,
 }
 
 impl Default for Config {
@@ -32,6 +36,8 @@ impl Default for Config {
         Config {
             keybinds: Keybinds::default(),
             keybinds_list: Vec::with_capacity(16),
+            sorting: Sorting::default(),
+            view: View::default(),
         }
     }
 }
@@ -112,6 +118,32 @@ fn bind(modifiers: Modifiers, key: Key) -> KeyboardShortcut {
     KeyboardShortcut::new(modifiers, key)
 }
 
+pub struct Sorting {
+    pub sorting_by: Property,
+    pub reversed: bool,
+}
+
+impl Default for Sorting {
+    fn default() -> Self {
+        Sorting {
+            sorting_by: Property::Name,
+            reversed: false,
+        }
+    }
+}
+
+pub struct View {
+    pub explorer: Vec<Property>,
+}
+
+impl Default for View {
+    fn default() -> Self {
+        View {
+            explorer: vec![Property::Name],
+        }
+    }
+}
+
 pub fn fetch(config: &mut Config) {
     let home_dir = env::home_dir();
 
@@ -133,11 +165,19 @@ pub fn fetch(config: &mut Config) {
 #[derive(Deserialize)]
 struct RawConfig {
     keybinds: Option<RawKeybinds>,
+    sorting: Option<RawSorting>,
+    view: Option<RawView>,
 }
 
 fn process_raw_config(raw_config: &RawConfig, config: &mut Config) {
     if let Some(table) = &raw_config.keybinds {
         process_raw_keybinds(&table, &mut config.keybinds);
+    }
+    if let Some(table) = &raw_config.sorting {
+        process_raw_sorting(&table, &mut config.sorting);
+    }
+    if let Some(table) = &raw_config.view {
+        process_raw_view(&table, &mut config.view);
     }
 }
 
@@ -409,4 +449,44 @@ fn listing_keybinds(keybinds: &Keybinds, list: &mut Vec<Keybind>) {
     list.push((KeybindAction::Refresh, keybinds.refresh));
     list.push((KeybindAction::Search, keybinds.search));
     list.push((KeybindAction::Info, keybinds.view_info));
+}
+
+#[derive(Deserialize)]
+struct RawSorting {
+    sorting_by: Option<String>,
+    reversed: Option<bool>,
+}
+
+fn process_raw_sorting(raw_sorting: &RawSorting, sorting_config: &mut Sorting) {
+    if let Some(by) = &raw_sorting.sorting_by {
+        sorting_config.sorting_by = match_property(&by);
+    }
+    if let Some(bol) = &raw_sorting.reversed {
+        sorting_config.reversed = bol.to_owned();
+    }
+}
+
+#[derive(Deserialize)]
+struct RawView {
+    explorer: Option<Vec<String>>,
+}
+
+fn process_raw_view(raw_view: &RawView, view_conf: &mut View) {
+    if let Some(list) = &raw_view.explorer {
+        view_conf.explorer.clear();
+
+        list.iter()
+            .for_each(|i| view_conf.explorer.push(match_property(&i)));
+    }
+}
+
+fn match_property(input: &str) -> Property {
+    match input.to_lowercase().as_str() {
+        "name" => Property::Name,
+        "accessed" => Property::Accessed,
+        "created" => Property::Created,
+        "type" => Property::Type,
+        "size" => Property::Size,
+        _ => Property::Name,
+    }
 }

@@ -9,57 +9,54 @@ pub enum PasteKind {
     Duplicate,
 }
 
-pub struct Modals {
-    pub rename: Option<InputModal>,
-    pub create_file: Option<InputModal>,
-    pub create_folder: Option<InputModal>,
-    pub search: Option<SearchModal>,
-    pub paste: Option<ChoiceModal>,
-    pub delete: Option<ChoiceModal>,
-    pub metadata: Option<InfoModal>,
+pub struct Overlay {
+    pub buffer: String,
+    pub error: String,
+    pub path: Option<PathBuf>,
+    pub kind: Option<OverlayKind>,
 }
 
-impl Default for Modals {
+impl Default for Overlay {
     fn default() -> Self {
-        Modals {
-            rename: None,
-            create_file: None,
-            create_folder: None,
-            search: None,
-            paste: None,
-            delete: None,
-            metadata: None,
+        Overlay {
+            buffer: String::new(),
+            error: String::new(),
+            path: None,
+            kind: None,
         }
     }
 }
 
-pub enum ModalKind {
+#[derive(Clone, Copy, PartialEq)]
+pub enum OverlayKind {
     Rename,
     CreateFile,
     CreateFolder,
-    Search,
     Paste,
     Delete,
     Metadata,
 }
 
-// modal for searching
-pub struct SearchModal {
-    pub content: String,
+pub struct Field {
+    pub buffer: String,
+    pub kind: Option<FieldKind>,
     pub focused: bool,
 }
 
-// modal for inputting text
-pub struct InputModal {
-    pub path: Option<PathBuf>,
-    pub content: String,
-    pub error: String,
+impl Default for Field {
+    fn default() -> Self {
+        Field {
+            buffer: String::new(),
+            kind: None,
+            focused: false,
+        }
+    }
 }
 
-// modal with some choices
-pub struct ChoiceModal {}
-// modal with some uh... info
-pub struct InfoModal {}
+#[derive(Clone, Copy, PartialEq, Debug)]
+pub enum FieldKind {
+    Search,
+}
 
 #[derive(Debug)]
 pub struct Clipboard {
