@@ -61,6 +61,7 @@ pub enum KeybindAction {
     Refresh,
     Info,
     Search,
+    Choice(usize),
 }
 
 pub struct Keybinds {
@@ -81,6 +82,16 @@ pub struct Keybinds {
     pub refresh: KeyboardShortcut,
     pub view_info: KeyboardShortcut,
     pub search: KeyboardShortcut,
+    pub choice_0: KeyboardShortcut,
+    pub choice_1: KeyboardShortcut,
+    pub choice_2: KeyboardShortcut,
+    pub choice_3: KeyboardShortcut,
+    pub choice_4: KeyboardShortcut,
+    pub choice_5: KeyboardShortcut,
+    pub choice_6: KeyboardShortcut,
+    pub choice_7: KeyboardShortcut,
+    pub choice_8: KeyboardShortcut,
+    pub choice_9: KeyboardShortcut,
 }
 
 const NONE: Modifiers = Modifiers::NONE;
@@ -110,6 +121,16 @@ impl Default for Keybinds {
             refresh: bind(CTRL, Key::R),
             search: bind(NONE, Key::Slash),
             view_info: bind(NONE, Key::F12),
+            choice_0: bind(NONE, Key::Num0),
+            choice_1: bind(NONE, Key::Num1),
+            choice_2: bind(NONE, Key::Num2),
+            choice_3: bind(NONE, Key::Num3),
+            choice_4: bind(NONE, Key::Num4),
+            choice_5: bind(NONE, Key::Num5),
+            choice_6: bind(NONE, Key::Num6),
+            choice_7: bind(NONE, Key::Num7),
+            choice_8: bind(NONE, Key::Num8),
+            choice_9: bind(NONE, Key::Num9),
         }
     }
 }
@@ -134,12 +155,14 @@ impl Default for Sorting {
 
 pub struct View {
     pub explorer: Vec<Property>,
+    pub dark_mode: bool,
 }
 
 impl Default for View {
     fn default() -> Self {
         View {
             explorer: vec![Property::Name],
+            dark_mode: false,
         }
     }
 }
@@ -200,6 +223,16 @@ struct RawKeybinds {
     pub refresh: Option<String>,
     pub search: Option<String>,
     pub view_info: Option<String>,
+    pub choice_0: Option<String>,
+    pub choice_1: Option<String>,
+    pub choice_2: Option<String>,
+    pub choice_3: Option<String>,
+    pub choice_4: Option<String>,
+    pub choice_5: Option<String>,
+    pub choice_6: Option<String>,
+    pub choice_7: Option<String>,
+    pub choice_8: Option<String>,
+    pub choice_9: Option<String>,
 }
 
 fn process_raw_keybinds(raw_keybinds: &RawKeybinds, kb_config: &mut Keybinds) {
@@ -287,6 +320,65 @@ fn process_raw_keybinds(raw_keybinds: &RawKeybinds, kb_config: &mut Keybinds) {
         && let Some(fresh_key) = match_key(key_str)
     {
         kb_config.view_info = fresh_key
+    }
+    if let Some(key_str) = &raw_keybinds.choice_0
+        && let Some(fresh_key) = match_key(key_str)
+    {
+        kb_config.choice_0 = fresh_key
+    }
+
+    if let Some(key_str) = &raw_keybinds.choice_1
+        && let Some(fresh_key) = match_key(key_str)
+    {
+        kb_config.choice_1 = fresh_key
+    }
+
+    if let Some(key_str) = &raw_keybinds.choice_2
+        && let Some(fresh_key) = match_key(key_str)
+    {
+        kb_config.choice_2 = fresh_key
+    }
+
+    if let Some(key_str) = &raw_keybinds.choice_3
+        && let Some(fresh_key) = match_key(key_str)
+    {
+        kb_config.choice_3 = fresh_key
+    }
+
+    if let Some(key_str) = &raw_keybinds.choice_4
+        && let Some(fresh_key) = match_key(key_str)
+    {
+        kb_config.choice_4 = fresh_key
+    }
+
+    if let Some(key_str) = &raw_keybinds.choice_5
+        && let Some(fresh_key) = match_key(key_str)
+    {
+        kb_config.choice_5 = fresh_key
+    }
+
+    if let Some(key_str) = &raw_keybinds.choice_6
+        && let Some(fresh_key) = match_key(key_str)
+    {
+        kb_config.choice_6 = fresh_key
+    }
+
+    if let Some(key_str) = &raw_keybinds.choice_7
+        && let Some(fresh_key) = match_key(key_str)
+    {
+        kb_config.choice_7 = fresh_key
+    }
+
+    if let Some(key_str) = &raw_keybinds.choice_8
+        && let Some(fresh_key) = match_key(key_str)
+    {
+        kb_config.choice_8 = fresh_key
+    }
+
+    if let Some(key_str) = &raw_keybinds.choice_9
+        && let Some(fresh_key) = match_key(key_str)
+    {
+        kb_config.choice_9 = fresh_key
     }
 }
 
@@ -449,6 +541,16 @@ fn listing_keybinds(keybinds: &Keybinds, list: &mut Vec<Keybind>) {
     list.push((KeybindAction::Refresh, keybinds.refresh));
     list.push((KeybindAction::Search, keybinds.search));
     list.push((KeybindAction::Info, keybinds.view_info));
+    list.push((KeybindAction::Choice(0), keybinds.choice_0));
+    list.push((KeybindAction::Choice(1), keybinds.choice_1));
+    list.push((KeybindAction::Choice(2), keybinds.choice_2));
+    list.push((KeybindAction::Choice(3), keybinds.choice_3));
+    list.push((KeybindAction::Choice(4), keybinds.choice_4));
+    list.push((KeybindAction::Choice(5), keybinds.choice_5));
+    list.push((KeybindAction::Choice(6), keybinds.choice_6));
+    list.push((KeybindAction::Choice(7), keybinds.choice_7));
+    list.push((KeybindAction::Choice(8), keybinds.choice_8));
+    list.push((KeybindAction::Choice(9), keybinds.choice_9));
 }
 
 #[derive(Deserialize)]
@@ -469,6 +571,7 @@ fn process_raw_sorting(raw_sorting: &RawSorting, sorting_config: &mut Sorting) {
 #[derive(Deserialize)]
 struct RawView {
     explorer: Option<Vec<String>>,
+    dark_mode: Option<bool>,
 }
 
 fn process_raw_view(raw_view: &RawView, view_conf: &mut View) {
@@ -477,6 +580,9 @@ fn process_raw_view(raw_view: &RawView, view_conf: &mut View) {
 
         list.iter()
             .for_each(|i| view_conf.explorer.push(match_property(&i)));
+    }
+    if let Some(b) = &raw_view.dark_mode {
+        view_conf.dark_mode = *b;
     }
 }
 

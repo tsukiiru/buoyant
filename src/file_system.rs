@@ -11,36 +11,50 @@ use std::{
 
 pub const BANNED_CHARACTERS: [&str; 4] = ["\0", "\"", "/", "*"];
 
-pub fn rename(path: &Path, name: &str) {
+pub fn rename(path: &Path, name: &str) -> Result<PathBuf, String> {
     let mut new_path = path.to_path_buf();
     new_path.set_file_name(name);
 
-    let command = Command::new("mv").arg(path).arg(new_path).output();
+    let command = Command::new("mv").arg(&path).arg(&new_path).output();
 
     if let Err(err) = command {
-        println!("{}", err);
+        return Err(err.to_string());
     }
+
+    Ok(new_path)
 }
 
-pub fn delete(paths: Vec<&Path>) {
-    paths.par_iter().for_each(|path| {
+pub fn delete(paths: Vec<&Path>) -> Result<(), String> {
+    let mut return_error = None;
+
+    paths.iter().for_each(|path| {
         if !path.exists() {
-            return;
+            return_error = Some(String::from("provided path doesn't exist?"));
         }
 
-        let command = Command::new("rm").arg("-rf").arg(path).output();
+        let command = Command::new("rm").arg("-rf").arg(&path).output();
 
         if let Err(e) = command {
-            println!("{}", e);
+            return_error = Some(e.to_string());
         }
     });
+
+    if let Some(err) = return_error {
+        return Err(err);
+    }
+
+    Ok(())
 }
 
-pub fn create(current_path: &Path, new_path: &Path, last_is_file: bool) -> Option<&'static str> {
+pub fn create(
+    current_path: &Path,
+    new_path: &Path,
+    last_is_file: &bool,
+) -> Result<PathBuf, String> {
     let layers: Vec<_> = new_path.components().collect();
 
     if layers.len() == 0 {
-        return None;
+        return Err(String::from("maybe dont leave the input box blank?"));
     }
 
     let mut clean_path = current_path.to_path_buf();
@@ -49,7 +63,7 @@ pub fn create(current_path: &Path, new_path: &Path, last_is_file: bool) -> Optio
         let name = layer.as_os_str().to_str().unwrap();
         for c in BANNED_CHARACTERS {
             if name.contains(c) {
-                return Some("invalid characters");
+                return Err(String::from("invalid characters"));
             }
         }
         clean_path.push(layer);
@@ -60,22 +74,22 @@ pub fn create(current_path: &Path, new_path: &Path, last_is_file: bool) -> Optio
 
     let try_create = fs::create_dir_all(path_without_last);
     if let Err(err) = try_create {
-        println!("{}", err);
+        return Err(err.to_string());
     }
 
-    if last_is_file {
-        let command = Command::new("touch").arg(clean_path).output();
+    if *last_is_file {
+        let command = Command::new("touch").arg(&clean_path).output();
         if let Err(err) = command {
-            println!("{}", err);
+            return Err(err.to_string());
         }
     } else {
-        let try_create = fs::create_dir(clean_path);
+        let try_create = fs::create_dir(&clean_path);
         if let Err(err) = try_create {
-            println!("{}", err);
+            return Err(err.to_string());
         }
     }
 
-    None
+    Ok(clean_path)
 }
 
 fn paste<'a>(
@@ -84,7 +98,7 @@ fn paste<'a>(
     paste_type: &PasteKind,
     path: &'a Path,
     is_cut: bool, // true - cut. false - copy
-) {
+) -> Option<PathBuf> {
     let name = path.file_name().unwrap().to_str().unwrap();
     let mut final_path = dest.to_path_buf();
     prevs.iter().for_each(|prev| final_path.push(prev));
@@ -93,7 +107,7 @@ fn paste<'a>(
     // check if not exists in the destination
     if !joined.exists() {
         move_file(path, joined, is_cut);
-        return;
+        return Some(joined.clone());
     }
 
     match paste_type {
@@ -107,18 +121,20 @@ fn paste<'a>(
             // since both file/folder has the same outcome for choosing duplicate
             let new_path = increment_suffix(&file_name(path), ext.as_str(), &final_path);
             move_file(path, &new_path, is_cut);
+            return Some(new_path);
         }
         PasteKind::Replace => {
             if path == joined {
-                return;
+                return Some(joined.clone());
                 // does nothing if trying to merge with the same destination as start
             }
 
             if !final_path.is_file() {
                 replace_file(path, joined, is_cut);
+                return Some(joined.clone());
             } else {
                 prevs.push(name);
-                paste(dest, prevs, paste_type, path, is_cut);
+                return paste(dest, prevs, paste_type, path, is_cut);
             }
         }
     }
@@ -192,9 +208,9 @@ pub fn file_type(path: &Path) -> &'static str {
     str_type
 }
 
-pub fn move_dir(old_files: &HashSet<PathBuf>, dest: &Path, operation: &PasteKind) {
+pub fn move_dir(old_files: &HashSet<PathBuf>, dest: &Path, operation: &PasteKind) -> Vec<PathBuf> {
     if !dest.exists() || !dest.is_dir() {
-        return;
+        return Vec::new();
     }
 
     // check if file with same name exists
@@ -204,35 +220,49 @@ pub fn move_dir(old_files: &HashSet<PathBuf>, dest: &Path, operation: &PasteKind
     // if duplicate, increment suffix normally, move to the next file
     // if merge, check if folder or file, if folder, get into that folder and repeat, if file, replace the file in destination
 
-    old_files.par_iter().for_each(|path| {
-        let mut clean_path = path.clone();
-        clean_path.pop();
+    old_files
+        .par_iter()
+        .map(|path| {
+            let mut clean_path = path.clone();
+            clean_path.pop();
 
-        if clean_path != dest {
-            paste(&dest, &mut Vec::with_capacity(5), operation, &path, true);
-        }
-    })
+            if clean_path != dest
+                && let Some(p) = paste(&dest, &mut Vec::with_capacity(5), operation, &path, true)
+            {
+                return p;
+            }
+
+            PathBuf::new()
+        })
+        .collect()
 }
 
-pub fn copy_dir(old_files: &HashSet<PathBuf>, dest: &Path, operation: &PasteKind) {
+pub fn copy_dir(old_files: &HashSet<PathBuf>, dest: &Path, operation: &PasteKind) -> Vec<PathBuf> {
     if !dest.exists() || !dest.is_dir() {
-        return;
+        return Vec::new();
     }
 
     old_files
         .par_iter()
-        .for_each(|p| paste(dest, &mut Vec::with_capacity(5), operation, &p, false));
+        .map(|p| {
+            if let Some(p) = paste(dest, &mut Vec::with_capacity(5), operation, &p, false) {
+                p
+            } else {
+                PathBuf::new()
+            }
+        })
+        .collect()
 }
 
 fn move_file(old_path: &Path, new_path: &Path, is_cut: bool) {
     let command;
 
     if is_cut {
-        command = Command::new("mv").arg(old_path).arg(new_path).output();
+        command = Command::new("mv").arg(&old_path).arg(&new_path).output();
     } else {
         command = Command::new("cp")
-            .arg(old_path)
-            .arg(new_path)
+            .arg(&old_path)
+            .arg(&new_path)
             .arg("-r")
             .output();
     }
@@ -247,12 +277,12 @@ fn replace_file(old_path: &Path, new_path: &Path, is_cut: bool) {
 
     Command::new("rm")
         .arg("-rf")
-        .arg(new_path)
+        .arg(&new_path)
         .output()
         .unwrap();
     // remove before copying / moving
 
-    let cmd = Command::new(program).arg(&old_path).arg(new_path).output();
+    let cmd = Command::new(program).arg(&old_path).arg(&new_path).output();
 
     if let Err(e) = cmd {
         println!("{}", e);
