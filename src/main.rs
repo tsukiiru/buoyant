@@ -147,10 +147,10 @@ impl App {
     }
 
     fn handle_actions(&mut self, action: &KeybindAction, is_ctrled: bool, is_shifted: bool) {
-        if self.overlay.kind.is_some()
-            && let KeybindAction::Choice(choice) = action
-        {
-            self.finalize_overlay_choice(&choice);
+        if self.overlay.kind.is_some() {
+            if let KeybindAction::Choice(choice) = action {
+                self.finalize_overlay_choice(&choice);
+            }
             return;
         }
 
