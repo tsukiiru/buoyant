@@ -156,6 +156,7 @@ impl Default for Sorting {
 pub struct View {
     pub explorer: Vec<Property>,
     pub dark_mode: bool,
+    pub view_hidden_files: bool,
 }
 
 impl Default for View {
@@ -163,6 +164,7 @@ impl Default for View {
         View {
             explorer: vec![Property::Name],
             dark_mode: false,
+            view_hidden_files: false,
         }
     }
 }
@@ -572,6 +574,7 @@ fn process_raw_sorting(raw_sorting: &RawSorting, sorting_config: &mut Sorting) {
 struct RawView {
     explorer: Option<Vec<String>>,
     dark_mode: Option<bool>,
+    view_hidden_files: Option<bool>,
 }
 
 fn process_raw_view(raw_view: &RawView, view_conf: &mut View) {
@@ -583,6 +586,9 @@ fn process_raw_view(raw_view: &RawView, view_conf: &mut View) {
     }
     if let Some(b) = &raw_view.dark_mode {
         view_conf.dark_mode = *b;
+    }
+    if let Some(b) = &raw_view.view_hidden_files {
+        view_conf.view_hidden_files = *b;
     }
 }
 

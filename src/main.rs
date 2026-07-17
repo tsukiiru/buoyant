@@ -68,7 +68,6 @@ async fn main() -> eframe::Result {
 }
 
 type Toasts = Arc<RwLock<Vec<Toast>>>;
-// TODO: switch to RwLock?
 
 struct App {
     ctx: Context,
@@ -79,7 +78,6 @@ struct App {
     clipboard: Clipboard,
     overlay: Overlay,
     field: Field,
-    view_hidden: bool,
     config: Config,
     actions: Actions,
     toasts: Toasts, // mhm toasts
@@ -96,7 +94,6 @@ impl App {
             clipboard: Clipboard::default(),
             selected: HashSet::with_capacity(20),
             current_index: None,
-            view_hidden: true,
             config: Config::default(),
             actions: Actions::default(),
             toasts: Arc::new(RwLock::new(Vec::with_capacity(5))),
@@ -261,7 +258,7 @@ impl App {
             }
 
             KeybindAction::ToggleHidden => {
-                self.view_hidden = !self.view_hidden;
+                self.config.view.view_hidden_files = !self.config.view.view_hidden_files;
                 self.fetch_entries(None);
             }
             KeybindAction::CreateFile => self.open_overlay(&OverlayKind::CreateFile),
@@ -392,6 +389,7 @@ impl App {
         self.selected.clear();
 
         let mut filter = "";
+        let view_hidden = &self.config.view.view_hidden_files;
 
         if let Some(kind) = &self.field.kind
             && kind == &FieldKind::Search
@@ -400,10 +398,7 @@ impl App {
         }
 
         for (i, entry) in self.entries.children.iter().enumerate() {
-            if !entry.using
-                || (!self.view_hidden && entry.is_hidden)
-                || !entry.name.contains(&filter)
-            {
+            if !entry.using || (!*view_hidden && entry.is_hidden) || !entry.name.contains(&filter) {
                 continue;
             }
 
@@ -1067,7 +1062,9 @@ impl eframe::App for App {
                                         ));
                                     }
                                     Property::Type => {
-                                        g.add(Label::new(RichText::new(entry.file_type)));
+                                        g.add(Label::new(
+                                            RichText::new(entry.file_type).color(color),
+                                        ));
                                     }
                                 });
                             });

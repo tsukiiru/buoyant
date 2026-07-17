@@ -181,7 +181,7 @@ fn is_textfile(path: &Path) -> bool {
         return false;
     };
 
-    buf[..n].iter().all(|&b| b.is_ascii())
+    buf[..n].par_iter().all(|&b| b.is_ascii())
 }
 
 pub fn file_type(path: &Path) -> &'static str {
