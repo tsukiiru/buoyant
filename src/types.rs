@@ -83,7 +83,7 @@ pub enum ClipboardMode {
 // temporary entry that doesnt allocate memory
 pub struct TempEntry<'a> {
     pub name: &'a str,
-    pub file_type: &'static str,
+    pub file_type: Option<&'static str>,
     pub path: &'a Path,
     pub is_hidden: bool,
     pub accessed: Option<i64>,
@@ -95,7 +95,7 @@ pub struct TempEntry<'a> {
 #[derive(Clone, Debug)]
 pub struct Entry {
     pub name: String,
-    pub file_type: &'static str,
+    pub file_type: Option<&'static str>,
     pub path: PathBuf,
     pub using: bool,
     pub is_hidden: bool,
@@ -109,7 +109,7 @@ impl Default for Entry {
     fn default() -> Self {
         Entry {
             name: String::with_capacity(16),
-            file_type: "",
+            file_type: None,
             path: PathBuf::new(),
             using: false,
             is_hidden: false,

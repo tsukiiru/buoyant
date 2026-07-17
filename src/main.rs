@@ -38,6 +38,7 @@ pub enum Property {
     Created,
     Type,
     Size,
+    Path,
 }
 
 impl Display for Property {
@@ -50,6 +51,7 @@ impl Display for Property {
             Property::Created => thing = "created",
             Property::Type => thing = "type",
             Property::Size => thing = "size",
+            Property::Path => thing = "path",
         };
 
         write!(f, "{}", thing)
@@ -282,12 +284,20 @@ impl App {
         }
     }
 
+    fn should_fetch(&self, property: &Property) -> bool {
+        let config = &self.config;
+
+        config.view.explorer.contains(property)
+            || config.view.metadata.contains(property)
+            || &config.sorting.sorting_by == property
+    }
+
     fn fetch_entries(&mut self, prev_path: Option<PathBuf>) {
         self.close_overlay();
         // clear entries
         self.entries.children.iter_mut().for_each(|e| {
             e.name.clear();
-            e.file_type = "";
+            e.file_type = None;
             e.path = PathBuf::new();
             e.using = false;
             e.accessed = None;
@@ -309,18 +319,25 @@ impl App {
         let mut index: usize = 0;
 
         for path in fetch_current_path.unwrap() {
-            let (accessed, created) = file_system::accessed_and_created(&path, &true, &true);
+            let file_type = file_system::file_type(&path, &self.should_fetch(&Property::Type));
+            let (fetch_accessed, fetch_created) = (
+                self.should_fetch(&Property::Accessed),
+                self.should_fetch(&Property::Created),
+            );
+            let fetch_size = self.should_fetch(&Property::Size);
+            let (accessed, created) =
+                file_system::accessed_and_created(&path, &fetch_accessed, &fetch_created);
 
             self.push_entry(
                 &TempEntry {
                     name: path.file_name().unwrap().to_str().unwrap(),
-                    file_type: &file_system::file_type(&path),
+                    file_type: file_type,
                     is_hidden: file_system::is_hidden(&path),
                     path: &path,
                     accessed,
                     created,
-                    folder_size: file_system::folder_size(&path, &true),
-                    file_size: file_system::file_size(&path, &true),
+                    folder_size: file_system::folder_size(&path, &fetch_size),
+                    file_size: file_system::file_size(&path, &fetch_size),
                 },
                 index,
             );
@@ -484,6 +501,7 @@ impl App {
                 let (x, y) = (&reference[*a].file_type, &reference[*b].file_type);
                 x.cmp(y)
             }),
+            _ => {}
         }
 
         if self.config.sorting.reversed {
@@ -1055,7 +1073,7 @@ impl eframe::App for App {
                                                 format!("{} items", size)
                                             } else {
                                                 file_system::bytes_to_string(
-                                                    entry.file_size.unwrap(),
+                                                    entry.file_size.unwrap_or_default(),
                                                 )
                                             })
                                             .color(color),
@@ -1063,7 +1081,14 @@ impl eframe::App for App {
                                     }
                                     Property::Type => {
                                         g.add(Label::new(
-                                            RichText::new(entry.file_type).color(color),
+                                            RichText::new(entry.file_type.unwrap_or_default())
+                                                .color(color),
+                                        ));
+                                    }
+                                    Property::Path => {
+                                        g.add(Label::new(
+                                            RichText::new(format!("{}", entry.path.display()))
+                                                .color(color),
                                         ));
                                     }
                                 });
@@ -1560,22 +1585,42 @@ impl eframe::App for App {
             modal_widget.show(&ctx, |m| {
                 m.label(format!("showing metadata for {}", entry.name));
                 m.separator();
-                m.label(format!("full path: {}", entry.path.display()));
-                m.label(format!("type: {}", entry.file_type));
-                m.label(format!(
-                    "last accessed date: {}",
-                    format_date(entry.accessed)
-                ));
-                m.label(format!("created date: {}", format_date(entry.created)));
-                m.label(if let Some(size) = &entry.folder_size {
-                    format!("folder size: {} items", size)
-                } else {
-                    format!(
-                        "file size: {}",
-                        file_system::bytes_to_string(entry.file_size.unwrap_or_default())
-                    )
-                });
 
+                self.config.view.metadata.iter().for_each(|p| match p {
+                    Property::Path => {
+                        m.label(format!("full path: {}", entry.path.display()));
+                    }
+                    Property::Type => {
+                        m.label(format!("type: {}", entry.file_type.unwrap_or_default()));
+                    }
+                    Property::Accessed => {
+                        m.label(format!(
+                            "last accessed date: {}",
+                            DateTime::from_timestamp_secs(entry.accessed.unwrap_or_default())
+                                .unwrap()
+                                .format(&self.config.view.format_date)
+                        ));
+                    }
+                    Property::Created => {
+                        m.label(format!(
+                            "created date: {}",
+                            DateTime::from_timestamp_secs(entry.created.unwrap_or_default())
+                                .unwrap()
+                                .format(&self.config.view.format_date)
+                        ));
+                    }
+                    Property::Size => {
+                        m.label(if let Some(size) = &entry.folder_size {
+                            format!("folder size: {} items", size)
+                        } else {
+                            format!(
+                                "file size: {}",
+                                file_system::bytes_to_string(entry.file_size.unwrap_or_default())
+                            )
+                        });
+                    }
+                    _ => {}
+                });
                 if m.input(|i| i.key_pressed(Key::Escape)) {
                     pending_close_metadata = true;
                 }

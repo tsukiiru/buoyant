@@ -1,3 +1,4 @@
+use rayon::iter::{IntoParallelRefIterator, ParallelIterator};
 use std::{env, fs};
 
 use eframe::egui::{Key, KeyboardShortcut, Modifiers};
@@ -155,16 +156,26 @@ impl Default for Sorting {
 
 pub struct View {
     pub explorer: Vec<Property>,
+    pub metadata: Vec<Property>,
     pub dark_mode: bool,
     pub view_hidden_files: bool,
+    pub format_date: String,
 }
 
 impl Default for View {
     fn default() -> Self {
         View {
             explorer: vec![Property::Name],
+            metadata: vec![
+                Property::Name,
+                Property::Type,
+                Property::Size,
+                Property::Accessed,
+                Property::Created,
+            ],
             dark_mode: false,
             view_hidden_files: false,
+            format_date: String::from("%d/%m/%Y, %I:%M:%S %p"),
         }
     }
 }
@@ -573,22 +584,27 @@ fn process_raw_sorting(raw_sorting: &RawSorting, sorting_config: &mut Sorting) {
 #[derive(Deserialize)]
 struct RawView {
     explorer: Option<Vec<String>>,
+    metadata: Option<Vec<String>>,
     dark_mode: Option<bool>,
     view_hidden_files: Option<bool>,
+    format_date: Option<String>,
 }
 
 fn process_raw_view(raw_view: &RawView, view_conf: &mut View) {
     if let Some(list) = &raw_view.explorer {
-        view_conf.explorer.clear();
-
-        list.iter()
-            .for_each(|i| view_conf.explorer.push(match_property(&i)));
+        view_conf.explorer = list.par_iter().map(|i| match_property(&i)).collect();
+    }
+    if let Some(list) = &raw_view.metadata {
+        view_conf.metadata = list.par_iter().map(|i| match_property(&i)).collect();
     }
     if let Some(b) = &raw_view.dark_mode {
         view_conf.dark_mode = *b;
     }
     if let Some(b) = &raw_view.view_hidden_files {
         view_conf.view_hidden_files = *b;
+    }
+    if let Some(s) = &raw_view.format_date {
+        view_conf.format_date = s.to_string();
     }
 }
 
@@ -599,6 +615,7 @@ fn match_property(input: &str) -> Property {
         "created" => Property::Created,
         "type" => Property::Type,
         "size" => Property::Size,
+        "path" => Property::Path,
         _ => Property::Name,
     }
 }

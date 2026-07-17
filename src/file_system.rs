@@ -184,9 +184,12 @@ fn is_textfile(path: &Path) -> bool {
     buf[..n].par_iter().all(|&b| b.is_ascii())
 }
 
-pub fn file_type(path: &Path) -> &'static str {
+pub fn file_type(path: &Path, should_fetch: &bool) -> Option<&'static str> {
+    if !*should_fetch {
+        return None;
+    }
     if path.is_dir() {
-        return "Folder";
+        return Some("Folder");
     }
 
     let ext = file_extension(path);
@@ -202,10 +205,10 @@ pub fn file_type(path: &Path) -> &'static str {
     }
 
     if path.is_symlink() {
-        return "Symlink";
+        return Some("Symlink");
     }
 
-    str_type
+    Some(str_type)
 }
 
 pub fn move_dir(old_files: &HashSet<PathBuf>, dest: &Path, operation: &PasteKind) -> Vec<PathBuf> {
