@@ -72,10 +72,11 @@ async fn main() -> eframe::Result {
 type Toasts = Arc<RwLock<Vec<Toast>>>;
 
 struct App {
+    scroll_signal: bool, // temporary solution for auto scrolling
     ctx: Context,
     current_path: PathBuf,
     entries: Entries,
-    current_index: Option<usize>,
+    current_index: usize,
     selected: HashSet<usize>,
     clipboard: Clipboard,
     overlay: Overlay,
@@ -88,6 +89,7 @@ struct App {
 impl App {
     fn new(cc: &eframe::CreationContext<'_>) -> Self {
         let mut app = App {
+            scroll_signal: false,
             ctx: cc.egui_ctx.clone(),
             current_path: env::home_dir().unwrap(),
             overlay: Overlay::default(),
@@ -95,7 +97,7 @@ impl App {
             entries: Entries::default(),
             clipboard: Clipboard::default(),
             selected: HashSet::with_capacity(20),
-            current_index: None,
+            current_index: 0,
             config: Config::default(),
             actions: Actions::default(),
             toasts: Arc::new(RwLock::new(Vec::with_capacity(5))),
@@ -106,10 +108,37 @@ impl App {
         app
     }
 
+    fn toggle_view_hidden(&mut self) {
+        self.config.view.view_hidden_files = !self.config.view.view_hidden_files;
+
+        let selected_paths: Vec<PathBuf> = self
+            .selected
+            .par_iter()
+            .map(|i| self.entries.children[*i].path.clone())
+            .collect();
+
+        self.filter_entries(Some(
+            self.entries
+                .entry(&self.current_index)
+                .unwrap()
+                .path
+                .clone(),
+        ));
+        self.scroll_signal = true;
+        for p in selected_paths {
+            for (id, e) in self.entries.children.iter().enumerate() {
+                if p == e.path
+                    && let Some(i) = self.entries.displaying.iter().find(|i| **i == id)
+                {
+                    self.selected.insert(*i);
+                }
+            }
+        }
+    }
+
     fn fetch_config(&mut self) {
         config::fetch(&mut self.config);
-        let is_dark_mode = &self.config.view.dark_mode;
-        self.ctx.set_theme(if *is_dark_mode {
+        self.ctx.set_theme(if self.config.view.dark_mode {
             Theme::Dark
         } else {
             Theme::Light
@@ -118,13 +147,12 @@ impl App {
     }
 
     fn bind_keybinds(&mut self) {
-        let keybinds_list = &mut self.config.keybinds_list;
         let actions = &mut self.actions;
         let copy_sc = KeyboardShortcut::new(CTRL, Key::C);
         let cut_sc = KeyboardShortcut::new(CTRL, Key::X);
         let paste_sc = KeyboardShortcut::new(CTRL, Key::V);
 
-        for (action, sc) in keybinds_list {
+        for (action, sc) in &mut self.config.keybinds_list {
             if sc.modifiers.matches_logically(copy_sc.modifiers)
                 && sc.logical_key == copy_sc.logical_key
             {
@@ -235,20 +263,7 @@ impl App {
 
                 self.open_overlay(&OverlayKind::Delete);
             }
-            KeybindAction::Rename => {
-                if self.current_index.is_none() {
-                    self.new_toast(
-                        String::from("Rename"),
-                        String::from("nothing is selected to rename!"),
-                        ToastKind::Info,
-                        Duration::from_secs(3),
-                    );
-                    return;
-                }
-
-                self.open_overlay(&OverlayKind::Rename);
-            }
-
+            KeybindAction::Rename => self.open_overlay(&OverlayKind::Rename),
             KeybindAction::ClearClipboard => {
                 self.clear_clipboard();
                 self.new_toast(
@@ -258,26 +273,10 @@ impl App {
                     Duration::from_secs(3),
                 );
             }
-
-            KeybindAction::ToggleHidden => {
-                self.config.view.view_hidden_files = !self.config.view.view_hidden_files;
-                self.fetch_entries(None);
-            }
+            KeybindAction::ToggleHidden => self.toggle_view_hidden(),
             KeybindAction::CreateFile => self.open_overlay(&OverlayKind::CreateFile),
             KeybindAction::CreateFolder => self.open_overlay(&OverlayKind::CreateFolder),
-            KeybindAction::Info => {
-                if self.current_index.is_none() {
-                    self.new_toast(
-                        String::from("Metadata"),
-                        String::from("failed to open metadata modal (nothing is selected!)"),
-                        ToastKind::Danger,
-                        Duration::from_secs(3),
-                    );
-                    return;
-                }
-
-                self.open_overlay(&OverlayKind::Metadata);
-            }
+            KeybindAction::Info => self.open_overlay(&OverlayKind::Metadata),
             KeybindAction::Search => self.new_field(FieldKind::Search),
             KeybindAction::Refresh => self.fetch_config(),
             _ => {}
@@ -286,10 +285,7 @@ impl App {
 
     fn should_fetch(&self, property: &Property) -> bool {
         let config = &self.config;
-
-        config.view.explorer.contains(property)
-            || config.view.metadata.contains(property)
-            || &config.sorting.sorting_by == property
+        config.view.explorer.contains(property) || &config.sorting.sorting_by == property
     }
 
     fn fetch_entries(&mut self, prev_path: Option<PathBuf>) {
@@ -319,7 +315,6 @@ impl App {
         let mut index: usize = 0;
 
         for path in fetch_current_path.unwrap() {
-            let file_type = file_system::file_type(&path, &self.should_fetch(&Property::Type));
             let (fetch_accessed, fetch_created) = (
                 self.should_fetch(&Property::Accessed),
                 self.should_fetch(&Property::Created),
@@ -331,7 +326,7 @@ impl App {
             self.push_entry(
                 &TempEntry {
                     name: path.file_name().unwrap().to_str().unwrap(),
-                    file_type: file_type,
+                    file_type: file_system::file_type(&path, &self.should_fetch(&Property::Type)),
                     is_hidden: file_system::is_hidden(&path),
                     path: &path,
                     accessed,
@@ -357,44 +352,31 @@ impl App {
         self.filter_entries(prev_path);
     }
 
-    fn push_entry(&mut self, entry: &TempEntry, index: usize) {
-        let (file_size, file_type, accessed, created, name, is_hidden, path, folder_size) = (
-            entry.file_size,
-            entry.file_type,
-            entry.accessed,
-            entry.created,
-            entry.name,
-            entry.is_hidden,
-            entry.path,
-            entry.folder_size,
-        );
-
-        let entry_opt = self.entries.children.get_mut(index);
-
-        if let Some(entry) = entry_opt {
-            entry.is_hidden = is_hidden;
+    fn push_entry(&mut self, temp_entry: &TempEntry, index: usize) {
+        if let Some(entry) = self.entries.children.get_mut(index) {
+            entry.is_hidden = temp_entry.is_hidden;
             entry.using = true;
-            entry.file_size = file_size;
-            entry.accessed = accessed;
-            entry.created = created;
-            entry.folder_size = folder_size;
-            entry.file_type = file_type;
+            entry.file_size = temp_entry.file_size;
+            entry.accessed = temp_entry.accessed;
+            entry.created = temp_entry.created;
+            entry.folder_size = temp_entry.folder_size;
+            entry.file_type = temp_entry.file_type;
 
-            entry.name.push_str(name);
-            entry.path.push(path);
+            entry.name.push_str(temp_entry.name);
+            entry.path.push(temp_entry.path);
         } else {
             let mut entry = Entry {
-                is_hidden,
-                folder_size,
-                file_size,
-                accessed,
-                created,
-                file_type,
+                is_hidden: temp_entry.is_hidden,
+                folder_size: temp_entry.folder_size,
+                file_size: temp_entry.file_size,
+                accessed: temp_entry.accessed,
+                created: temp_entry.created,
+                file_type: temp_entry.file_type,
                 using: true,
                 ..Default::default()
             };
-            entry.name.push_str(name);
-            entry.path.push(path);
+            entry.name.push_str(temp_entry.name);
+            entry.path.push(temp_entry.path);
 
             self.entries.children.push(entry);
         }
@@ -402,7 +384,7 @@ impl App {
 
     fn filter_entries(&mut self, prev_path: Option<PathBuf>) {
         self.entries.displaying.clear();
-        self.current_index = None;
+        self.current_index = 0;
         self.selected.clear();
 
         let mut filter = "";
@@ -452,14 +434,13 @@ impl App {
                     if let Some(entry) = self.entries.children.get(*entry_index)
                         && entry.path == path
                     {
-                        self.current_index = Some(index.clone());
+                        self.current_index = index.clone();
                     }
                 });
         }
     }
 
     fn sort(&mut self, index: usize, is_from_start: bool) {
-        let sorting_by = &self.config.sorting.sorting_by;
         let reference = &self.entries.children;
         let displaying = if is_from_start {
             &mut self.entries.displaying[..index]
@@ -467,7 +448,7 @@ impl App {
             &mut self.entries.displaying[index..]
         };
 
-        match sorting_by {
+        match &self.config.sorting.sorting_by {
             Property::Name => {
                 let mut lowercased: Vec<(usize, String)> = displaying
                     .par_iter()
@@ -510,14 +491,11 @@ impl App {
     }
 
     fn nav_forward(&mut self) {
-        let cur_index = &self.current_index;
+        let to = &self.entries.entry(&self.current_index).unwrap().path;
 
-        if cur_index.is_none() {
+        if !to.is_file() && !to.is_dir() {
             return;
         }
-
-        let cur_index = cur_index.unwrap();
-        let to = &self.entries.entry(&cur_index).unwrap().path;
 
         if to.is_file() {
             let res = Command::new("xdg-open").arg(to).spawn();
@@ -529,12 +507,8 @@ impl App {
                     Duration::from_millis(5000),
                 );
             }
-            return;
         }
 
-        if !to.is_dir() {
-            return;
-        }
         self.current_path = to.to_path_buf();
         self.fetch_entries(None);
     }
@@ -546,19 +520,19 @@ impl App {
     }
 
     fn delete(&mut self) {
-        let paths = self
-            .selected
-            .par_iter()
-            .map(|entry_index| {
-                self.entries
-                    .children
-                    .get(*entry_index)
-                    .unwrap()
-                    .path
-                    .as_ref()
-            })
-            .collect::<Vec<&Path>>();
-        if let Err(e) = file_system::delete(paths) {
+        if let Err(e) = file_system::delete(
+            self.selected
+                .par_iter()
+                .map(|entry_index| {
+                    self.entries
+                        .children
+                        .get(*entry_index)
+                        .unwrap()
+                        .path
+                        .as_ref()
+                })
+                .collect::<Vec<&Path>>(),
+        ) {
             self.new_toast(
                 String::from("Delete"),
                 e,
@@ -589,7 +563,6 @@ impl App {
 
         self.close_overlay();
         self.fetch_entries(try_create.ok());
-        return;
     }
 
     fn rename(&mut self) {
@@ -660,14 +633,54 @@ impl App {
 
         match kind {
             OverlayKind::Rename => {
-                let path = &self
-                    .entries
-                    .entry(&self.current_index.unwrap())
-                    .unwrap()
-                    .path;
+                let path = &self.entries.entry(&self.current_index).unwrap().path;
 
                 overlay.path = Some(path.to_path_buf());
                 overlay.buffer = path.file_name().unwrap().to_str().unwrap().to_string();
+            }
+            OverlayKind::Metadata => {
+                let metadata_conf = &self.config.view.metadata;
+                let selected_entry = self.entries.entry(&self.current_index).unwrap();
+                let mut new_entry = Entry::default();
+
+                new_entry.path = selected_entry.path.clone();
+                new_entry.name = selected_entry.name.clone();
+
+                if let Some(t) = selected_entry.file_type {
+                    new_entry.file_type = Some(t);
+                } else {
+                    new_entry.file_type = file_system::file_type(
+                        &selected_entry.path,
+                        &metadata_conf.contains(&Property::Path),
+                    );
+                }
+
+                if let Some(t) = selected_entry.accessed
+                    && let Some(p) = selected_entry.created
+                {
+                    new_entry.accessed = Some(t);
+                    new_entry.created = Some(p);
+                } else {
+                    let (acc, cr) = file_system::accessed_and_created(
+                        &selected_entry.path,
+                        &metadata_conf.contains(&Property::Accessed),
+                        &metadata_conf.contains(&Property::Created),
+                    );
+                    new_entry.accessed = acc;
+                    new_entry.created = cr;
+                }
+
+                if let Some(t) = selected_entry.file_size {
+                    new_entry.file_size = Some(t);
+                    new_entry.folder_size = selected_entry.folder_size;
+                } else {
+                    let fetch_size = &metadata_conf.contains(&Property::Size);
+                    new_entry.file_size = file_system::file_size(&selected_entry.path, fetch_size);
+                    new_entry.folder_size =
+                        file_system::folder_size(&selected_entry.path, fetch_size);
+                }
+
+                overlay.entry = Some(new_entry);
             }
             _ => {}
         }
@@ -749,14 +762,12 @@ impl App {
         };
 
         self.close_overlay();
-
         self.new_toast(
             String::from("Clipboard"),
             format!("successfully pasted {} items!", amount),
             ToastKind::Success,
             Duration::from_secs(3),
         );
-
         self.fetch_entries(Some(returned_path[0].to_owned()));
 
         for p in &returned_path {
@@ -772,15 +783,7 @@ impl App {
     }
 
     fn navigate_index(&mut self, direction: &NavigateDirection, is_ctrled: bool, is_shifted: bool) {
-        let index_opt = self.current_index.as_mut();
-        let mut current_index: usize = 0;
-
-        if index_opt.is_none() {
-            self.modify_selected(0, is_ctrled, is_shifted);
-            return;
-        } else if let Some(index) = index_opt {
-            current_index = *index;
-        }
+        let mut current_index: usize = self.current_index;
 
         match direction {
             NavigateDirection::Down => {
@@ -796,16 +799,16 @@ impl App {
         }
 
         self.modify_selected(current_index, is_ctrled, is_shifted);
+        self.scroll_signal = true;
     }
 
     fn swap_selected(&mut self, index: &usize) {
         // exclusively for right clicking
         // - 1 selected: swapping
         // - >= 2 selected: add to the selected
-        let entry_index_opt = self.entries.displaying.get(*index);
         let selected = &mut self.selected;
 
-        if let Some(entry_index) = entry_index_opt
+        if let Some(entry_index) = self.entries.displaying.get(*index)
             && !selected.contains(entry_index)
         {
             if selected.len() == 1 {
@@ -814,7 +817,7 @@ impl App {
             selected.insert(*entry_index);
         }
 
-        self.current_index = Some(*index);
+        self.current_index = *index;
     }
 
     fn modify_selected(&mut self, index: usize, is_ctrled: bool, is_shifted: bool) {
@@ -822,10 +825,8 @@ impl App {
             self.selected.clear();
         }
 
-        let end_index = if let Some(current_index) = self.current_index
-            && is_shifted
-        {
-            current_index
+        let end_index = if is_shifted {
+            self.current_index
         } else {
             index
         };
@@ -841,14 +842,14 @@ impl App {
         if is_ctrled {
             if self.selected.contains(entry_index) {
                 self.selected.remove(entry_index);
-                self.current_index = Some(index);
+                self.current_index = index;
                 return;
             } else {
                 self.selected.insert(*entry_index);
             }
         }
 
-        self.current_index = Some(index);
+        self.current_index = index;
         self.selected.insert(*entry_index);
     }
 
@@ -958,28 +959,22 @@ impl eframe::App for App {
                 if input.gained_focus() && !bol {
                     self.new_field(FieldKind::Search);
                 }
-
                 if input.changed() {
                     self.update_field_buffer(content);
                     self.logic_field(&FieldKind::Search);
                 }
-
                 if input.lost_focus() {
                     self.field.focused = false;
                 }
-
                 if self.field.kind.is_some() && ui.input(|i| i.key_pressed(Key::Escape)) {
                     self.close_field();
                 }
-
                 if self.field.focused {
                     input.request_focus();
                 }
             }
 
-            ui.heading("da buoyant file explorer!! :o");
             ui.separator();
-
             ui.horizontal(|ui| {
                 let view = &self.config.view.explorer;
                 ui.allocate_space(Vec2::new(2.0, 0.0));
@@ -1014,17 +1009,22 @@ impl eframe::App for App {
                 ) = (None, None, None, None, None, None, false);
 
                 let keybinds = &self.config.keybinds;
-                for (index, entry_index) in self.entries.displaying.clone().into_iter().enumerate()
-                {
-                    let is_selected = self.selected.contains(&entry_index);
-                    let is_current_index = if let Some(i) = self.current_index {
-                        index == i
-                    } else {
-                        false
-                    };
+                let current_index = &self.current_index;
+                let len = self.entries.displaying.len();
 
-                    let entry_opt = self.entries.children.get(entry_index);
+                for (index, entry_index) in {
+                    let start_index =
+                        (*current_index as i16 - 30).clamp(0, len as i16 - 1) as usize;
+                    let end_index = (*current_index as i16 + 30).clamp(0, len as i16 - 1) as usize;
 
+                    (start_index..=end_index).into_iter().zip(
+                        self.entries.displaying[start_index..=end_index]
+                            .iter()
+                            .clone(),
+                    )
+                } {
+                    let is_current_index = index == *current_index;
+                    let entry_opt = self.entries.children.get(*entry_index);
                     if entry_opt.is_none() {
                         continue;
                     }
@@ -1036,7 +1036,7 @@ impl eframe::App for App {
                         let mut frame = Frame::NONE
                             .inner_margin(8.0)
                             .stroke(Stroke::new(1.0, Color32::TRANSPARENT));
-                        if is_selected {
+                        if self.selected.contains(&entry_index) {
                             frame.fill = Color32::LIGHT_GREEN.gamma_multiply(0.3);
                         }
                         if is_current_index {
@@ -1099,8 +1099,9 @@ impl eframe::App for App {
                             ui.interact(fr.response.rect, Id::new(i), Sense::click());
                         i += 1;
 
-                        if is_current_index {
+                        if is_current_index && self.scroll_signal {
                             btn_response.scroll_to_me(None);
+                            self.scroll_signal = false;
                         }
 
                         btn_response.context_menu(|ui| {
@@ -1341,7 +1342,6 @@ impl eframe::App for App {
 
         let overlay = &self.overlay;
         let overlay_kind = overlay.kind;
-
         let (
             mut pending_upd_overlay_buffer,
             mut pending_rename,
@@ -1474,11 +1474,8 @@ impl eframe::App for App {
                         f.label(format!("{}", item.display()));
                     });
                 });
-
                 ui.separator();
-
                 ui.heading("choose pasting type");
-
                 ui.vertical(|ui| {
                     if ui
                         .add(
@@ -1509,12 +1506,6 @@ impl eframe::App for App {
                 }
             });
         };
-
-        if let Some(choice) = pending_overlay_choice {
-            self.finalize_overlay_choice(&choice);
-        }
-
-        let mut pending_overlay_choice = None;
 
         if let Some(kind) = overlay_kind
             && kind == OverlayKind::Delete
@@ -1570,17 +1561,13 @@ impl eframe::App for App {
             });
         }
 
-        if let Some(choice) = pending_overlay_choice {
-            self.finalize_overlay_choice(&choice);
-        }
-
         let mut pending_close_metadata = false;
 
         if let Some(kind) = overlay_kind
             && kind == OverlayKind::Metadata
         {
             let modal_widget = Modal::new(Id::new("metadata_modal"));
-            let entry = &self.entries.entry(&self.current_index.unwrap()).unwrap();
+            let entry = self.overlay.entry.as_ref().unwrap();
 
             modal_widget.show(&ctx, |m| {
                 m.label(format!("showing metadata for {}", entry.name));
@@ -1629,6 +1616,9 @@ impl eframe::App for App {
 
         if pending_close_metadata {
             self.close_overlay();
+        }
+        if let Some(choice) = pending_overlay_choice {
+            self.finalize_overlay_choice(&choice);
         }
 
         let toasts_opt = self.toasts.clone();

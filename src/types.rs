@@ -14,6 +14,7 @@ pub struct Overlay {
     pub error: String,
     pub path: Option<PathBuf>,
     pub kind: Option<OverlayKind>,
+    pub entry: Option<Entry>,
 }
 
 impl Default for Overlay {
@@ -23,6 +24,7 @@ impl Default for Overlay {
             error: String::new(),
             path: None,
             kind: None,
+            entry: None,
         }
     }
 }
