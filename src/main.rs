@@ -1,14 +1,16 @@
 mod config;
 mod file_system;
 mod file_types;
+mod icons;
 mod types;
 
 use chrono::{DateTime, Datelike, Utc};
 use eframe::egui::{
-    Align, Align2, Button, CentralPanel, Color32, Context, Event, Frame, Grid, Id, Key,
-    KeyboardShortcut, Label, Modal, ProgressBar, RichText, ScrollArea, Sense, Stroke, TextEdit,
-    Theme, Ui, Vec2, Window, mutex::RwLock,
+    Align, Align2, Button, CentralPanel, Color32, Context, Event, Frame, Grid, Id, Image, Key,
+    KeyboardShortcut, Label, Margin, Modal, ProgressBar, RichText, ScrollArea, Sense, Stroke,
+    TextEdit, Theme, Ui, Vec2, Window, mutex::RwLock,
 };
+use egui_extras;
 use rayon::{
     iter::{
         IndexedParallelIterator, IntoParallelRefIterator, IntoParallelRefMutIterator,
@@ -88,9 +90,11 @@ struct App {
 
 impl App {
     fn new(cc: &eframe::CreationContext<'_>) -> Self {
+        let ctx = cc.egui_ctx.clone();
+        egui_extras::install_image_loaders(&ctx);
         let mut app = App {
             scroll_signal: false,
-            ctx: cc.egui_ctx.clone(),
+            ctx: ctx,
             current_path: env::home_dir().unwrap(),
             overlay: Overlay::default(),
             field: Field::default(),
@@ -293,7 +297,7 @@ impl App {
         // clear entries
         self.entries.children.iter_mut().for_each(|e| {
             e.name.clear();
-            e.file_type = None;
+            e.file_type = "";
             e.path = PathBuf::new();
             e.using = false;
             e.accessed = None;
@@ -322,11 +326,13 @@ impl App {
             let fetch_size = self.should_fetch(&Property::Size);
             let (accessed, created) =
                 file_system::accessed_and_created(&path, &fetch_accessed, &fetch_created);
+            let (file_type, file_icon) = file_system::file_type(&path);
 
             self.push_entry(
                 &TempEntry {
                     name: path.file_name().unwrap().to_str().unwrap(),
-                    file_type: file_system::file_type(&path, &self.should_fetch(&Property::Type)),
+                    file_type: file_type,
+                    file_icon: file_icon,
                     is_hidden: file_system::is_hidden(&path),
                     path: &path,
                     accessed,
@@ -361,6 +367,7 @@ impl App {
             entry.created = temp_entry.created;
             entry.folder_size = temp_entry.folder_size;
             entry.file_type = temp_entry.file_type;
+            entry.file_icon = temp_entry.file_icon.clone();
 
             entry.name.push_str(temp_entry.name);
             entry.path.push(temp_entry.path);
@@ -372,6 +379,7 @@ impl App {
                 accessed: temp_entry.accessed,
                 created: temp_entry.created,
                 file_type: temp_entry.file_type,
+                file_icon: temp_entry.file_icon.clone(),
                 using: true,
                 ..Default::default()
             };
@@ -507,6 +515,7 @@ impl App {
                     Duration::from_millis(5000),
                 );
             }
+            return;
         }
 
         self.current_path = to.to_path_buf();
@@ -645,15 +654,7 @@ impl App {
 
                 new_entry.path = selected_entry.path.clone();
                 new_entry.name = selected_entry.name.clone();
-
-                if let Some(t) = selected_entry.file_type {
-                    new_entry.file_type = Some(t);
-                } else {
-                    new_entry.file_type = file_system::file_type(
-                        &selected_entry.path,
-                        &metadata_conf.contains(&Property::Path),
-                    );
-                }
+                new_entry.file_type = selected_entry.file_type;
 
                 if let Some(t) = selected_entry.accessed
                     && let Some(p) = selected_entry.created
@@ -977,7 +978,7 @@ impl eframe::App for App {
             ui.separator();
             ui.horizontal(|ui| {
                 let view = &self.config.view.explorer;
-                ui.allocate_space(Vec2::new(2.0, 0.0));
+                ui.allocate_space(Vec2::new(2.0 + 16.0, 0.0));
 
                 let mut grid = Grid::new(i);
                 i += 1;
@@ -1034,8 +1035,8 @@ impl eframe::App for App {
                     ui.horizontal(|ui| {
                         let view = &self.config.view.explorer;
                         let mut frame = Frame::NONE
-                            .inner_margin(8.0)
-                            .stroke(Stroke::new(1.0, Color32::TRANSPARENT));
+                            .stroke(Stroke::new(1.0, Color32::TRANSPARENT))
+                            .corner_radius(4.0);
                         if self.selected.contains(&entry_index) {
                             frame.fill = Color32::LIGHT_GREEN.gamma_multiply(0.3);
                         }
@@ -1048,6 +1049,15 @@ impl eframe::App for App {
                             if entry.is_hidden {
                                 color = visuals.text_color().gamma_multiply(0.3);
                             }
+
+                            let another_frame = Frame::NONE.inner_margin(Margin::symmetric(2, 8));
+                            another_frame.show(f, |a| {
+                                a.add(
+                                    Image::new(icons::match_icon(&entry.file_icon))
+                                        .fit_to_exact_size(Vec2::new(14.0, 14.0)),
+                                );
+                            });
+
                             let mut grid = Grid::new(Id::new(i));
                             i += 1;
 
@@ -1081,8 +1091,7 @@ impl eframe::App for App {
                                     }
                                     Property::Type => {
                                         g.add(Label::new(
-                                            RichText::new(entry.file_type.unwrap_or_default())
-                                                .color(color),
+                                            RichText::new(entry.file_type).color(color),
                                         ));
                                     }
                                     Property::Path => {
@@ -1578,7 +1587,7 @@ impl eframe::App for App {
                         m.label(format!("full path: {}", entry.path.display()));
                     }
                     Property::Type => {
-                        m.label(format!("type: {}", entry.file_type.unwrap_or_default()));
+                        m.label(format!("type: {}", entry.file_type));
                     }
                     Property::Accessed => {
                         m.label(format!(

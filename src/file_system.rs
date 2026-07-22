@@ -1,4 +1,7 @@
-use crate::{file_types, types::PasteKind};
+use crate::{
+    file_types::{self, IconKind},
+    types::PasteKind,
+};
 use rayon::iter::{IntoParallelRefIterator, ParallelIterator};
 use std::{
     collections::HashSet,
@@ -184,31 +187,33 @@ fn is_textfile(path: &Path) -> bool {
     buf[..n].par_iter().all(|&b| b.is_ascii())
 }
 
-pub fn file_type(path: &Path, should_fetch: &bool) -> Option<&'static str> {
-    if !*should_fetch {
-        return None;
-    }
+pub fn file_type(path: &Path) -> (&'static str, IconKind) {
     if path.is_dir() {
-        return Some("Folder");
+        return ("Folder", IconKind::Folder);
     }
 
-    let ext = file_extension(path);
-    let opt_type = file_types::extension_to_file_type(ext);
     let str_type: &str;
+    let icon;
 
-    if let Some(thing) = &opt_type {
-        str_type = &thing;
+    if let Some(thing) = file_types::extension_to_file_type(file_extension(path)) {
+        str_type = &thing.0;
+        icon = thing.1;
     } else if is_textfile(path) {
         str_type = "Text File";
+        icon = IconKind::File;
     } else {
         str_type = "Unknown";
+        icon = IconKind::QuestionMark;
     }
 
     if path.is_symlink() {
-        return Some("Symlink");
+        if str_type == "Unknown" {
+            return ("Symlink", IconKind::BrokenLink);
+        }
+        return ("Symlink", IconKind::Link);
     }
 
-    Some(str_type)
+    (str_type, icon)
 }
 
 pub fn move_dir(old_files: &HashSet<PathBuf>, dest: &Path, operation: &PasteKind) -> Vec<PathBuf> {

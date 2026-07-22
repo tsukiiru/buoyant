@@ -6,6 +6,7 @@ edition = "2024"
 [dependencies]
 chrono = "0.4.44"
 eframe = "0.35.0"
+egui_extras = { version = "0.35.0", features = ["svg"] }
 rayon = "1.12.0"
 serde = "1.0.228"
 tokio = { version="1.52.3", features= ["full"] }
