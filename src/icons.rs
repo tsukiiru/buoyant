@@ -28,11 +28,10 @@ pub fn match_icon(kind: &IconKind) -> ImageSource<'_> {
         IconKind::Sqlite => include_image!("../assets/icons/file-sql.svg"),
         IconKind::Cube => include_image!("../assets/icons/cube.svg"),
         IconKind::File => include_image!("../assets/icons/file.svg"),
-        IconKind::QuestionMark => include_image!("../assets/icons/image.svg"),
+        IconKind::QuestionMark => include_image!("../assets/icons/question-mark.svg"),
         IconKind::BrokenLink => include_image!("../assets/icons/link-break.svg"),
         IconKind::Folder => include_image!("../assets/icons/folder.svg"),
         IconKind::VueSrc => include_image!("../assets/icons/file-vue.svg"),
         IconKind::Link => include_image!("../assets/icons/link.svg"),
     }
 }
-
