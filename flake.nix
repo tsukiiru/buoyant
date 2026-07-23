@@ -1,27 +1,31 @@
 {
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
-    fenix.url = "github:nix-community/fenix";
   };
 
   outputs =
     {
       self,
       nixpkgs,
-      fenix,
+      ...
     }:
     let
       system = "x86_64-linux";
       pkgs = import nixpkgs { inherit system; };
 
-      toolchain = fenix.packages.${system}.stable.toolchain;
-
       fhs = pkgs.buildFHSEnv {
         name = "rust-build-env";
         targetPkgs =
           pkgs: with pkgs; [
-            toolchain
+            curl
             pkg-config
+          ];
+        multiPkgs =
+          pkgs: with pkgs; [
+            gcc
+            zlib
+            openssl
+            stdenv.cc.cc.lib
             libX11
             libXcursor
             libXrandr
@@ -30,9 +34,8 @@
             libxkbcommon
             vulkan-loader
             wayland
-            gcc
           ];
-        runScript = "bash";
+        runScript = "fish";
       };
     in
     {
