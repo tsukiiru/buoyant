@@ -348,6 +348,7 @@ impl App {
         self.entries.children.truncate(index);
 
         // freed some mem from the greedy alloc
+        #[cfg(target_env = "gnu")]
         unsafe {
             unsafe extern "C" {
                 fn malloc_trim(pad: usize) -> i32;
