@@ -1,5 +1,6 @@
 use std::{
     collections::HashSet,
+    fmt::Display,
     path::{Path, PathBuf},
     time::{Duration, Instant},
 };
@@ -54,6 +55,14 @@ impl Default for Field {
             kind: None,
             focused: false,
         }
+    }
+}
+
+impl Field {
+    pub fn reset(&mut self) {
+        self.buffer = String::new();
+        self.kind = None;
+        self.focused = false;
     }
 }
 
@@ -188,4 +197,38 @@ pub enum ToastKind {
 pub enum NavigateDirection {
     Up,
     Down,
+}
+
+#[derive(PartialEq, Default)]
+pub enum Property {
+    #[default]
+    Name,
+    Accessed,
+    Created,
+    Type,
+    Size,
+    Path,
+}
+
+impl Display for Property {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let thing;
+
+        match self {
+            Property::Name => thing = "name",
+            Property::Accessed => thing = "accessed",
+            Property::Created => thing = "created",
+            Property::Type => thing = "type",
+            Property::Size => thing = "size",
+            Property::Path => thing = "path",
+        };
+
+        write!(f, "{}", thing)
+    }
+}
+
+#[derive(PartialEq)]
+pub enum CreateType {
+    File,
+    Folder,
 }

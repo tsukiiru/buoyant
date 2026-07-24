@@ -1,6 +1,6 @@
 use crate::{
     file_types::{self, IconKind},
-    types::PasteKind,
+    types::{CreateType, PasteKind},
 };
 use rayon::iter::{IntoParallelRefIterator, ParallelIterator};
 use std::{
@@ -52,7 +52,7 @@ pub fn delete(paths: Vec<&Path>) -> Result<(), String> {
 pub fn create(
     current_path: &Path,
     new_path: &Path,
-    last_is_file: &bool,
+    create_type: &CreateType,
 ) -> Result<PathBuf, String> {
     let layers: Vec<_> = new_path.components().collect();
 
@@ -80,7 +80,7 @@ pub fn create(
         return Err(err.to_string());
     }
 
-    if *last_is_file {
+    if *create_type == CreateType::File {
         let command = Command::new("touch").arg(&clean_path).output();
         if let Err(err) = command {
             return Err(err.to_string());

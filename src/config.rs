@@ -4,7 +4,7 @@ use std::{env, fs};
 use eframe::egui::{Key, KeyboardShortcut, Modifiers};
 use serde::Deserialize;
 
-use crate::Property;
+use crate::types::Property;
 
 pub type Keybind = (KeybindAction, KeyboardShortcut);
 
@@ -36,7 +36,8 @@ impl Default for Config {
     fn default() -> Self {
         Config {
             keybinds: Keybinds::default(),
-            keybinds_list: Vec::with_capacity(16),
+            keybinds_list: Vec::with_capacity(27),
+            // TODO: update allocation size matching the number of keybinds
             sorting: Sorting::default(),
             view: View::default(),
         }
@@ -339,55 +340,46 @@ fn process_raw_keybinds(raw_keybinds: &RawKeybinds, kb_config: &mut Keybinds) {
     {
         kb_config.choice_0 = fresh_key
     }
-
     if let Some(key_str) = &raw_keybinds.choice_1
         && let Some(fresh_key) = match_key(key_str)
     {
         kb_config.choice_1 = fresh_key
     }
-
     if let Some(key_str) = &raw_keybinds.choice_2
         && let Some(fresh_key) = match_key(key_str)
     {
         kb_config.choice_2 = fresh_key
     }
-
     if let Some(key_str) = &raw_keybinds.choice_3
         && let Some(fresh_key) = match_key(key_str)
     {
         kb_config.choice_3 = fresh_key
     }
-
     if let Some(key_str) = &raw_keybinds.choice_4
         && let Some(fresh_key) = match_key(key_str)
     {
         kb_config.choice_4 = fresh_key
     }
-
     if let Some(key_str) = &raw_keybinds.choice_5
         && let Some(fresh_key) = match_key(key_str)
     {
         kb_config.choice_5 = fresh_key
     }
-
     if let Some(key_str) = &raw_keybinds.choice_6
         && let Some(fresh_key) = match_key(key_str)
     {
         kb_config.choice_6 = fresh_key
     }
-
     if let Some(key_str) = &raw_keybinds.choice_7
         && let Some(fresh_key) = match_key(key_str)
     {
         kb_config.choice_7 = fresh_key
     }
-
     if let Some(key_str) = &raw_keybinds.choice_8
         && let Some(fresh_key) = match_key(key_str)
     {
         kb_config.choice_8 = fresh_key
     }
-
     if let Some(key_str) = &raw_keybinds.choice_9
         && let Some(fresh_key) = match_key(key_str)
     {
