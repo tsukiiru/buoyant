@@ -24,7 +24,6 @@
           pkgs: with pkgs; [
             gcc
             zlib
-            openssl
             stdenv.cc.cc.lib
             libX11
             libXcursor
