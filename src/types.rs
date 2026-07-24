@@ -5,7 +5,7 @@ use std::{
     time::{Duration, Instant},
 };
 
-use crate::file_types::IconKind;
+use crate::icons::IconKind;
 
 pub enum PasteKind {
     Replace,

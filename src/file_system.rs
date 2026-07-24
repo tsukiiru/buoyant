@@ -1,5 +1,6 @@
 use crate::{
-    file_types::{self, IconKind},
+    file_types,
+    icons::IconKind,
     types::{CreateType, PasteKind},
 };
 use rayon::iter::{IntoParallelRefIterator, ParallelIterator};

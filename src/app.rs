@@ -26,7 +26,7 @@ use tokio;
 use crate::{
     config::{self, *},
     file_system::{self, BANNED_CHARACTERS},
-    icons,
+    icons::{self, IconKind},
     types::*,
 };
 
@@ -966,13 +966,10 @@ impl eframe::App for App {
 
                     let keybinds = &self.config.keybinds;
 
-                    for (index, entry_index) in {
-                        (range.start..=range.end)
-                            .zip(displaying[range.start..range.end].iter().clone())
-                    } {
+                    for (index, entry_index) in displaying.iter().enumerate() {
                         let is_current_index = index == *current_index;
                         let entry_opt = self.entries.children.get(*entry_index);
-                        if entry_opt.is_none() {
+                        if entry_opt.is_none() || (!range.contains(&index) && !is_current_index) {
                             continue;
                         }
 
@@ -992,15 +989,22 @@ impl eframe::App for App {
 
                             let fr = frame.show(ui, |f| {
                                 let mut color = visuals.text_color();
+                                let mut icon = &entry.file_icon;
                                 if entry.is_hidden {
-                                    color = visuals.text_color().gamma_multiply(0.3);
+                                    color = visuals.text_color().gamma_multiply(0.5);
                                 }
-
+                                if self.clipboard.entries.contains(&entry.path) {
+                                    icon = match self.clipboard.mode.as_ref().unwrap() {
+                                        ClipboardMode::Copy => &IconKind::Copy,
+                                        ClipboardMode::Cut => &IconKind::Scissors,
+                                    };
+                                    color = Color32::BLUE.gamma_multiply(0.3);
+                                }
                                 let another_frame =
                                     Frame::NONE.inner_margin(Margin::symmetric(2, 8));
                                 another_frame.show(f, |a| {
                                     a.add(
-                                        Image::new(icons::match_icon(&entry.file_icon))
+                                        Image::new(icons::match_icon(icon))
                                             .fit_to_exact_size(Vec2::new(14.0, 14.0)),
                                     );
                                 });
@@ -1074,9 +1078,11 @@ impl eframe::App for App {
                                 });
                             });
 
-                            let btn_response =
-                                ui.interact(fr.response.rect, Id::new(i), Sense::click());
-                            i += 1;
+                            let btn_response = ui.interact(
+                                fr.response.rect,
+                                Id::new(format!("btn{}", &entry_index)),
+                                Sense::click(),
+                            );
 
                             if is_current_index {
                                 btn_response.scroll_to_me(None);

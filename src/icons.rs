@@ -1,6 +1,39 @@
 use eframe::egui::{ImageSource, include_image};
 
-use crate::file_types::IconKind;
+#[derive(Clone, Debug)]
+pub enum IconKind {
+    Image,
+    Painting,
+    Video,
+    Audio,
+    RustSrc,
+    PySrc,
+    CSrc,
+    CppSrc,
+    JavaSrc,
+    JsSrc,
+    TsSrc,
+    Src,
+    TsxSrc,
+    JsxSrc,
+    CsSrc,
+    MdSrc,
+    CssSrc,
+    VueSrc,
+    HtmlSrc,
+    Script,
+    Archive,
+    Database,
+    Sqlite,
+    Cube,
+    File,
+    Link,
+    QuestionMark,
+    BrokenLink,
+    Folder,
+    Scissors,
+    Copy,
+}
 
 pub fn match_icon(kind: &IconKind) -> ImageSource<'_> {
     match kind {
@@ -33,5 +66,7 @@ pub fn match_icon(kind: &IconKind) -> ImageSource<'_> {
         IconKind::Folder => include_image!("../assets/icons/folder.svg"),
         IconKind::VueSrc => include_image!("../assets/icons/file-vue.svg"),
         IconKind::Link => include_image!("../assets/icons/link.svg"),
+        IconKind::Scissors => include_image!("../assets/icons/scissors.svg"),
+        IconKind::Copy => include_image!("../assets/icons/copy-simple.svg"),
     }
 }

@@ -1,35 +1,4 @@
-#[derive(Clone, Debug)]
-pub enum IconKind {
-    Image,
-    Painting,
-    Video,
-    Audio,
-    RustSrc,
-    PySrc,
-    CSrc,
-    CppSrc,
-    JavaSrc,
-    JsSrc,
-    TsSrc,
-    Src,
-    TsxSrc,
-    JsxSrc,
-    CsSrc,
-    MdSrc,
-    CssSrc,
-    VueSrc,
-    HtmlSrc,
-    Script,
-    Archive,
-    Database,
-    Sqlite,
-    Cube,
-    File,
-    Link,
-    QuestionMark,
-    BrokenLink,
-    Folder,
-}
+use crate::icons::IconKind;
 
 pub fn extension_to_file_type(extension: &str) -> Option<(&'static str, IconKind)> {
     let something: (&'static str, IconKind) = match extension {
