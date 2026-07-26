@@ -34,6 +34,7 @@ type Toasts = Arc<RwLock<Vec<Toast>>>;
 pub struct App {
     ctx: Context,
     current_path: PathBuf,
+    scroll_signal: bool,
     entries: Entries,
     current_index: usize,
     selected: HashSet<usize>,
@@ -48,6 +49,7 @@ pub struct App {
 impl Default for App {
     fn default() -> Self {
         App {
+            scroll_signal: false,
             ctx: Context::default(),
             current_path: env::home_dir().unwrap(),
             overlay: Overlay::default(),
@@ -743,6 +745,7 @@ impl App {
             }
         }
 
+        self.scroll_signal = true;
         self.modify_selected(current_index, is_ctrled, is_shifted);
     }
 
@@ -1084,8 +1087,9 @@ impl eframe::App for App {
                                 Sense::click(),
                             );
 
-                            if is_current_index {
+                            if is_current_index && self.scroll_signal {
                                 btn_response.scroll_to_me(None);
+                                self.scroll_signal = false;
                             }
 
                             btn_response.context_menu(|ui| {
