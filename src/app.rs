@@ -397,6 +397,7 @@ impl App {
                         && entry.path == path
                     {
                         self.current_index = index.clone();
+                        self.scroll_signal = true;
                     }
                 });
         }
@@ -863,7 +864,7 @@ impl eframe::App for App {
         }
     }
 
-    fn ui(&mut self, ui: &mut Ui, _frame: &mut eframe::Frame) {
+    fn ui(&mut self, main_ui: &mut Ui, _frame: &mut eframe::Frame) {
         let mut i = 0;
         let ctx = self.ctx.clone();
         let visuals = ctx.theme().default_visuals();
@@ -876,7 +877,7 @@ impl eframe::App for App {
             mut req_reset_selected,
         ) = (None, false, None, None, false);
 
-        let mut req_navigate_forward = false;
+        let (mut req_navigate_forward, mut req_navigate_backward) = (false, false);
         let mut req_create = None;
         let mut req_rename = false;
 
@@ -887,14 +888,22 @@ impl eframe::App for App {
             mut req_update_overlay_buffer,
         ) = (None, None, false, None);
 
-        CentralPanel::default().show(ui, |ui| {
+        let (
+            mut req_open_field,
+            mut req_close_field,
+            mut req_update_field_buffer,
+            mut req_logic_field,
+            mut req_unfocus_field,
+        ) = (None, false, None, None, false);
+
+        CentralPanel::default().show(main_ui, |ui| {
             ui.horizontal(|ui| {
                 let mut button =
                     ui.add(Button::new(RichText::new("<").size(14.0)).fill(Color32::TRANSPARENT));
                 button.set_intrinsic_size(Vec2::new(400.0, 20.0));
 
                 if button.clicked() {
-                    self.nav_back();
+                    req_navigate_backward = true;
                 }
 
                 ui.label(format!("{}", self.current_path.display()));
@@ -922,17 +931,17 @@ impl eframe::App for App {
                 );
 
                 if input.gained_focus() && !bol {
-                    self.new_field(FieldKind::Search);
+                    req_open_field = Some(FieldKind::Search);
                 }
                 if input.changed() {
-                    self.update_field_buffer(content);
-                    self.logic_field(&FieldKind::Search);
+                    req_update_field_buffer = Some(content);
+                    req_logic_field = Some(FieldKind::Search);
                 }
                 if input.lost_focus() {
-                    self.field.focused = false;
+                    req_unfocus_field = true;
                 }
                 if self.field.kind.is_some() && ui.input(|i| i.key_pressed(Key::Escape)) {
-                    self.close_field();
+                    req_close_field = true;
                 }
                 if self.field.focused {
                     input.request_focus();
@@ -955,13 +964,16 @@ impl eframe::App for App {
                 });
             });
 
-            let displaying = &self.entries.displaying;
             let current_index = &self.current_index;
+            let mut from: Option<Arc<usize>> = None;
+            let mut to = None;
+            let displaying = self.entries.displaying.clone();
 
             let bg_response =
-                ScrollArea::vertical().show_rows(ui, 32.0, displaying.len(), |ui, range| {
-                    let bg_response = ui.interact(
-                        ui.available_rect_before_wrap(),
+                ScrollArea::vertical().show_rows(ui, 32.0, displaying.len(), |sa, range| {
+                    sa.set_min_height(300.0);
+                    let bg_response = sa.interact(
+                        sa.available_rect_before_wrap(),
                         Id::new(format!("explorer-area{}", i)),
                         Sense::click(),
                     );
@@ -969,17 +981,18 @@ impl eframe::App for App {
 
                     let keybinds = &self.config.keybinds;
 
-                    for (index, entry_index) in displaying.iter().enumerate() {
+                    let view = &self.config.view.explorer;
+
+                    for (index, entry_index) in displaying.into_iter().enumerate() {
                         let is_current_index = index == *current_index;
-                        let entry_opt = self.entries.children.get(*entry_index);
+                        let entry_opt = self.entries.children.get(entry_index);
                         if entry_opt.is_none() || (!range.contains(&index) && !is_current_index) {
                             continue;
                         }
 
                         let entry = entry_opt.unwrap();
 
-                        ui.horizontal(|ui| {
-                            let view = &self.config.view.explorer;
+                        sa.horizontal(|h| {
                             let mut frame = Frame::NONE
                                 .stroke(Stroke::new(1.0, Color32::TRANSPARENT))
                                 .corner_radius(4.0);
@@ -990,102 +1003,110 @@ impl eframe::App for App {
                                 frame.stroke.color = visuals.text_color().linear_multiply(0.3);
                             }
 
-                            let fr = frame.show(ui, |f| {
-                                let mut color = visuals.text_color();
-                                let mut icon = &entry.file_icon;
-                                if entry.is_hidden {
-                                    color = visuals.text_color().gamma_multiply(0.5);
-                                }
-                                if self.clipboard.entries.contains(&entry.path) {
-                                    icon = match self.clipboard.mode.as_ref().unwrap() {
-                                        ClipboardMode::Copy => &IconKind::Copy,
-                                        ClipboardMode::Cut => &IconKind::Scissors,
-                                    };
-                                    color = Color32::BLUE.gamma_multiply(0.3);
-                                }
-                                let another_frame =
-                                    Frame::NONE.inner_margin(Margin::symmetric(2, 8));
-                                another_frame.show(f, |a| {
-                                    a.add(
-                                        Image::new(icons::match_icon(icon))
-                                            .fit_to_exact_size(Vec2::new(14.0, 14.0)),
+                            let mut color = visuals.text_color();
+                            let mut icon = &entry.file_icon;
+                            if entry.is_hidden {
+                                color = visuals.text_color().gamma_multiply(0.5);
+                            }
+                            if self.clipboard.entries.contains(&entry.path) {
+                                icon = match self.clipboard.mode.as_ref().unwrap() {
+                                    ClipboardMode::Copy => &IconKind::Copy,
+                                    ClipboardMode::Cut => &IconKind::Scissors,
+                                };
+                                color = Color32::BLUE.gamma_multiply(0.3);
+                            }
+
+                            let fr = frame
+                                .show(h, |f| {
+                                    f.dnd_drag_source(
+                                        Id::new(("item", index)),
+                                        entry_index,
+                                        |dnd| {
+                                            dnd.label("very cool item");
+                                        },
                                     );
-                                });
 
-                                let mut grid = Grid::new(Id::new(i));
-                                i += 1;
-
-                                grid = grid.min_col_width(200.0);
-                                grid.show(f, |g| {
-                                    view.iter().for_each(|p| match p {
-                                        Property::Name => {
-                                            g.add(
-                                                AtomLayout::new(&entry.name)
-                                                    .wrap_mode(TextWrapMode::Truncate)
-                                                    .max_width(200.0)
-                                                    .fallback_text_color(color),
-                                            );
-                                        }
-                                        Property::Accessed => {
-                                            g.add(
-                                                AtomLayout::new(format_date(entry.accessed))
-                                                    .max_width(200.0)
-                                                    .wrap_mode(TextWrapMode::Truncate)
-                                                    .fallback_text_color(color),
-                                            );
-                                        }
-                                        Property::Created => {
-                                            g.add(
-                                                AtomLayout::new(format_date(entry.created))
-                                                    .max_width(200.0)
-                                                    .wrap_mode(TextWrapMode::Truncate)
-                                                    .fallback_text_color(color),
-                                            );
-                                        }
-                                        Property::Size => {
-                                            g.add(
-                                                AtomLayout::new(
-                                                    if let Some(size) = &entry.folder_size {
-                                                        format!("{} items", size)
-                                                    } else {
-                                                        file_system::bytes_to_string(
-                                                            entry.file_size.unwrap_or_default(),
-                                                        )
-                                                    },
-                                                )
-                                                .max_width(200.0)
-                                                .wrap_mode(TextWrapMode::Truncate)
-                                                .fallback_text_color(color),
-                                            );
-                                        }
-                                        Property::Type => {
-                                            g.add(
-                                                AtomLayout::new(entry.file_type)
-                                                    .max_width(200.0)
-                                                    .wrap_mode(TextWrapMode::Truncate)
-                                                    .fallback_text_color(color),
-                                            );
-                                        }
-                                        Property::Path => {
-                                            g.add(
-                                                AtomLayout::new(format!(
-                                                    "{}",
-                                                    entry.path.display()
-                                                ))
-                                                .max_width(200.0)
-                                                .wrap_mode(TextWrapMode::Truncate)
-                                                .fallback_text_color(color),
-                                            );
-                                        }
+                                    let another_frame =
+                                        Frame::NONE.inner_margin(Margin::symmetric(2, 8));
+                                    another_frame.show(f, |a| {
+                                        a.add(
+                                            Image::new(icons::match_icon(icon))
+                                                .fit_to_exact_size(Vec2::new(14.0, 14.0)),
+                                        );
                                     });
-                                });
-                            });
 
-                            let btn_response = ui.interact(
-                                fr.response.rect,
-                                Id::new(format!("btn{}", &entry_index)),
-                                Sense::click(),
-                            );
+                                    let mut grid = Grid::new(Id::new(i));
+                                    i += 1;
+
+                                    grid = grid.min_col_width(200.0);
+                                    grid.show(f, |g| {
+                                        view.iter().for_each(|p| match p {
+                                            Property::Name => {
+                                                g.add(
+                                                    AtomLayout::new(&entry.name)
+                                                        .wrap_mode(TextWrapMode::Truncate)
+                                                        .max_width(200.0)
+                                                        .fallback_text_color(color),
+                                                );
+                                            }
+                                            Property::Accessed => {
+                                                g.add(
+                                                    AtomLayout::new(format_date(entry.accessed))
+                                                        .max_width(200.0)
+                                                        .wrap_mode(TextWrapMode::Truncate)
+                                                        .fallback_text_color(color),
+                                                );
+                                            }
+                                            Property::Created => {
+                                                g.add(
+                                                    AtomLayout::new(format_date(entry.created))
+                                                        .max_width(200.0)
+                                                        .wrap_mode(TextWrapMode::Truncate)
+                                                        .fallback_text_color(color),
+                                                );
+                                            }
+                                            Property::Size => {
+                                                g.add(
+                                                    AtomLayout::new(
+                                                        if let Some(size) = &entry.folder_size {
+                                                            format!("{} items", size)
+                                                        } else {
+                                                            file_system::bytes_to_string(
+                                                                entry.file_size.unwrap_or_default(),
+                                                            )
+                                                        },
+                                                    )
+                                                    .max_width(200.0)
+                                                    .wrap_mode(TextWrapMode::Truncate)
+                                                    .fallback_text_color(color),
+                                                );
+                                            }
+                                            Property::Type => {
+                                                g.add(
+                                                    AtomLayout::new(entry.file_type)
+                                                        .max_width(200.0)
+                                                        .wrap_mode(TextWrapMode::Truncate)
+                                                        .fallback_text_color(color),
+                                                );
+                                            }
+                                            Property::Path => {
+                                                g.add(
+                                                    AtomLayout::new(format!(
+                                                        "{}",
+                                                        entry.path.display()
+                                                    ))
+                                                    .max_width(200.0)
+                                                    .wrap_mode(TextWrapMode::Truncate)
+                                                    .fallback_text_color(color),
+                                                );
+                                            }
+                                        });
+                                    });
+                                })
+                                .response;
+
+                            let btn_response =
+                                h.interact(fr.rect, Id::new(("btn", &entry_index)), Sense::click());
 
                             if is_current_index && self.scroll_signal {
                                 btn_response.scroll_to_me(None);
@@ -1139,7 +1160,6 @@ impl eframe::App for App {
                                     req_open_overlay = Some(OverlayKind::Metadata);
                                 }
                             });
-
                             if btn_response.clicked() {
                                 req_modify_selected = Some(index);
                             }
@@ -1150,6 +1170,19 @@ impl eframe::App for App {
 
                             if btn_response.secondary_clicked() {
                                 req_swap_selected = Some(index);
+                            }
+
+                            if let (Some(_pointer), Some(_hovered_payload)) = (
+                                h.input(|i| i.pointer.interact_pos()),
+                                fr.dnd_hover_payload::<usize>(),
+                            ) {
+                                let _rect = fr.rect;
+                                let _stroke = Stroke::new(1.0, Color32::GRAY);
+
+                                if let Some(dragged_payload) = fr.dnd_release_payload() {
+                                    from = Some(dragged_payload);
+                                    to = Some(entry_index)
+                                }
                             }
                         });
                     }
@@ -1264,12 +1297,18 @@ impl eframe::App for App {
                 }
 
                 if ui.add(paste_button).clicked() {
-                    self.open_overlay(OverlayKind::Paste);
+                    req_open_overlay = Some(OverlayKind::Paste);
                 }
                 if ui.add(clearcp_button).clicked() {
                     req_reset_clipboard = true;
                 }
             });
+
+            // drag n drop handler
+            if let (Some(from), Some(to)) = (from, to) {
+                println!("dragged from {:?} to {:?}", from, to);
+                /////
+            }
         });
 
         // modals
@@ -1411,7 +1450,7 @@ impl eframe::App for App {
                 });
 
                 if ui.input(|i| i.key_pressed(Key::Escape)) {
-                    self.close_overlay();
+                    req_close_overlay = true;
                 }
             });
         };
@@ -1559,9 +1598,9 @@ impl eframe::App for App {
 
         if let Some(index) = req_modify_selected {
             let ctrl_pressed =
-                ui.input(|i| i.key_down(Key::ControlLeft) || i.key_down(Key::ControlRight));
+                main_ui.input(|i| i.key_down(Key::ControlLeft) || i.key_down(Key::ControlRight));
             let shift_pressed =
-                ui.input(|i| i.key_down(Key::ShiftLeft) || i.key_down(Key::ShiftRight));
+                main_ui.input(|i| i.key_down(Key::ShiftLeft) || i.key_down(Key::ShiftRight));
 
             self.modify_selected(index, ctrl_pressed, shift_pressed);
         }
@@ -1574,6 +1613,22 @@ impl eframe::App for App {
             self.nav_forward();
         }
 
+        if let Some(kind) = req_open_field {
+            self.new_field(kind);
+        }
+
+        if req_close_field {
+            self.close_field();
+        }
+
+        if let Some(kind) = req_logic_field {
+            self.logic_field(&kind);
+        }
+
+        if let Some(content) = req_update_field_buffer {
+            self.update_field_buffer(content);
+        }
+
         let toast_list = self.toasts.read();
         if toast_list.len() > 0 {
             let toast_overlay = Window::new("toast")
@@ -1582,7 +1637,7 @@ impl eframe::App for App {
                 .anchor(Align2::RIGHT_BOTTOM, Vec2::new(-8.0, -8.0))
                 .resizable(false);
 
-            toast_overlay.show(ui, |overlay| {
+            toast_overlay.show(main_ui, |overlay| {
                 for toast in toast_list.iter() {
                     let mut frame = Frame::new()
                         .corner_radius(4.0)
