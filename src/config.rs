@@ -37,7 +37,7 @@ impl Default for Config {
         Config {
             keybinds: Keybinds::default(),
             keybinds_list: Vec::with_capacity(27),
-            // TODO: update allocation size matching the number of keybinds
+            // NOTE: update allocation size matching the number of keybinds
             sorting: Sorting::default(),
             view: View::default(),
         }
@@ -166,7 +166,7 @@ pub struct View {
 impl Default for View {
     fn default() -> Self {
         View {
-            explorer: vec![Property::Name],
+            explorer: vec![Property::Name, Property::Size, Property::Type],
             metadata: vec![
                 Property::Name,
                 Property::Type,
