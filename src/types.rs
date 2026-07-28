@@ -39,7 +39,6 @@ pub enum OverlayKind {
     CreateFile,
     CreateFolder,
     Paste,
-    Move,
     Delete,
     Metadata,
 }
@@ -88,7 +87,7 @@ impl Default for Clipboard {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq, Clone)]
 pub enum ClipboardMode {
     Copy,
     Cut,

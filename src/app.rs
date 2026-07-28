@@ -33,6 +33,12 @@ use crate::{
 
 type Toasts = Arc<RwLock<Vec<Toast>>>;
 
+#[derive(Debug)]
+pub enum WorkerRequest {
+    OperationType { path: PathBuf },
+    Done { paths: Vec<PathBuf> },
+}
+
 pub struct App {
     ctx: Context,
     current_path: PathBuf,
@@ -45,8 +51,9 @@ pub struct App {
     field: Field,
     config: Config,
     actions: Actions,
-    toasts: Toasts, // mhm toasts
-    rx: Option<mpsc::Receiver<Vec<PathBuf>>>,
+    toasts: Toasts, // mhm toasts :3
+    from_worker: Option<mpsc::Receiver<WorkerRequest>>,
+    to_worker: Option<mpsc::Sender<PasteKind>>,
 }
 
 impl Default for App {
@@ -64,7 +71,8 @@ impl Default for App {
             config: Config::default(),
             actions: Actions::default(),
             toasts: Arc::new(RwLock::new(Vec::with_capacity(5))),
-            rx: None,
+            from_worker: None,
+            to_worker: None,
         }
     }
 }
@@ -653,26 +661,23 @@ impl App {
     fn finalize_overlay_choice(&mut self, choice: usize) {
         match self.overlay.kind.unwrap() {
             OverlayKind::Paste => {
-                /*
-                let receiver = Arc::clone(&self.queue_receive);
-                let mut receiver_writer = receiver.write();
-                */
-
                 if choice == 0 {
-                    //*receiver_writer = Some(PasteKind::Replace);
+                    let _ = self.to_worker.as_ref().unwrap().send(PasteKind::Replace);
                 } else if choice == 1 {
-                    //*receiver_writer = Some(PasteKind::Duplicate);
+                    let _ = self.to_worker.as_ref().unwrap().send(PasteKind::Duplicate);
                 }
+
+                self.to_worker = None;
             }
             OverlayKind::Delete => {
                 if choice == 0 {
                     self.delete();
-                } else if choice == 1 {
-                    self.close_overlay();
                 }
             }
             _ => {}
         }
+
+        self.close_overlay();
     }
 
     fn update_overlay_buffer(&mut self, buffer: String) {
@@ -704,6 +709,25 @@ impl App {
         clipboard.mode = None;
     }
 
+    fn transfer(&mut self, to: usize) {
+        let selected = self
+            .selected
+            .iter()
+            .map(|e_index| self.entries.children[*e_index].path.clone())
+            .collect::<HashSet<PathBuf>>();
+
+        let (worker_tx, worker_rx) = mpsc::channel(); // main use - worker recv
+        let (user_tx, user_rx) = mpsc::channel(); // main recv - worker use
+        self.from_worker = Some(user_rx);
+        self.to_worker = Some(worker_tx);
+
+        let destination = self.entries.children[to].path.clone();
+
+        std::thread::spawn(move || {
+            file_system::move_dir(selected, destination, &user_tx, &worker_rx);
+        });
+    }
+
     fn paste(&mut self) {
         let clipboard = &mut self.clipboard;
         let clipboard_mode = clipboard.mode.as_ref();
@@ -712,8 +736,10 @@ impl App {
             return;
         }
 
-        let (tx, rx) = mpsc::channel();
-        self.rx = Some(rx);
+        let (worker_tx, worker_rx) = mpsc::channel(); // main use - worker recv
+        let (user_tx, user_rx) = mpsc::channel(); // main recv - worker use
+        self.from_worker = Some(user_rx);
+        self.to_worker = Some(worker_tx);
 
         let current_path = self.current_path.clone();
         let entries = clipboard.entries.clone();
@@ -721,41 +747,16 @@ impl App {
         match clipboard_mode.unwrap() {
             ClipboardMode::Copy => {
                 std::thread::spawn(move || {
-                    file_system::copy_dir(entries, current_path, tx);
+                    file_system::copy_dir(entries, current_path, &user_tx, &worker_rx);
                 });
             }
             ClipboardMode::Cut => {
                 let current_path = self.current_path.clone();
                 std::thread::spawn(move || {
-                    file_system::move_dir(entries, current_path, tx);
+                    file_system::move_dir(entries, current_path, &user_tx, &worker_rx);
                 });
-
-                /*
-                clipboard.entries.clear();
-                clipboard.mode = None;
-                */
             }
         };
-
-        /*
-        self.new_toast(
-            String::from("Clipboard"),
-            format!("successfully pasted {} items!", amount),
-            ToastKind::Success,
-            Duration::from_secs(3),
-        );
-        self.fetch_entries(Some(returned_path[0].to_owned()));
-
-        for p in returned_path {
-            for (id, e) in self.entries.children.iter().enumerate() {
-                if p == e.path
-                    && let Some(i) = self.entries.displaying.iter().find(|i| **i == id)
-                {
-                    self.selected.insert(*i);
-                }
-            }
-        }
-        */
     }
 
     fn navigate_index(&mut self, direction: &NavigateDirection, is_ctrled: bool, is_shifted: bool) {
@@ -891,20 +892,40 @@ impl eframe::App for App {
             self.handle_actions(action, is_ctrled, is_shifted);
         }
 
-        if let Some(rx) = &self.rx {
-            if let Ok(paths) = rx.try_recv() {
-                self.fetch_entries(Some(paths[0].to_owned()));
+        if let Some(rx) = &self.from_worker {
+            if let Ok(req) = rx.try_recv() {
+                match req {
+                    WorkerRequest::OperationType { path } => {
+                        self.open_overlay(OverlayKind::Paste, Some(&path));
+                    }
+                    WorkerRequest::Done { paths } => {
+                        self.fetch_entries(if !paths.is_empty() {
+                            Some(paths[0].to_owned())
+                        } else {
+                            None
+                        });
 
-                for p in paths {
-                    for (id, e) in self.entries.children.iter().enumerate() {
-                        if p == e.path
-                            && let Some(i) = self.entries.displaying.iter().find(|i| **i == id)
-                        {
-                            self.selected.insert(*i);
+                        for p in paths {
+                            for (id, e) in self.entries.children.iter().enumerate() {
+                                if p == e.path
+                                    && let Some(i) =
+                                        self.entries.displaying.iter().find(|i| **i == id)
+                                {
+                                    self.selected.insert(*i);
+                                }
+                            }
                         }
+
+                        if let Some(mode) = &self.clipboard.mode
+                            && mode == &ClipboardMode::Cut
+                        {
+                            self.clipboard.entries.clear();
+                            self.clipboard.mode = None;
+                        }
+
+                        self.from_worker = None;
                     }
                 }
-                self.rx = None;
             }
         }
     }
@@ -928,6 +949,7 @@ impl eframe::App for App {
         let mut req_create = None;
         let mut req_rename = false;
         let mut req_paste = false;
+        let mut req_transfer = None;
 
         let (
             mut req_open_overlay,
@@ -1153,6 +1175,10 @@ impl eframe::App for App {
                             );
                             btn_interact.dnd_set_drag_payload(entry_index);
 
+                            if btn_interact.drag_started() {
+                                req_modify_selected = Some(index);
+                            }
+
                             if btn_interact.dragged() {
                                 let popup = Popup::new(
                                     Id::new(("drag_pop", &entry_index)),
@@ -1162,6 +1188,7 @@ impl eframe::App for App {
                                 );
                                 popup.show(|pop| {
                                     pop.label("HIII!!!");
+                                    pop.label(self.selected.len().to_string());
                                 });
                             }
 
@@ -1365,8 +1392,12 @@ impl eframe::App for App {
 
             // drag n drop handler
             if let (Some(from), Some(to)) = (from, to) {
-                println!("dragged from {:?} to {:?}", from, to);
-                req_open_overlay = Some(OverlayKind::Move);
+                //println!("dragged from {:?} to {:?}", from, to);
+                //println!("current index is {:?}", self.current_index);
+
+                if *from != to && !self.selected.contains(&to) {
+                    req_transfer = Some(to);
+                }
             }
         });
 
@@ -1470,9 +1501,13 @@ impl eframe::App for App {
                 let keybinds = &self.config.keybinds;
                 ui.heading(format!(
                     "you are {} these:",
-                    match self.clipboard.mode.as_ref().unwrap() {
-                        ClipboardMode::Copy => "copying",
-                        ClipboardMode::Cut => "cutting",
+                    if let Some(mode) = &self.clipboard.mode {
+                        match mode {
+                            ClipboardMode::Copy => "copying",
+                            ClipboardMode::Cut => "cutting",
+                        }
+                    } else {
+                        "moving"
                     }
                 ));
                 let frame = Frame::NONE.fill(visuals.text_edit_bg_color());
@@ -1692,6 +1727,10 @@ impl eframe::App for App {
 
         if let Some(content) = req_update_field_buffer {
             self.update_field_buffer(content);
+        }
+
+        if let Some(to) = req_transfer {
+            self.transfer(to);
         }
 
         let toast_list = self.toasts.read();

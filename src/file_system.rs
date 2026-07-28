@@ -1,4 +1,5 @@
 use crate::{
+    app::WorkerRequest,
     file_types,
     icons::IconKind,
     types::{CreateType, PasteKind},
@@ -102,6 +103,8 @@ fn paste<'a>(
     prevs: &mut Vec<&'a str>,
     path: &'a Path,
     is_cut: bool, // true - cut. false - copy
+    from_worker: &mpsc::Sender<WorkerRequest>,
+    to_worker: &mpsc::Receiver<PasteKind>,
 ) -> Option<PathBuf> {
     let name = path.file_name().unwrap().to_str().unwrap();
     let mut final_path = dest.to_path_buf();
@@ -114,7 +117,11 @@ fn paste<'a>(
         return Some(joined.clone());
     }
 
-    let paste_kind = PasteKind::Duplicate;
+    let _ = from_worker.send(WorkerRequest::OperationType {
+        path: joined.to_path_buf(),
+    });
+
+    let paste_kind = to_worker.recv().unwrap();
     match paste_kind {
         PasteKind::Duplicate => {
             let result = file_extension(path);
@@ -139,7 +146,7 @@ fn paste<'a>(
                 return Some(joined.clone());
             } else {
                 prevs.push(name);
-                return paste(dest, prevs, path, is_cut);
+                return paste(dest, prevs, path, is_cut, from_worker, to_worker);
             }
         }
     }
@@ -218,49 +225,69 @@ pub fn file_type(path: &Path) -> (&'static str, IconKind) {
     (str_type, icon)
 }
 
-pub fn move_dir(old_files: HashSet<PathBuf>, dest: PathBuf, tx: mpsc::Sender<Vec<PathBuf>>) {
+pub fn move_dir(
+    old_files: HashSet<PathBuf>,
+    dest: PathBuf,
+    from_worker: &mpsc::Sender<WorkerRequest>,
+    to_worker: &mpsc::Receiver<PasteKind>,
+) {
     if !dest.exists() || !dest.is_dir() {
-        let _ = tx.send(Vec::new());
+        let _ = from_worker.send(WorkerRequest::Done { paths: Vec::new() });
         return;
     }
 
-    let resulte = old_files
-        .par_iter()
-        .map(|path| {
-            let mut clean_path = path.clone();
-            clean_path.pop();
+    let mut resulte = Vec::with_capacity(old_files.len());
 
-            if clean_path != dest
-                && let Some(p) = paste(&dest, &mut Vec::with_capacity(5), &path, true)
-            {
-                return p;
-            }
+    for path in old_files {
+        let mut clean_path = path.clone();
+        clean_path.pop();
 
-            PathBuf::new()
-        })
-        .collect();
+        if clean_path != dest
+            && let Some(p) = paste(
+                &dest,
+                &mut Vec::with_capacity(5),
+                &path,
+                true,
+                &from_worker,
+                &to_worker,
+            )
+        {
+            resulte.push(p);
+            continue;
+        }
+    }
 
-    let _ = tx.send(resulte);
+    let _ = from_worker.send(WorkerRequest::Done { paths: resulte });
 }
 
-pub fn copy_dir(old_files: HashSet<PathBuf>, dest: PathBuf, tx: mpsc::Sender<Vec<PathBuf>>) {
+pub fn copy_dir(
+    old_files: HashSet<PathBuf>,
+    dest: PathBuf,
+    from_worker: &mpsc::Sender<WorkerRequest>,
+    to_worker: &mpsc::Receiver<PasteKind>,
+) {
     if !dest.exists() || !dest.is_dir() {
-        let _ = tx.send(Vec::new());
+        let _ = from_worker.send(WorkerRequest::Done { paths: Vec::new() });
         return;
     }
 
-    let resulte = old_files
-        .par_iter()
-        .map(|p| {
-            if let Some(p) = paste(&dest, &mut Vec::with_capacity(5), &p, false) {
-                p
-            } else {
-                PathBuf::new()
-            }
-        })
-        .collect();
+    let mut resulte = Vec::with_capacity(old_files.len());
 
-    let _ = tx.send(resulte);
+    for path in old_files {
+        if let Some(p) = paste(
+            &dest,
+            &mut Vec::with_capacity(5),
+            &path,
+            false,
+            &from_worker,
+            &to_worker,
+        ) {
+            resulte.push(p);
+            continue;
+        }
+    }
+
+    let _ = from_worker.send(WorkerRequest::Done { paths: resulte });
 }
 
 fn move_file(old_path: &Path, new_path: &Path, is_cut: bool) {
