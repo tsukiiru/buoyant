@@ -1,5 +1,4 @@
 use crate::{
-    app::{QueueReceive, QueueRequest},
     file_types,
     icons::IconKind,
     types::{CreateType, PasteKind},
@@ -11,7 +10,7 @@ use std::{
     os::unix::fs::MetadataExt,
     path::{Path, PathBuf},
     process::Command,
-    sync::Arc,
+    sync::mpsc,
     time::SystemTime,
 };
 
@@ -103,8 +102,6 @@ fn paste<'a>(
     prevs: &mut Vec<&'a str>,
     path: &'a Path,
     is_cut: bool, // true - cut. false - copy
-    queue_request: &QueueRequest,
-    queue_receive: &QueueReceive,
 ) -> Option<PathBuf> {
     let name = path.file_name().unwrap().to_str().unwrap();
     let mut final_path = dest.to_path_buf();
@@ -117,22 +114,7 @@ fn paste<'a>(
         return Some(joined.clone());
     }
 
-    let queue_req = Arc::clone(&queue_request);
-    let queue_rev = Arc::clone(&queue_receive);
-
-    let mut req = queue_req.write();
-    *req = Some(final_path.to_path_buf());
-
-    let paste_kind;
-    let mut paste_type = queue_rev.write();
-    loop {
-        if paste_type.is_some() {
-            paste_kind = paste_type.unwrap();
-            break;
-        }
-    }
-    *paste_type = None;
-
+    let paste_kind = PasteKind::Duplicate;
     match paste_kind {
         PasteKind::Duplicate => {
             let result = file_extension(path);
@@ -157,7 +139,7 @@ fn paste<'a>(
                 return Some(joined.clone());
             } else {
                 prevs.push(name);
-                return paste(dest, prevs, path, is_cut, &queue_request, &queue_receive);
+                return paste(dest, prevs, path, is_cut);
             }
         }
     }
@@ -236,84 +218,49 @@ pub fn file_type(path: &Path) -> (&'static str, IconKind) {
     (str_type, icon)
 }
 
-pub fn move_dir(
-    old_files: &HashSet<PathBuf>,
-    dest: &Path,
-    queue_request: &QueueRequest,
-    queue_receive: &QueueReceive,
-) -> Vec<PathBuf> {
+pub fn move_dir(old_files: HashSet<PathBuf>, dest: PathBuf, tx: mpsc::Sender<Vec<PathBuf>>) {
     if !dest.exists() || !dest.is_dir() {
-        return Vec::new();
+        let _ = tx.send(Vec::new());
+        return;
     }
 
-    // check if file with same name exists
-    // if not, move like usual
-    // if yes, check if merge or duplicate
-
-    // if duplicate, increment suffix normally, move to the next file
-    // if merge, check if folder or file, if folder, get into that folder and repeat, if file, replace the file in destination
-
-    old_files
+    let resulte = old_files
         .par_iter()
         .map(|path| {
             let mut clean_path = path.clone();
             clean_path.pop();
 
             if clean_path != dest
-                && let Some(p) = paste(
-                    &dest,
-                    &mut Vec::with_capacity(5),
-                    &path,
-                    true,
-                    &queue_request,
-                    &queue_receive,
-                )
+                && let Some(p) = paste(&dest, &mut Vec::with_capacity(5), &path, true)
             {
                 return p;
             }
 
             PathBuf::new()
         })
-        .collect()
+        .collect();
+
+    let _ = tx.send(resulte);
 }
 
-pub fn copy_dir(
-    old_files: &HashSet<PathBuf>,
-    dest: &Path,
-    queue_request: &QueueRequest,
-    queue_receive: &QueueReceive,
-) -> Vec<PathBuf> {
+pub fn copy_dir(old_files: HashSet<PathBuf>, dest: PathBuf, tx: mpsc::Sender<Vec<PathBuf>>) {
     if !dest.exists() || !dest.is_dir() {
-        return Vec::new();
+        let _ = tx.send(Vec::new());
+        return;
     }
 
-    let mut resulte = Vec::new();
-    let old_files = old_files.clone();
-    let dest = dest.clone();
-    let queue_request = queue_request.clone();
-    let queue_receive = queue_receive.clone();
+    let resulte = old_files
+        .par_iter()
+        .map(|p| {
+            if let Some(p) = paste(&dest, &mut Vec::with_capacity(5), &p, false) {
+                p
+            } else {
+                PathBuf::new()
+            }
+        })
+        .collect();
 
-    tokio::spawn(async move {
-        resulte = old_files
-            .par_iter()
-            .map(|p| {
-                if let Some(p) = paste(
-                    dest,
-                    &mut Vec::with_capacity(5),
-                    &p,
-                    false,
-                    &queue_request,
-                    &queue_receive,
-                ) {
-                    p
-                } else {
-                    PathBuf::new()
-                }
-            })
-            .collect();
-    });
-
-    resulte
+    let _ = tx.send(resulte);
 }
 
 fn move_file(old_path: &Path, new_path: &Path, is_cut: bool) {

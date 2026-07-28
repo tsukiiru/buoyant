@@ -19,7 +19,7 @@ use std::{
     ops::Sub,
     path::{Path, PathBuf},
     process::Command,
-    sync::Arc,
+    sync::{Arc, mpsc},
     time::{Duration, Instant},
 };
 use tokio;
@@ -32,8 +32,6 @@ use crate::{
 };
 
 type Toasts = Arc<RwLock<Vec<Toast>>>;
-pub type QueueRequest = Arc<RwLock<Option<PathBuf>>>;
-pub type QueueReceive = Arc<RwLock<Option<PasteKind>>>;
 
 pub struct App {
     ctx: Context,
@@ -48,8 +46,7 @@ pub struct App {
     config: Config,
     actions: Actions,
     toasts: Toasts, // mhm toasts
-    queue_overlay: QueueRequest,
-    queue_receive: QueueReceive,
+    rx: Option<mpsc::Receiver<Vec<PathBuf>>>,
 }
 
 impl Default for App {
@@ -67,8 +64,7 @@ impl Default for App {
             config: Config::default(),
             actions: Actions::default(),
             toasts: Arc::new(RwLock::new(Vec::with_capacity(5))),
-            queue_overlay: Arc::new(RwLock::new(None)),
-            queue_receive: Arc::new(RwLock::new(None)),
+            rx: None,
         }
     }
 }
@@ -174,7 +170,7 @@ impl App {
                 self.new_toast(
                     String::from("Clipboard"),
                     format!(
-                        "successfully add {} items for copying!",
+                        "successfully added {} items into clipboard!",
                         self.selected.len()
                     ),
                     ToastKind::Success,
@@ -195,7 +191,10 @@ impl App {
 
                 self.new_toast(
                     String::from("Clipboard"),
-                    format!("successfully cut {} items!", self.selected.len()),
+                    format!(
+                        "successfully added {} items into clipboard!",
+                        self.selected.len()
+                    ),
                     ToastKind::Success,
                     Duration::from_secs(3),
                 );
@@ -654,13 +653,15 @@ impl App {
     fn finalize_overlay_choice(&mut self, choice: usize) {
         match self.overlay.kind.unwrap() {
             OverlayKind::Paste => {
+                /*
                 let receiver = Arc::clone(&self.queue_receive);
                 let mut receiver_writer = receiver.write();
+                */
 
                 if choice == 0 {
-                    *receiver_writer = Some(PasteKind::Replace);
+                    //*receiver_writer = Some(PasteKind::Replace);
                 } else if choice == 1 {
-                    *receiver_writer = Some(PasteKind::Duplicate);
+                    //*receiver_writer = Some(PasteKind::Duplicate);
                 }
             }
             OverlayKind::Delete => {
@@ -711,33 +712,32 @@ impl App {
             return;
         }
 
-        let amount = clipboard.entries.len();
-        let returned_path;
+        let (tx, rx) = mpsc::channel();
+        self.rx = Some(rx);
+
+        let current_path = self.current_path.clone();
+        let entries = clipboard.entries.clone();
+
         match clipboard_mode.unwrap() {
             ClipboardMode::Copy => {
-                returned_path = file_system::copy_dir(
-                    &clipboard.entries,
-                    &self.current_path,
-                    &self.queue_overlay,
-                    &self.queue_receive,
-                );
+                std::thread::spawn(move || {
+                    file_system::copy_dir(entries, current_path, tx);
+                });
             }
             ClipboardMode::Cut => {
-                let paths = file_system::move_dir(
-                    &clipboard.entries,
-                    &self.current_path,
-                    &self.queue_overlay,
-                    &self.queue_receive,
-                );
+                let current_path = self.current_path.clone();
+                std::thread::spawn(move || {
+                    file_system::move_dir(entries, current_path, tx);
+                });
 
+                /*
                 clipboard.entries.clear();
                 clipboard.mode = None;
-
-                returned_path = paths;
+                */
             }
         };
 
-        self.close_overlay();
+        /*
         self.new_toast(
             String::from("Clipboard"),
             format!("successfully pasted {} items!", amount),
@@ -755,6 +755,7 @@ impl App {
                 }
             }
         }
+        */
     }
 
     fn navigate_index(&mut self, direction: &NavigateDirection, is_ctrled: bool, is_shifted: bool) {
@@ -890,12 +891,21 @@ impl eframe::App for App {
             self.handle_actions(action, is_ctrled, is_shifted);
         }
 
-        let req = Arc::clone(&self.queue_overlay);
-        let mut request = req.write();
+        if let Some(rx) = &self.rx {
+            if let Ok(paths) = rx.try_recv() {
+                self.fetch_entries(Some(paths[0].to_owned()));
 
-        if request.is_some() {
-            self.open_overlay(OverlayKind::Paste, Some(request.as_ref().unwrap()));
-            *request = None;
+                for p in paths {
+                    for (id, e) in self.entries.children.iter().enumerate() {
+                        if p == e.path
+                            && let Some(i) = self.entries.displaying.iter().find(|i| **i == id)
+                        {
+                            self.selected.insert(*i);
+                        }
+                    }
+                }
+                self.rx = None;
+            }
         }
     }
 
