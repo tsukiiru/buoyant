@@ -7,6 +7,7 @@ use std::{
 
 use crate::icons::IconKind;
 
+#[derive(Clone, Copy)]
 pub enum PasteKind {
     Replace,
     Duplicate,
@@ -38,6 +39,7 @@ pub enum OverlayKind {
     CreateFile,
     CreateFolder,
     Paste,
+    Move,
     Delete,
     Metadata,
 }

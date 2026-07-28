@@ -1,8 +1,9 @@
 use chrono::{DateTime, Datelike, Utc};
 use eframe::egui::{
-    Align, Align2, AtomLayout, Button, CentralPanel, Color32, Context, Event, Frame, Grid, Id,
-    Image, Key, Label, Margin, Modal, ProgressBar, RichText, ScrollArea, Sense, Stroke, TextEdit,
-    TextWrapMode, Theme, Ui, Vec2, Window, mutex::RwLock,
+    Align, Align2, AtomLayout, Button, CentralPanel, Color32, Context, CornerRadius, Event, Frame,
+    Grid, Id, Image, Key, Label, LayerId, Margin, Modal, Order, Popup, PopupAnchor, ProgressBar,
+    RichText, ScrollArea, Sense, Stroke, TextEdit, TextWrapMode, Theme, Ui, Vec2, Window,
+    mutex::RwLock,
 };
 use egui_extras;
 use rayon::{
@@ -31,6 +32,9 @@ use crate::{
 };
 
 type Toasts = Arc<RwLock<Vec<Toast>>>;
+pub type QueueRequest = Arc<RwLock<Option<PathBuf>>>;
+pub type QueueReceive = Arc<RwLock<Option<PasteKind>>>;
+
 pub struct App {
     ctx: Context,
     current_path: PathBuf,
@@ -44,6 +48,8 @@ pub struct App {
     config: Config,
     actions: Actions,
     toasts: Toasts, // mhm toasts
+    queue_overlay: QueueRequest,
+    queue_receive: QueueReceive,
 }
 
 impl Default for App {
@@ -61,6 +67,8 @@ impl Default for App {
             config: Config::default(),
             actions: Actions::default(),
             toasts: Arc::new(RwLock::new(Vec::with_capacity(5))),
+            queue_overlay: Arc::new(RwLock::new(None)),
+            queue_receive: Arc::new(RwLock::new(None)),
         }
     }
 }
@@ -204,7 +212,7 @@ impl App {
                     return;
                 }
 
-                self.open_overlay(OverlayKind::Paste);
+                self.paste();
             }
 
             KeybindAction::Delete => {
@@ -218,9 +226,9 @@ impl App {
                     return;
                 }
 
-                self.open_overlay(OverlayKind::Delete);
+                self.open_overlay(OverlayKind::Delete, None);
             }
-            KeybindAction::Rename => self.open_overlay(OverlayKind::Rename),
+            KeybindAction::Rename => self.open_overlay(OverlayKind::Rename, None),
             KeybindAction::ClearClipboard => {
                 self.clear_clipboard();
                 self.new_toast(
@@ -231,9 +239,9 @@ impl App {
                 );
             }
             KeybindAction::ToggleHidden => self.toggle_view_hidden(),
-            KeybindAction::CreateFile => self.open_overlay(OverlayKind::CreateFile),
-            KeybindAction::CreateFolder => self.open_overlay(OverlayKind::CreateFolder),
-            KeybindAction::Info => self.open_overlay(OverlayKind::Metadata),
+            KeybindAction::CreateFile => self.open_overlay(OverlayKind::CreateFile, None),
+            KeybindAction::CreateFolder => self.open_overlay(OverlayKind::CreateFolder, None),
+            KeybindAction::Info => self.open_overlay(OverlayKind::Metadata, None),
             KeybindAction::Search => self.new_field(FieldKind::Search),
             KeybindAction::Refresh => self.fetch_config(),
             _ => {}
@@ -480,6 +488,7 @@ impl App {
     fn nav_back(&mut self) {
         let old_path = self.current_path.clone();
         self.current_path.pop();
+        self.close_field();
         self.fetch_entries(Some(old_path));
     }
 
@@ -586,7 +595,7 @@ impl App {
         }
     }
 
-    fn open_overlay(&mut self, kind: OverlayKind) {
+    fn open_overlay(&mut self, kind: OverlayKind, path: Option<&Path>) {
         let overlay = &mut self.overlay;
         overlay.kind = Some(kind);
 
@@ -633,6 +642,11 @@ impl App {
 
                 overlay.entry = Some(new_entry);
             }
+            OverlayKind::Paste => {
+                if let Some(p) = path {
+                    overlay.path = Some(p.to_path_buf());
+                }
+            }
             _ => {}
         }
     }
@@ -640,10 +654,13 @@ impl App {
     fn finalize_overlay_choice(&mut self, choice: usize) {
         match self.overlay.kind.unwrap() {
             OverlayKind::Paste => {
+                let receiver = Arc::clone(&self.queue_receive);
+                let mut receiver_writer = receiver.write();
+
                 if choice == 0 {
-                    self.paste(PasteKind::Replace);
+                    *receiver_writer = Some(PasteKind::Replace);
                 } else if choice == 1 {
-                    self.paste(PasteKind::Duplicate);
+                    *receiver_writer = Some(PasteKind::Duplicate);
                 }
             }
             OverlayKind::Delete => {
@@ -686,7 +703,7 @@ impl App {
         clipboard.mode = None;
     }
 
-    fn paste(&mut self, paste_type: PasteKind) {
+    fn paste(&mut self) {
         let clipboard = &mut self.clipboard;
         let clipboard_mode = clipboard.mode.as_ref();
 
@@ -695,18 +712,28 @@ impl App {
         }
 
         let amount = clipboard.entries.len();
-        let returned_path = match clipboard_mode.unwrap() {
+        let returned_path;
+        match clipboard_mode.unwrap() {
             ClipboardMode::Copy => {
-                file_system::copy_dir(&clipboard.entries, &self.current_path, &paste_type)
+                returned_path = file_system::copy_dir(
+                    &clipboard.entries,
+                    &self.current_path,
+                    &self.queue_overlay,
+                    &self.queue_receive,
+                );
             }
             ClipboardMode::Cut => {
-                let paths =
-                    file_system::move_dir(&clipboard.entries, &self.current_path, &paste_type);
+                let paths = file_system::move_dir(
+                    &clipboard.entries,
+                    &self.current_path,
+                    &self.queue_overlay,
+                    &self.queue_receive,
+                );
 
                 clipboard.entries.clear();
                 clipboard.mode = None;
 
-                paths
+                returned_path = paths;
             }
         };
 
@@ -862,12 +889,22 @@ impl eframe::App for App {
         if let Some(action) = action_to_handle {
             self.handle_actions(action, is_ctrled, is_shifted);
         }
+
+        let req = Arc::clone(&self.queue_overlay);
+        let mut request = req.write();
+
+        if request.is_some() {
+            self.open_overlay(OverlayKind::Paste, Some(request.as_ref().unwrap()));
+            *request = None;
+        }
     }
 
     fn ui(&mut self, main_ui: &mut Ui, _frame: &mut eframe::Frame) {
         let mut i = 0;
         let ctx = self.ctx.clone();
         let visuals = ctx.theme().default_visuals();
+
+        let drag_layer = LayerId::new(Order::Tooltip, Id::new("drag"));
 
         let (
             mut req_set_clipboard,
@@ -880,6 +917,7 @@ impl eframe::App for App {
         let (mut req_navigate_forward, mut req_navigate_backward) = (false, false);
         let mut req_create = None;
         let mut req_rename = false;
+        let mut req_paste = false;
 
         let (
             mut req_open_overlay,
@@ -967,6 +1005,7 @@ impl eframe::App for App {
             let current_index = &self.current_index;
             let mut from: Option<Arc<usize>> = None;
             let mut to = None;
+
             let displaying = self.entries.displaying.clone();
 
             let bg_response =
@@ -980,7 +1019,6 @@ impl eframe::App for App {
                     i += 1;
 
                     let keybinds = &self.config.keybinds;
-
                     let view = &self.config.view.explorer;
 
                     for (index, entry_index) in displaying.into_iter().enumerate() {
@@ -996,11 +1034,12 @@ impl eframe::App for App {
                             let mut frame = Frame::NONE
                                 .stroke(Stroke::new(1.0, Color32::TRANSPARENT))
                                 .corner_radius(4.0);
+
                             if self.selected.contains(&entry_index) {
                                 frame.fill = Color32::LIGHT_GREEN.gamma_multiply(0.3);
                             }
                             if is_current_index {
-                                frame.stroke.color = visuals.text_color().linear_multiply(0.3);
+                                frame.stroke.color = visuals.text_color().gamma_multiply(0.3);
                             }
 
                             let mut color = visuals.text_color();
@@ -1018,14 +1057,6 @@ impl eframe::App for App {
 
                             let fr = frame
                                 .show(h, |f| {
-                                    f.dnd_drag_source(
-                                        Id::new(("item", index)),
-                                        entry_index,
-                                        |dnd| {
-                                            dnd.label("very cool item");
-                                        },
-                                    );
-
                                     let another_frame =
                                         Frame::NONE.inner_margin(Margin::symmetric(2, 8));
                                     another_frame.show(f, |a| {
@@ -1105,15 +1136,45 @@ impl eframe::App for App {
                                 })
                                 .response;
 
-                            let btn_response =
-                                h.interact(fr.rect, Id::new(("btn", &entry_index)), Sense::click());
+                            let btn_interact = h.interact(
+                                fr.rect,
+                                Id::new(("button", &entry_index)),
+                                Sense::click_and_drag(),
+                            );
+                            btn_interact.dnd_set_drag_payload(entry_index);
+
+                            if btn_interact.dragged() {
+                                let popup = Popup::new(
+                                    Id::new(("drag_pop", &entry_index)),
+                                    ctx.clone(),
+                                    PopupAnchor::Pointer,
+                                    drag_layer,
+                                );
+                                popup.show(|pop| {
+                                    pop.label("HIII!!!");
+                                });
+                            }
+
+                            if let Some(hovered_payload) = fr.dnd_hover_payload::<usize>() {
+                                if *hovered_payload != entry_index {
+                                    h.painter().rect_filled(
+                                        fr.rect,
+                                        CornerRadius::from(4.0),
+                                        visuals.text_color().gamma_multiply(0.1),
+                                    );
+                                }
+                                if let Some(dragged_payload) = fr.dnd_release_payload() {
+                                    from = Some(dragged_payload);
+                                    to = Some(entry_index)
+                                }
+                            }
 
                             if is_current_index && self.scroll_signal {
-                                btn_response.scroll_to_me(None);
+                                btn_interact.scroll_to_me(None);
                                 self.scroll_signal = false;
                             }
 
-                            btn_response.context_menu(|ui| {
+                            btn_interact.context_menu(|ui| {
                                 ui.label(entry.name.clone());
                                 if ui
                                     .add(
@@ -1160,29 +1221,17 @@ impl eframe::App for App {
                                     req_open_overlay = Some(OverlayKind::Metadata);
                                 }
                             });
-                            if btn_response.clicked() {
+
+                            if btn_interact.clicked() {
                                 req_modify_selected = Some(index);
                             }
 
-                            if btn_response.double_clicked() {
+                            if btn_interact.double_clicked() {
                                 req_navigate_forward = true;
                             }
 
-                            if btn_response.secondary_clicked() {
+                            if btn_interact.secondary_clicked() {
                                 req_swap_selected = Some(index);
-                            }
-
-                            if let (Some(_pointer), Some(_hovered_payload)) = (
-                                h.input(|i| i.pointer.interact_pos()),
-                                fr.dnd_hover_payload::<usize>(),
-                            ) {
-                                let _rect = fr.rect;
-                                let _stroke = Stroke::new(1.0, Color32::GRAY);
-
-                                if let Some(dragged_payload) = fr.dnd_release_payload() {
-                                    from = Some(dragged_payload);
-                                    to = Some(entry_index)
-                                }
                             }
                         });
                     }
@@ -1297,7 +1346,7 @@ impl eframe::App for App {
                 }
 
                 if ui.add(paste_button).clicked() {
-                    req_open_overlay = Some(OverlayKind::Paste);
+                    req_paste = true;
                 }
                 if ui.add(clearcp_button).clicked() {
                     req_reset_clipboard = true;
@@ -1307,7 +1356,7 @@ impl eframe::App for App {
             // drag n drop handler
             if let (Some(from), Some(to)) = (from, to) {
                 println!("dragged from {:?} to {:?}", from, to);
-                /////
+                req_open_overlay = Some(OverlayKind::Move);
             }
         });
 
@@ -1418,9 +1467,7 @@ impl eframe::App for App {
                 ));
                 let frame = Frame::NONE.fill(visuals.text_edit_bg_color());
                 frame.show(ui, |f| {
-                    self.clipboard.entries.iter().for_each(|item| {
-                        f.label(format!("{}", item.display()));
-                    });
+                    f.label(format!("{}", overlay.path.as_ref().unwrap().display()));
                 });
                 ui.separator();
                 ui.heading("choose pasting type");
@@ -1564,8 +1611,16 @@ impl eframe::App for App {
             self.close_overlay();
         }
 
+        if req_paste {
+            self.paste();
+        }
+
+        if req_navigate_backward {
+            self.nav_back();
+        }
+
         if let Some(kind) = req_open_overlay {
-            self.open_overlay(kind);
+            self.open_overlay(kind, None);
         }
 
         if req_reset_clipboard {
