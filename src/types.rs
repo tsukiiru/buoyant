@@ -1,9 +1,12 @@
 use std::{
-    collections::HashSet,
     fmt::Display,
     path::{Path, PathBuf},
+    sync::Arc,
     time::{Duration, Instant},
 };
+
+use eframe::egui::mutex::RwLock;
+use rustc_hash::FxHashSet;
 
 use crate::icons::IconKind;
 
@@ -74,14 +77,14 @@ pub enum FieldKind {
 
 #[derive(Debug)]
 pub struct Clipboard {
-    pub entries: HashSet<PathBuf>,
+    pub entries: FxHashSet<PathBuf>,
     pub mode: Option<ClipboardMode>,
 }
 
 impl Default for Clipboard {
     fn default() -> Self {
         Clipboard {
-            entries: HashSet::with_capacity(5),
+            entries: FxHashSet::default(),
             mode: None,
         }
     }
@@ -232,4 +235,12 @@ impl Display for Property {
 pub enum CreateType {
     File,
     Folder,
+}
+
+pub type Toasts = Arc<RwLock<Vec<Toast>>>;
+
+#[derive(Debug)]
+pub enum WorkerRequest {
+    OperationType { path: PathBuf },
+    Done { paths: Vec<PathBuf> },
 }

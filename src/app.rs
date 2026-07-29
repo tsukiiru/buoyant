@@ -13,8 +13,8 @@ use rayon::{
     },
     slice::ParallelSliceMut,
 };
+use rustc_hash::FxHashSet;
 use std::{
-    collections::HashSet,
     env,
     ops::Sub,
     path::{Path, PathBuf},
@@ -31,21 +31,13 @@ use crate::{
     types::*,
 };
 
-type Toasts = Arc<RwLock<Vec<Toast>>>;
-
-#[derive(Debug)]
-pub enum WorkerRequest {
-    OperationType { path: PathBuf },
-    Done { paths: Vec<PathBuf> },
-}
-
 pub struct App {
     ctx: Context,
     current_path: PathBuf,
     scroll_signal: bool,
     entries: Entries,
     current_index: usize,
-    selected: HashSet<usize>,
+    selected: FxHashSet<usize>,
     clipboard: Clipboard,
     overlay: Overlay,
     field: Field,
@@ -66,7 +58,7 @@ impl Default for App {
             field: Field::default(),
             entries: Entries::default(),
             clipboard: Clipboard::default(),
-            selected: HashSet::with_capacity(20),
+            selected: FxHashSet::default(),
             current_index: 0,
             config: Config::default(),
             actions: Actions::default(),
@@ -500,19 +492,14 @@ impl App {
     }
 
     fn delete(&mut self) {
-        if let Err(e) = file_system::delete(
-            self.selected
-                .par_iter()
-                .map(|entry_index| {
-                    self.entries
-                        .children
-                        .get(*entry_index)
-                        .unwrap()
-                        .path
-                        .as_ref()
-                })
-                .collect::<Vec<&Path>>(),
-        ) {
+        if let Err(e) = file_system::delete(self.selected.iter().map(|entry_index| {
+            self.entries
+                .children
+                .get(*entry_index)
+                .unwrap()
+                .path
+                .as_ref()
+        })) {
             self.new_toast(
                 String::from("Delete"),
                 e,
@@ -714,7 +701,7 @@ impl App {
             .selected
             .iter()
             .map(|e_index| self.entries.children[*e_index].path.clone())
-            .collect::<HashSet<PathBuf>>();
+            .collect();
 
         let (worker_tx, worker_rx) = mpsc::channel(); // main use - worker recv
         let (user_tx, user_rx) = mpsc::channel(); // main recv - worker use
@@ -742,7 +729,11 @@ impl App {
         self.to_worker = Some(worker_tx);
 
         let current_path = self.current_path.clone();
-        let entries = clipboard.entries.clone();
+        let entries = clipboard
+            .entries
+            .clone()
+            .into_iter()
+            .collect::<Vec<PathBuf>>();
 
         match clipboard_mode.unwrap() {
             ClipboardMode::Copy => {
@@ -931,12 +922,11 @@ impl eframe::App for App {
     }
 
     fn ui(&mut self, main_ui: &mut Ui, _frame: &mut eframe::Frame) {
-        let mut i = 0;
         let ctx = self.ctx.clone();
         let visuals = ctx.theme().default_visuals();
+        let drag_layer_id = LayerId::new(Order::Tooltip, Id::new("drag"));
 
-        let drag_layer = LayerId::new(Order::Tooltip, Id::new("drag"));
-
+        // all the requests to be handled via self later
         let (
             mut req_set_clipboard,
             mut req_reset_clipboard,
@@ -963,8 +953,8 @@ impl eframe::App for App {
             mut req_close_field,
             mut req_update_field_buffer,
             mut req_logic_field,
-            mut req_unfocus_field,
-        ) = (None, false, None, None, false);
+        ) = (None, false, None, None);
+        //
 
         CentralPanel::default().show(main_ui, |ui| {
             ui.horizontal(|ui| {
@@ -1007,9 +997,6 @@ impl eframe::App for App {
                     req_update_field_buffer = Some(content);
                     req_logic_field = Some(FieldKind::Search);
                 }
-                if input.lost_focus() {
-                    req_unfocus_field = true;
-                }
                 if self.field.kind.is_some() && ui.input(|i| i.key_pressed(Key::Escape)) {
                     req_close_field = true;
                 }
@@ -1023,8 +1010,7 @@ impl eframe::App for App {
                 let view = &self.config.view.explorer;
                 ui.allocate_space(Vec2::new(2.0 + 16.0, 0.0));
 
-                let mut grid = Grid::new(i);
-                i += 1;
+                let mut grid = Grid::new("explorer-title-grid");
                 grid = grid.min_col_width(200.0);
 
                 grid.show(ui, |ui| {
@@ -1042,13 +1028,12 @@ impl eframe::App for App {
 
             let bg_response =
                 ScrollArea::vertical().show_rows(ui, 32.0, displaying.len(), |sa, range| {
-                    sa.set_min_height(300.0);
+                    sa.set_min_height(f32::INFINITY);
                     let bg_response = sa.interact(
                         sa.available_rect_before_wrap(),
-                        Id::new(format!("explorer-area{}", i)),
+                        Id::new(format!("explorer-area")),
                         Sense::click(),
                     );
-                    i += 1;
 
                     let keybinds = &self.config.keybinds;
                     let view = &self.config.view.explorer;
@@ -1098,8 +1083,7 @@ impl eframe::App for App {
                                         );
                                     });
 
-                                    let mut grid = Grid::new(Id::new(i));
-                                    i += 1;
+                                    let mut grid = Grid::new(Id::new(("explorer-grid", &index)));
 
                                     grid = grid.min_col_width(200.0);
                                     grid.show(f, |g| {
@@ -1170,7 +1154,7 @@ impl eframe::App for App {
 
                             let btn_interact = h.interact(
                                 fr.rect,
-                                Id::new(("button", &entry_index)),
+                                Id::new(("button", &index)),
                                 Sense::click_and_drag(),
                             );
                             btn_interact.dnd_set_drag_payload(entry_index);
@@ -1181,10 +1165,10 @@ impl eframe::App for App {
 
                             if btn_interact.dragged() {
                                 let popup = Popup::new(
-                                    Id::new(("drag_pop", &entry_index)),
+                                    Id::new(("drag_pop", &index)),
                                     ctx.clone(),
                                     PopupAnchor::Pointer,
-                                    drag_layer,
+                                    drag_layer_id,
                                 );
                                 popup.show(|pop| {
                                     pop.label("HIII!!!");
@@ -1554,16 +1538,8 @@ impl eframe::App for App {
             let modal_widget = Modal::new(Id::new("delete_modal"));
             let paths = self
                 .selected
-                .par_iter()
-                .map(|entry_index| {
-                    self.entries
-                        .children
-                        .get(*entry_index)
-                        .unwrap()
-                        .path
-                        .as_ref()
-                })
-                .collect::<Vec<&Path>>();
+                .iter()
+                .map(|entry_index| self.entries.children[*entry_index].path.as_ref());
 
             modal_widget.show(&ctx, |w| {
                 w.label("are you sure you wanna delete these?");
@@ -1574,7 +1550,7 @@ impl eframe::App for App {
                     .inner_margin(2.0)
                     .show(w, |u| {
                         ScrollArea::vertical().max_height(200.0).show(u, |b| {
-                            paths.iter().for_each(|path| {
+                            paths.for_each(|path: &Path| {
                                 b.label(format!("{}", path.display()));
                             });
                         });

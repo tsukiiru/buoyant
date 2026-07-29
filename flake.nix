@@ -17,13 +17,13 @@
         name = "rust-build-env";
         targetPkgs =
           pkgs: with pkgs; [
-            curl
             pkg-config
           ];
         multiPkgs =
           pkgs: with pkgs; [
-            gcc
+            clang
             zlib
+            mold
             stdenv.cc.cc.lib
             libX11
             libXcursor

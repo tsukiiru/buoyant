@@ -1,12 +1,10 @@
 use crate::{
-    app::WorkerRequest,
     file_types,
     icons::IconKind,
-    types::{CreateType, PasteKind},
+    types::{CreateType, PasteKind, WorkerRequest},
 };
 use rayon::iter::{IntoParallelRefIterator, ParallelIterator};
 use std::{
-    collections::HashSet,
     fs,
     os::unix::fs::MetadataExt,
     path::{Path, PathBuf},
@@ -30,10 +28,13 @@ pub fn rename(path: &Path, name: &str) -> Result<PathBuf, String> {
     Ok(new_path)
 }
 
-pub fn delete(paths: Vec<&Path>) -> Result<(), String> {
+pub fn delete<'a, I>(paths: I) -> Result<(), String>
+where
+    I: Iterator<Item = &'a Path>,
+{
     let mut return_error = None;
 
-    paths.iter().for_each(|path| {
+    paths.for_each(|path| {
         if !path.exists() {
             return_error = Some(String::from("provided path doesn't exist?"));
         }
@@ -57,9 +58,9 @@ pub fn create(
     new_path: &Path,
     create_type: &CreateType,
 ) -> Result<PathBuf, String> {
-    let layers: Vec<_> = new_path.components().collect();
+    let layers = new_path.components();
 
-    if layers.len() == 0 {
+    if layers.clone().count() == 0 {
         return Err(String::from("maybe dont leave the input box blank?"));
     }
 
@@ -226,7 +227,7 @@ pub fn file_type(path: &Path) -> (&'static str, IconKind) {
 }
 
 pub fn move_dir(
-    old_files: HashSet<PathBuf>,
+    old_files: Vec<PathBuf>,
     dest: PathBuf,
     from_worker: &mpsc::Sender<WorkerRequest>,
     to_worker: &mpsc::Receiver<PasteKind>,
@@ -237,7 +238,6 @@ pub fn move_dir(
     }
 
     let mut resulte = Vec::with_capacity(old_files.len());
-
     for path in old_files {
         let mut clean_path = path.clone();
         clean_path.pop();
@@ -261,7 +261,7 @@ pub fn move_dir(
 }
 
 pub fn copy_dir(
-    old_files: HashSet<PathBuf>,
+    old_files: Vec<PathBuf>,
     dest: PathBuf,
     from_worker: &mpsc::Sender<WorkerRequest>,
     to_worker: &mpsc::Receiver<PasteKind>,
@@ -355,7 +355,7 @@ pub fn read_dir(path: &Path) -> Result<Vec<PathBuf>, String> {
 
     Ok(read_results
         .unwrap()
-        .map(|r| r.map(|e| e.path()).unwrap())
+        .map(|r| r.unwrap().path())
         .collect::<Vec<_>>())
 }
 
