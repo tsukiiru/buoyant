@@ -208,13 +208,13 @@ struct RawConfig {
 
 fn process_raw_config(raw_config: &RawConfig, config: &mut Config) {
     if let Some(table) = &raw_config.keybinds {
-        process_raw_keybinds(&table, &mut config.keybinds);
+        process_raw_keybinds(table, &mut config.keybinds);
     }
     if let Some(table) = &raw_config.sorting {
-        process_raw_sorting(&table, &mut config.sorting);
+        process_raw_sorting(table, &mut config.sorting);
     }
     if let Some(table) = &raw_config.view {
-        process_raw_view(&table, &mut config.view);
+        process_raw_view(table, &mut config.view);
     }
 }
 
@@ -392,7 +392,7 @@ fn match_key(raw_key: &str) -> Option<KeyboardShortcut> {
     let raw_key = raw_key.to_lowercase();
     let mut splitted = raw_key.split("+").map(|s| s.trim()).collect::<Vec<&str>>();
 
-    if splitted.len() <= 0 {
+    if splitted.is_empty() {
         println!("keybind cannot be 0 character long");
         return None;
     }
@@ -566,7 +566,7 @@ struct RawSorting {
 
 fn process_raw_sorting(raw_sorting: &RawSorting, sorting_config: &mut Sorting) {
     if let Some(by) = &raw_sorting.sorting_by {
-        sorting_config.sorting_by = match_property(&by);
+        sorting_config.sorting_by = match_property(by);
     }
     if let Some(bol) = &raw_sorting.reversed {
         sorting_config.reversed = bol.to_owned();
@@ -584,10 +584,10 @@ struct RawView {
 
 fn process_raw_view(raw_view: &RawView, view_conf: &mut View) {
     if let Some(list) = &raw_view.explorer {
-        view_conf.explorer = list.par_iter().map(|i| match_property(&i)).collect();
+        view_conf.explorer = list.par_iter().map(|i| match_property(i)).collect();
     }
     if let Some(list) = &raw_view.metadata {
-        view_conf.metadata = list.par_iter().map(|i| match_property(&i)).collect();
+        view_conf.metadata = list.par_iter().map(|i| match_property(i)).collect();
     }
     if let Some(b) = &raw_view.dark_mode {
         view_conf.dark_mode = *b;

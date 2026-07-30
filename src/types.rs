@@ -16,24 +16,13 @@ pub enum PasteKind {
     Duplicate,
 }
 
+#[derive(Default)]
 pub struct Overlay {
     pub buffer: String,
     pub error: String,
     pub path: Option<PathBuf>,
     pub kind: Option<OverlayKind>,
     pub entry: Option<Entry>,
-}
-
-impl Default for Overlay {
-    fn default() -> Self {
-        Overlay {
-            buffer: String::new(),
-            error: String::new(),
-            path: None,
-            kind: None,
-            entry: None,
-        }
-    }
 }
 
 #[derive(Clone, Copy, PartialEq)]
@@ -46,20 +35,11 @@ pub enum OverlayKind {
     Metadata,
 }
 
+#[derive(Default)]
 pub struct Field {
     pub buffer: String,
     pub kind: Option<FieldKind>,
     pub focused: bool,
-}
-
-impl Default for Field {
-    fn default() -> Self {
-        Field {
-            buffer: String::new(),
-            kind: None,
-            focused: false,
-        }
-    }
 }
 
 impl Field {
@@ -75,19 +55,10 @@ pub enum FieldKind {
     Search,
 }
 
-#[derive(Debug)]
+#[derive(Default, Debug)]
 pub struct Clipboard {
     pub entries: FxHashSet<PathBuf>,
     pub mode: Option<ClipboardMode>,
-}
-
-impl Default for Clipboard {
-    fn default() -> Self {
-        Clipboard {
-            entries: FxHashSet::default(),
-            mode: None,
-        }
-    }
 }
 
 #[derive(Debug, PartialEq, Clone)]
@@ -216,15 +187,13 @@ pub enum Property {
 
 impl Display for Property {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let thing;
-
-        match self {
-            Property::Name => thing = "name",
-            Property::Accessed => thing = "accessed",
-            Property::Created => thing = "created",
-            Property::Type => thing = "type",
-            Property::Size => thing = "size",
-            Property::Path => thing = "path",
+        let thing = match self {
+            Property::Name => "name",
+            Property::Accessed => "accessed",
+            Property::Created => "created",
+            Property::Type => "type",
+            Property::Size => "size",
+            Property::Path => "path",
         };
 
         write!(f, "{}", thing)

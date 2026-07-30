@@ -19,7 +19,7 @@ pub fn rename(path: &Path, name: &str) -> Result<PathBuf, String> {
     let mut new_path = path.to_path_buf();
     new_path.set_file_name(name);
 
-    let command = Command::new("mv").arg(&path).arg(&new_path).output();
+    let command = Command::new("mv").arg(path).arg(&new_path).output();
 
     if let Err(err) = command {
         return Err(err.to_string());
@@ -39,7 +39,7 @@ where
             return_error = Some(String::from("provided path doesn't exist?"));
         }
 
-        let command = Command::new("rm").arg("-rf").arg(&path).output();
+        let command = Command::new("rm").arg("-rf").arg(path).output();
 
         if let Err(e) = command {
             return_error = Some(e.to_string());
@@ -111,7 +111,7 @@ fn paste<'a>(
     let mut final_path = dest.to_path_buf();
     prevs.iter().for_each(|prev| final_path.push(prev));
 
-    let joined = &final_path.join(&name);
+    let joined = &final_path.join(name);
     // check if not exists in the destination
     if !joined.exists() {
         move_file(path, joined, is_cut);
@@ -126,7 +126,7 @@ fn paste<'a>(
     match paste_kind {
         PasteKind::Duplicate => {
             let result = file_extension(path);
-            let ext = if result == "" {
+            let ext = if result.is_empty() {
                 String::new()
             } else {
                 format!(".{}", result)
@@ -134,7 +134,7 @@ fn paste<'a>(
             // since both file/folder has the same outcome for choosing duplicate
             let new_path = increment_suffix(&file_name(path), ext.as_str(), &final_path);
             move_file(path, &new_path, is_cut);
-            return Some(new_path);
+            Some(new_path)
         }
         PasteKind::Replace => {
             if path == joined {
@@ -144,10 +144,10 @@ fn paste<'a>(
 
             if !final_path.is_file() {
                 replace_file(path, joined, is_cut);
-                return Some(joined.clone());
+                Some(joined.clone())
             } else {
                 prevs.push(name);
-                return paste(dest, prevs, path, is_cut, from_worker, to_worker);
+                paste(dest, prevs, path, is_cut, from_worker, to_worker)
             }
         }
     }
@@ -206,7 +206,7 @@ pub fn file_type(path: &Path) -> (&'static str, IconKind) {
     let icon;
 
     if let Some(thing) = file_types::extension_to_file_type(file_extension(path)) {
-        str_type = &thing.0;
+        str_type = thing.0;
         icon = thing.1;
     } else if is_textfile(path) {
         str_type = "Text File";
@@ -248,8 +248,8 @@ pub fn move_dir(
                 &mut Vec::with_capacity(5),
                 &path,
                 true,
-                &from_worker,
-                &to_worker,
+                from_worker,
+                to_worker,
             )
         {
             resulte.push(p);
@@ -279,8 +279,8 @@ pub fn copy_dir(
             &mut Vec::with_capacity(5),
             &path,
             false,
-            &from_worker,
-            &to_worker,
+            from_worker,
+            to_worker,
         ) {
             resulte.push(p);
             continue;
@@ -291,17 +291,15 @@ pub fn copy_dir(
 }
 
 fn move_file(old_path: &Path, new_path: &Path, is_cut: bool) {
-    let command;
-
-    if is_cut {
-        command = Command::new("mv").arg(&old_path).arg(&new_path).output();
+    let command = if is_cut {
+        Command::new("mv").arg(old_path).arg(new_path).output()
     } else {
-        command = Command::new("cp")
-            .arg(&old_path)
-            .arg(&new_path)
+        Command::new("cp")
+            .arg(old_path)
+            .arg(new_path)
             .arg("-r")
-            .output();
-    }
+            .output()
+    };
 
     if let Err(e) = command {
         println!("{}", e);
@@ -313,12 +311,12 @@ fn replace_file(old_path: &Path, new_path: &Path, is_cut: bool) {
 
     Command::new("rm")
         .arg("-rf")
-        .arg(&new_path)
+        .arg(new_path)
         .output()
         .unwrap();
     // remove before copying / moving
 
-    let cmd = Command::new(program).arg(&old_path).arg(&new_path).output();
+    let cmd = Command::new(program).arg(old_path).arg(new_path).output();
 
     if let Err(e) = cmd {
         println!("{}", e);
@@ -447,21 +445,21 @@ pub fn bytes_to_string(size: u64) -> String {
     if size >= 10_u64.pow(12) {
         // TiB
         let round = size / 10_u64.pow(12);
-        return format!("{:.2}TiB", round);
+        format!("{:.2}TiB", round)
     } else if size >= 10_u64.pow(9) {
         // GiB
         let round = size / 10_u64.pow(9);
-        return format!("{:.2}GiB", round);
+        format!("{:.2}GiB", round)
     } else if size >= 10_u64.pow(6) {
         // MiB
         let round = size / 10_u64.pow(6);
-        return format!("{:.2}MiB", round);
+        format!("{:.2}MiB", round)
     } else if size >= 10_u64.pow(3) {
         // KiB
         let round = size / 10_u64.pow(3);
-        return format!("{:.2}KiB", round);
+        format!("{:.2}KiB", round)
     } else {
         // bytes
-        return format!("{} bytes", size);
+        format!("{} bytes", size)
     }
 }

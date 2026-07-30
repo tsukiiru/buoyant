@@ -5,7 +5,6 @@ use eframe::egui::{
     RichText, ScrollArea, Sense, Stroke, TextEdit, TextWrapMode, Theme, Ui, Vec2, Window,
     mutex::RwLock,
 };
-use egui_extras;
 use rayon::{
     iter::{
         IndexedParallelIterator, IntoParallelRefIterator, IntoParallelRefMutIterator,
@@ -22,7 +21,6 @@ use std::{
     sync::{Arc, mpsc},
     time::{Duration, Instant},
 };
-use tokio;
 
 use crate::{
     config::{self, *},
@@ -73,8 +71,10 @@ impl App {
     pub fn new(cc: &eframe::CreationContext<'_>) -> Self {
         let ctx = cc.egui_ctx.clone();
         egui_extras::install_image_loaders(&ctx);
-        let mut app = App::default();
-        app.ctx = ctx;
+        let mut app = App {
+            ctx,
+            ..Default::default()
+        };
         app.fetch_config();
         app.bind_keybinds();
 
@@ -123,13 +123,13 @@ impl App {
 
         for (action, sc) in &mut self.config.keybinds_list {
             if sc.modifiers.matches_logically(CTRL) && sc.logical_key == Key::C {
-                actions.copy = action.clone();
+                actions.copy = *action;
             }
             if sc.modifiers.matches_logically(CTRL) && sc.logical_key == Key::X {
-                actions.cut = action.clone();
+                actions.cut = *action;
             }
             if sc.modifiers.matches_logically(CTRL) && sc.logical_key == Key::V {
-                actions.paste = action.clone();
+                actions.paste = *action;
             }
         }
     }
@@ -157,7 +157,7 @@ impl App {
             KeybindAction::NavigateForward => self.nav_forward(),
             KeybindAction::NavigateBackward => self.nav_back(),
             KeybindAction::Copy => {
-                if self.selected.len() < 1 {
+                if self.selected.is_empty() {
                     self.new_toast(
                         String::from("Clipboard"),
                         String::from("nothing is selected to be copied!"),
@@ -179,7 +179,7 @@ impl App {
                 self.add_to_clipboard(ClipboardMode::Copy);
             }
             KeybindAction::Cut => {
-                if self.selected.len() < 1 {
+                if self.selected.is_empty() {
                     self.new_toast(
                         String::from("Clipboard"),
                         String::from("nothing is selected to be cut!"),
@@ -201,7 +201,7 @@ impl App {
                 self.add_to_clipboard(ClipboardMode::Cut);
             }
             KeybindAction::Paste => {
-                if self.clipboard.entries.len() < 1 {
+                if self.clipboard.entries.is_empty() {
                     self.new_toast(
                         String::from("Clipboard"),
                         String::from("nothing is in clipboard to be pasted!"),
@@ -215,7 +215,7 @@ impl App {
             }
 
             KeybindAction::Delete => {
-                if self.selected.len() < 1 {
+                if self.selected.is_empty() {
                     self.new_toast(
                         String::from("Delete"),
                         String::from("nothing is selected to be deleted!"),
@@ -291,8 +291,8 @@ impl App {
             self.push_entry(
                 &TempEntry {
                     name: path.file_name().unwrap().to_str().unwrap(),
-                    file_type: file_type,
-                    file_icon: file_icon,
+                    file_type,
+                    file_icon,
                     is_hidden: file_system::is_hidden(&path),
                     path: &path,
                     accessed,
@@ -366,7 +366,7 @@ impl App {
         }
 
         for (i, entry) in self.entries.children.iter().enumerate() {
-            if !entry.using || (!view_hidden && entry.is_hidden) || !entry.name.contains(&filter) {
+            if !entry.using || (!view_hidden && entry.is_hidden) || !entry.name.contains(filter) {
                 continue;
             }
 
@@ -403,7 +403,7 @@ impl App {
                     if let Some(entry) = self.entries.children.get(*entry_index)
                         && entry.path == path
                     {
-                        self.current_index = index.clone();
+                        self.current_index = index;
                         self.scroll_signal = true;
                     }
                 });
@@ -546,7 +546,7 @@ impl App {
             }
         }
 
-        let rename_res = file_system::rename(&overlay.path.as_ref().unwrap(), &overlay.buffer);
+        let rename_res = file_system::rename(overlay.path.as_ref().unwrap(), &overlay.buffer);
 
         if let Err(err) = &rename_res {
             self.new_toast(
@@ -571,7 +571,7 @@ impl App {
             return;
         }
 
-        field.kind = Some(kind.clone());
+        field.kind = Some(kind);
     }
 
     fn close_field(&mut self) {
@@ -603,11 +603,12 @@ impl App {
             OverlayKind::Metadata => {
                 let metadata_conf = &self.config.view.metadata;
                 let selected_entry = self.entries.entry(&self.current_index).unwrap();
-                let mut new_entry = Entry::default();
-
-                new_entry.path = selected_entry.path.clone();
-                new_entry.name = selected_entry.name.clone();
-                new_entry.file_type = selected_entry.file_type;
+                let mut new_entry = Entry {
+                    name: selected_entry.name.clone(),
+                    file_type: selected_entry.file_type,
+                    path: selected_entry.path.clone(),
+                    ..Default::default()
+                };
 
                 if let Some(t) = selected_entry.accessed
                     && let Some(p) = selected_entry.created
@@ -657,9 +658,11 @@ impl App {
                 self.to_worker = None;
             }
             OverlayKind::Delete => {
-                if choice == 0 {
-                    self.delete();
+                if choice != 0 {
+                    self.close_overlay();
                 }
+
+                self.delete();
             }
             _ => {}
         }
@@ -837,7 +840,7 @@ impl App {
                     duration,
                     ..Default::default()
                 };
-                let instant = toast.start_time.clone();
+                let instant = toast.start_time;
                 list.push(toast);
 
                 instant
@@ -883,39 +886,38 @@ impl eframe::App for App {
             self.handle_actions(action, is_ctrled, is_shifted);
         }
 
-        if let Some(rx) = &self.from_worker {
-            if let Ok(req) = rx.try_recv() {
-                match req {
-                    WorkerRequest::OperationType { path } => {
-                        self.open_overlay(OverlayKind::Paste, Some(&path));
-                    }
-                    WorkerRequest::Done { paths } => {
-                        self.fetch_entries(if !paths.is_empty() {
-                            Some(paths[0].to_owned())
-                        } else {
-                            None
-                        });
+        if let Some(rx) = &self.from_worker
+            && let Ok(req) = rx.try_recv()
+        {
+            match req {
+                WorkerRequest::OperationType { path } => {
+                    self.open_overlay(OverlayKind::Paste, Some(&path));
+                }
+                WorkerRequest::Done { paths } => {
+                    self.fetch_entries(if !paths.is_empty() {
+                        Some(paths[0].to_owned())
+                    } else {
+                        None
+                    });
 
-                        for p in paths {
-                            for (id, e) in self.entries.children.iter().enumerate() {
-                                if p == e.path
-                                    && let Some(i) =
-                                        self.entries.displaying.iter().find(|i| **i == id)
-                                {
-                                    self.selected.insert(*i);
-                                }
+                    for p in paths {
+                        for (id, e) in self.entries.children.iter().enumerate() {
+                            if p == e.path
+                                && let Some(i) = self.entries.displaying.iter().find(|i| **i == id)
+                            {
+                                self.selected.insert(*i);
                             }
                         }
-
-                        if let Some(mode) = &self.clipboard.mode
-                            && mode == &ClipboardMode::Cut
-                        {
-                            self.clipboard.entries.clear();
-                            self.clipboard.mode = None;
-                        }
-
-                        self.from_worker = None;
                     }
+
+                    if let Some(mode) = &self.clipboard.mode
+                        && mode == &ClipboardMode::Cut
+                    {
+                        self.clipboard.entries.clear();
+                        self.clipboard.mode = None;
+                    }
+
+                    self.from_worker = None;
                 }
             }
         }
@@ -1031,7 +1033,7 @@ impl eframe::App for App {
                     sa.set_min_height(f32::INFINITY);
                     let bg_response = sa.interact(
                         sa.available_rect_before_wrap(),
-                        Id::new(format!("explorer-area")),
+                        Id::new("explorer-area"),
                         Sense::click(),
                     );
 
@@ -1710,7 +1712,7 @@ impl eframe::App for App {
         }
 
         let toast_list = self.toasts.read();
-        if toast_list.len() > 0 {
+        if !toast_list.is_empty() {
             let toast_overlay = Window::new("toast")
                 .title_bar(false)
                 .frame(Frame::NONE)
