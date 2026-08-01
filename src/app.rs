@@ -1,9 +1,9 @@
 use chrono::{DateTime, Datelike, Utc};
 use eframe::egui::{
     Align, Align2, AtomLayout, Button, CentralPanel, Color32, Context, CornerRadius, Event, Frame,
-    Grid, Id, Image, Key, Label, LayerId, Margin, Modal, Order, Popup, PopupAnchor, ProgressBar,
-    RichText, ScrollArea, Sense, Stroke, TextEdit, TextWrapMode, Theme, Ui, Vec2, Window,
-    mutex::RwLock,
+    Grid, Id, Image, Key, Label, LayerId, Margin, Modal, Modifiers, Order, Popup, PopupAnchor,
+    ProgressBar, RichText, ScrollArea, Sense, Stroke, TextEdit, TextWrapMode, Theme, Ui, Vec2,
+    Window, mutex::RwLock,
 };
 use rayon::{
     iter::{
@@ -14,7 +14,8 @@ use rayon::{
 };
 use rustc_hash::FxHashSet;
 use std::{
-    env,
+    borrow::Cow,
+    env, fs,
     ops::Sub,
     path::{Path, PathBuf},
     process::Command,
@@ -40,7 +41,6 @@ pub struct App {
     overlay: Overlay,
     field: Field,
     config: Config,
-    actions: Actions,
     toasts: Toasts, // mhm toasts :3
     from_worker: Option<mpsc::Receiver<WorkerRequest>>,
     to_worker: Option<mpsc::Sender<PasteKind>>,
@@ -59,7 +59,6 @@ impl Default for App {
             selected: FxHashSet::default(),
             current_index: 0,
             config: Config::default(),
-            actions: Actions::default(),
             toasts: Arc::new(RwLock::new(Vec::with_capacity(5))),
             from_worker: None,
             to_worker: None,
@@ -70,13 +69,13 @@ impl Default for App {
 impl App {
     pub fn new(cc: &eframe::CreationContext<'_>) -> Self {
         let ctx = cc.egui_ctx.clone();
+
         egui_extras::install_image_loaders(&ctx);
         let mut app = App {
             ctx,
             ..Default::default()
         };
         app.fetch_config();
-        app.bind_keybinds();
 
         app
     }
@@ -118,26 +117,10 @@ impl App {
         self.fetch_entries(None);
     }
 
-    fn bind_keybinds(&mut self) {
-        let actions = &mut self.actions;
-
-        for (action, sc) in &mut self.config.keybinds_list {
-            if sc.modifiers.matches_logically(CTRL) && sc.logical_key == Key::C {
-                actions.copy = *action;
-            }
-            if sc.modifiers.matches_logically(CTRL) && sc.logical_key == Key::X {
-                actions.cut = *action;
-            }
-            if sc.modifiers.matches_logically(CTRL) && sc.logical_key == Key::V {
-                actions.paste = *action;
-            }
-        }
-    }
-
-    fn handle_actions(&mut self, action: KeybindAction, is_ctrled: bool, is_shifted: bool) {
+    fn handle_actions(&mut self, action: &KeybindAction, is_ctrled: bool, is_shifted: bool) {
         if self.overlay.kind.is_some() {
             if let KeybindAction::Choice(choice) = action {
-                self.finalize_overlay_choice(choice);
+                self.finalize_overlay_choice(*choice);
             }
             return;
         }
@@ -159,8 +142,8 @@ impl App {
             KeybindAction::Copy => {
                 if self.selected.is_empty() {
                     self.new_toast(
-                        String::from("Clipboard"),
-                        String::from("nothing is selected to be copied!"),
+                        "Clipboard",
+                        "nothing is selected to be copied!",
                         ToastKind::Info,
                         Duration::from_secs(3),
                     );
@@ -168,8 +151,8 @@ impl App {
                 }
 
                 self.new_toast(
-                    String::from("Clipboard"),
-                    format!(
+                    "Clipboard",
+                    &format!(
                         "successfully added {} items into clipboard!",
                         self.selected.len()
                     ),
@@ -181,8 +164,8 @@ impl App {
             KeybindAction::Cut => {
                 if self.selected.is_empty() {
                     self.new_toast(
-                        String::from("Clipboard"),
-                        String::from("nothing is selected to be cut!"),
+                        "Clipboard",
+                        "nothing is selected to be cut!",
                         ToastKind::Info,
                         Duration::from_secs(3),
                     );
@@ -190,8 +173,8 @@ impl App {
                 }
 
                 self.new_toast(
-                    String::from("Clipboard"),
-                    format!(
+                    "Clipboard",
+                    &format!(
                         "successfully added {} items into clipboard!",
                         self.selected.len()
                     ),
@@ -201,46 +184,36 @@ impl App {
                 self.add_to_clipboard(ClipboardMode::Cut);
             }
             KeybindAction::Paste => {
-                if self.clipboard.entries.is_empty() {
-                    self.new_toast(
-                        String::from("Clipboard"),
-                        String::from("nothing is in clipboard to be pasted!"),
-                        ToastKind::Info,
-                        Duration::from_secs(3),
-                    );
-                    return;
-                }
-
                 self.paste();
             }
 
             KeybindAction::Delete => {
                 if self.selected.is_empty() {
                     self.new_toast(
-                        String::from("Delete"),
-                        String::from("nothing is selected to be deleted!"),
+                        "Delete",
+                        "nothing is selected to be deleted!",
                         ToastKind::Info,
                         Duration::from_secs(3),
                     );
                     return;
                 }
 
-                self.open_overlay(OverlayKind::Delete, None);
+                self.new_overlay(OverlayKind::Delete, None);
             }
-            KeybindAction::Rename => self.open_overlay(OverlayKind::Rename, None),
+            KeybindAction::Rename => self.new_overlay(OverlayKind::Rename, None),
             KeybindAction::ClearClipboard => {
                 self.clear_clipboard();
                 self.new_toast(
-                    String::from("Success!"),
-                    String::from("successfully cleared clipboard!"),
+                    "Success!",
+                    "successfully cleared clipboard!",
                     ToastKind::Success,
                     Duration::from_secs(3),
                 );
             }
             KeybindAction::ToggleHidden => self.toggle_view_hidden(),
-            KeybindAction::CreateFile => self.open_overlay(OverlayKind::CreateFile, None),
-            KeybindAction::CreateFolder => self.open_overlay(OverlayKind::CreateFolder, None),
-            KeybindAction::Info => self.open_overlay(OverlayKind::Metadata, None),
+            KeybindAction::CreateFile => self.new_overlay(OverlayKind::CreateFile, None),
+            KeybindAction::CreateFolder => self.new_overlay(OverlayKind::CreateFolder, None),
+            KeybindAction::Info => self.new_overlay(OverlayKind::Metadata, None),
             KeybindAction::Search => self.new_field(FieldKind::Search),
             KeybindAction::Refresh => self.fetch_config(),
             _ => {}
@@ -268,12 +241,7 @@ impl App {
         let fetch_current_path = file_system::read_dir(&self.current_path);
 
         if let Err(err) = &fetch_current_path {
-            self.new_toast(
-                String::from("Error"),
-                err.to_owned(),
-                ToastKind::Danger,
-                Duration::from_millis(5000),
-            );
+            self.new_toast("Error", err, ToastKind::Danger, Duration::from_millis(5000));
         }
 
         let mut index: usize = 0;
@@ -360,7 +328,7 @@ impl App {
         let view_hidden = self.config.view.view_hidden_files;
 
         if let Some(kind) = &self.field.kind
-            && kind == &FieldKind::Search
+            && *kind == FieldKind::Search
         {
             filter = self.field.buffer.trim();
         }
@@ -471,8 +439,8 @@ impl App {
             let res = Command::new("xdg-open").arg(to).spawn();
             if let Err(err) = res {
                 self.new_toast(
-                    String::from("Error"),
-                    err.to_string(),
+                    "xdg-open",
+                    &err.to_string(),
                     ToastKind::Danger,
                     Duration::from_millis(5000),
                 );
@@ -500,12 +468,7 @@ impl App {
                 .path
                 .as_ref()
         })) {
-            self.new_toast(
-                String::from("Delete"),
-                e,
-                ToastKind::Danger,
-                Duration::from_secs(3),
-            );
+            self.new_toast("Delete", &e, ToastKind::Danger, Duration::from_secs(3));
         }
         self.fetch_entries(None);
     }
@@ -534,7 +497,7 @@ impl App {
 
     fn rename(&mut self) {
         let overlay = &mut self.overlay;
-        if overlay.kind != Some(OverlayKind::Rename) {
+        if overlay.kind.unwrap() != OverlayKind::Rename {
             return;
         }
 
@@ -549,12 +512,7 @@ impl App {
         let rename_res = file_system::rename(overlay.path.as_ref().unwrap(), &overlay.buffer);
 
         if let Err(err) = &rename_res {
-            self.new_toast(
-                String::from("Rename"),
-                err.to_owned(),
-                ToastKind::Danger,
-                Duration::from_secs(3),
-            );
+            self.new_toast("Rename", err, ToastKind::Danger, Duration::from_secs(3));
         }
 
         self.fetch_entries(rename_res.ok());
@@ -589,7 +547,7 @@ impl App {
         }
     }
 
-    fn open_overlay(&mut self, kind: OverlayKind, path: Option<&Path>) {
+    fn new_overlay(&mut self, kind: OverlayKind, path: Option<&Path>) {
         let overlay = &mut self.overlay;
         overlay.kind = Some(kind);
 
@@ -681,16 +639,38 @@ impl App {
     }
 
     fn add_to_clipboard(&mut self, clipboard_mode: ClipboardMode) {
-        let clipboard = &mut self.clipboard;
-        clipboard.entries.clear();
+        use wl_clipboard_rs::copy::{MimeType, Options, Source};
 
-        self.selected.iter().for_each(|i| {
-            let _ = clipboard
-                .entries
-                .insert(self.entries.children.get(*i).unwrap().path.clone());
-        });
+        self.clipboard.entries.clear();
 
-        clipboard.mode = Some(clipboard_mode);
+        let is_copy = clipboard_mode == ClipboardMode::Copy;
+
+        for i in &self.selected {
+            let path = self.entries.children.get(*i).unwrap().path.clone();
+
+            if is_copy && path.is_file() {
+                let opts = Options::new();
+                let buf = fs::read(&path);
+                if buf.is_err() {
+                    self.new_toast(
+                        "System Clipboard",
+                        &format!("failed to read file contents for {}", path.display()),
+                        ToastKind::Info,
+                        Duration::from_secs(3),
+                    );
+                    continue;
+                }
+                opts.copy(
+                    Source::Bytes(fs::read(&path).unwrap().into()),
+                    MimeType::Autodetect,
+                )
+                .unwrap();
+            }
+
+            let _ = self.clipboard.entries.insert(path);
+        }
+
+        self.clipboard.mode = Some(clipboard_mode);
     }
 
     fn clear_clipboard(&mut self) {
@@ -719,36 +699,50 @@ impl App {
     }
 
     fn paste(&mut self) {
-        let clipboard = &mut self.clipboard;
-        let clipboard_mode = clipboard.mode.as_ref();
+        if let Some(mode) = &self.clipboard.mode {
+            let (worker_tx, worker_rx) = mpsc::channel(); // main use - worker recv
+            let (user_tx, user_rx) = mpsc::channel(); // main recv - worker use
+            self.from_worker = Some(user_rx);
+            self.to_worker = Some(worker_tx);
 
-        if clipboard.entries.is_empty() || clipboard_mode.is_none() {
-            return;
-        }
+            let current_path = self.current_path.clone();
+            let entries = self.clipboard.entries.clone();
 
-        let (worker_tx, worker_rx) = mpsc::channel(); // main use - worker recv
-        let (user_tx, user_rx) = mpsc::channel(); // main recv - worker use
-        self.from_worker = Some(user_rx);
-        self.to_worker = Some(worker_tx);
-
-        let current_path = self.current_path.clone();
-        let entries = clipboard
-            .entries
-            .clone()
-            .into_iter()
-            .collect::<Vec<PathBuf>>();
-
-        match clipboard_mode.unwrap() {
-            ClipboardMode::Copy => {
-                std::thread::spawn(move || {
-                    file_system::copy_dir(entries, current_path, &user_tx, &worker_rx);
-                });
+            match mode {
+                ClipboardMode::Copy => {
+                    std::thread::spawn(move || {
+                        file_system::copy_dir(entries, current_path, &user_tx, &worker_rx);
+                    });
+                }
+                ClipboardMode::Cut => {
+                    let current_path = self.current_path.clone();
+                    std::thread::spawn(move || {
+                        file_system::move_dir(entries, current_path, &user_tx, &worker_rx);
+                    });
+                }
             }
-            ClipboardMode::Cut => {
-                let current_path = self.current_path.clone();
-                std::thread::spawn(move || {
-                    file_system::move_dir(entries, current_path, &user_tx, &worker_rx);
-                });
+            return;
+        };
+
+        // if there's nothing in app's clipboard, use wayland's selection (clipboard)
+        use std::io::Read;
+        use wl_clipboard_rs::paste::{ClipboardType, Error, MimeType, Seat, get_contents};
+        let result = get_contents(ClipboardType::Regular, Seat::Unspecified, MimeType::Any);
+
+        match result {
+            Ok((mut pipe, _mime_type)) => {
+                //println!("mime-type: {}", mime_type);
+                let mut contents = vec![];
+                pipe.read_to_end(&mut contents).unwrap();
+                //println!("{}", String::from_utf8_lossy(&contents));
+            }
+
+            Err(Error::NoSeats) | Err(Error::ClipboardEmpty) | Err(Error::NoMimeType) => {
+                println!("boog");
+            }
+
+            Err(_err) => {
+                println!("goog");
             }
         };
     }
@@ -827,8 +821,9 @@ impl App {
         self.selected.clear();
     }
 
-    fn new_toast(&self, title: String, content: String, kind: ToastKind, duration: Duration) {
+    fn new_toast(&self, title: &'static str, content: &str, kind: ToastKind, duration: Duration) {
         let toasts = Arc::clone(&self.toasts);
+        let content = Cow::Owned(content.to_string());
 
         tokio::spawn(async move {
             let id = {
@@ -859,31 +854,44 @@ impl eframe::App for App {
         let mut action_to_handle: Option<KeybindAction> = None;
         let (mut is_ctrled, mut is_shifted) = (false, false);
         ctx.clone().input_mut(|i| {
-            let actions = self.actions.clone();
             is_ctrled = i.modifiers.ctrl;
             is_shifted = i.modifiers.shift;
 
+            let mut pressed_modifiers = Modifiers::NONE.plus(i.modifiers);
+            let mut pressed_key = None;
+
             for event in &i.events {
                 if let Event::Copy = event {
-                    action_to_handle = Some(actions.copy);
-                }
-                if let Event::Cut = event {
-                    action_to_handle = Some(actions.cut);
-                }
-                if let Event::Paste { .. } = event {
-                    action_to_handle = Some(actions.paste);
+                    pressed_modifiers = pressed_modifiers.plus(CTRL);
+                    pressed_key = Some(Key::C);
+                } else if let Event::Cut = event {
+                    pressed_modifiers = pressed_modifiers.plus(CTRL);
+                    pressed_key = Some(Key::X);
+                } else if let Event::Paste { .. } = event {
+                    pressed_modifiers = pressed_modifiers.plus(CTRL);
+                    pressed_key = Some(Key::V);
                 }
             }
 
             for (action, shortcut) in &self.config.keybinds_list {
-                if i.consume_shortcut(shortcut) {
-                    action_to_handle = Some(*action);
+                if i.modifiers
+                    .matches_logically(pressed_modifiers.plus(shortcut.modifiers))
+                {
+                    if let Some(key) = pressed_key
+                        && shortcut.logical_key == key
+                    {
+                        action_to_handle = Some(*action);
+                        return;
+                    } else if i.key_pressed(shortcut.logical_key) {
+                        action_to_handle = Some(*action);
+                        return;
+                    }
                 }
             }
         });
 
         if let Some(action) = action_to_handle {
-            self.handle_actions(action, is_ctrled, is_shifted);
+            self.handle_actions(&action, is_ctrled, is_shifted);
         }
 
         if let Some(rx) = &self.from_worker
@@ -891,7 +899,7 @@ impl eframe::App for App {
         {
             match req {
                 WorkerRequest::OperationType { path } => {
-                    self.open_overlay(OverlayKind::Paste, Some(&path));
+                    self.new_overlay(OverlayKind::Paste, Some(&path));
                 }
                 WorkerRequest::Done { paths } => {
                     self.fetch_entries(if !paths.is_empty() {
@@ -944,7 +952,7 @@ impl eframe::App for App {
         let mut req_transfer = None;
 
         let (
-            mut req_open_overlay,
+            mut req_new_overlay,
             mut req_overlay_choice,
             mut req_close_overlay,
             mut req_update_overlay_buffer,
@@ -971,40 +979,38 @@ impl eframe::App for App {
                 ui.label(format!("{}", self.current_path.display()));
             });
 
+            let mut content = self.field.buffer.clone();
+            let bol = if let Some(kind) = self.field.kind
+                && kind == FieldKind::Search
             {
-                let mut content = self.field.buffer.clone();
-                let bol = if let Some(kind) = self.field.kind
-                    && kind == FieldKind::Search
-                {
-                    true
-                } else {
-                    false
-                };
+                true
+            } else {
+                false
+            };
 
-                let input = ui.add(
-                    TextEdit::singleline(&mut content)
-                        .background_color(Color32::TRANSPARENT)
-                        .hint_text(format!(
-                            "({}) input search entry :3",
-                            ctx.format_shortcut(&self.config.keybinds.search)
-                        ))
-                        .frame(Frame::NONE)
-                        .desired_width(f32::INFINITY),
-                );
+            let input = ui.add(
+                TextEdit::singleline(&mut content)
+                    .background_color(Color32::TRANSPARENT)
+                    .hint_text(format!(
+                        "({}) input search entry :3",
+                        ctx.format_shortcut(&self.config.keybinds.search)
+                    ))
+                    .frame(Frame::NONE)
+                    .desired_width(f32::INFINITY),
+            );
 
-                if input.gained_focus() && !bol {
-                    req_open_field = Some(FieldKind::Search);
-                }
-                if input.changed() {
-                    req_update_field_buffer = Some(content);
-                    req_logic_field = Some(FieldKind::Search);
-                }
-                if self.field.kind.is_some() && ui.input(|i| i.key_pressed(Key::Escape)) {
-                    req_close_field = true;
-                }
-                if self.field.focused {
-                    input.request_focus();
-                }
+            if input.gained_focus() && !bol {
+                req_open_field = Some(FieldKind::Search);
+            }
+            if input.changed() {
+                req_update_field_buffer = Some(content);
+                req_logic_field = Some(FieldKind::Search);
+            }
+            if self.field.kind.is_some() && ui.input(|i| i.key_pressed(Key::Escape)) {
+                req_close_field = true;
+            }
+            if self.field.focused {
+                input.request_focus();
             }
 
             ui.separator();
@@ -1028,241 +1034,237 @@ impl eframe::App for App {
 
             let displaying = self.entries.displaying.clone();
 
-            let bg_response =
-                ScrollArea::vertical().show_rows(ui, 32.0, displaying.len(), |sa, range| {
-                    sa.set_min_height(f32::INFINITY);
-                    let bg_response = sa.interact(
-                        sa.available_rect_before_wrap(),
-                        Id::new("explorer-area"),
-                        Sense::click(),
-                    );
+            let bg_response = ui.interact(
+                ui.available_rect_before_wrap(),
+                Id::new("explorer-area"),
+                Sense::click(),
+            );
 
-                    let keybinds = &self.config.keybinds;
-                    let view = &self.config.view.explorer;
+            ScrollArea::vertical().show_rows(ui, 32.0, displaying.len(), |sa, range| {
+                let keybinds = &self.config.keybinds;
+                let view = &self.config.view.explorer;
 
-                    for (index, entry_index) in displaying.into_iter().enumerate() {
-                        let is_current_index = index == *current_index;
-                        let entry_opt = self.entries.children.get(entry_index);
-                        if entry_opt.is_none() || (!range.contains(&index) && !is_current_index) {
-                            continue;
-                        }
-
-                        let entry = entry_opt.unwrap();
-
-                        sa.horizontal(|h| {
-                            let mut frame = Frame::NONE
-                                .stroke(Stroke::new(1.0, Color32::TRANSPARENT))
-                                .corner_radius(4.0);
-
-                            if self.selected.contains(&entry_index) {
-                                frame.fill = Color32::LIGHT_GREEN.gamma_multiply(0.3);
-                            }
-                            if is_current_index {
-                                frame.stroke.color = visuals.text_color().gamma_multiply(0.3);
-                            }
-
-                            let mut color = visuals.text_color();
-                            let mut icon = &entry.file_icon;
-                            if entry.is_hidden {
-                                color = visuals.text_color().gamma_multiply(0.5);
-                            }
-                            if self.clipboard.entries.contains(&entry.path) {
-                                icon = match self.clipboard.mode.as_ref().unwrap() {
-                                    ClipboardMode::Copy => &IconKind::Copy,
-                                    ClipboardMode::Cut => &IconKind::Scissors,
-                                };
-                                color = Color32::BLUE.gamma_multiply(0.3);
-                            }
-
-                            let fr = frame
-                                .show(h, |f| {
-                                    let another_frame =
-                                        Frame::NONE.inner_margin(Margin::symmetric(2, 8));
-                                    another_frame.show(f, |a| {
-                                        a.add(
-                                            Image::new(icons::match_icon(icon))
-                                                .fit_to_exact_size(Vec2::new(14.0, 14.0)),
-                                        );
-                                    });
-
-                                    let mut grid = Grid::new(Id::new(("explorer-grid", &index)));
-
-                                    grid = grid.min_col_width(200.0);
-                                    grid.show(f, |g| {
-                                        view.iter().for_each(|p| match p {
-                                            Property::Name => {
-                                                g.add(
-                                                    AtomLayout::new(&entry.name)
-                                                        .wrap_mode(TextWrapMode::Truncate)
-                                                        .max_width(200.0)
-                                                        .fallback_text_color(color),
-                                                );
-                                            }
-                                            Property::Accessed => {
-                                                g.add(
-                                                    AtomLayout::new(format_date(entry.accessed))
-                                                        .max_width(200.0)
-                                                        .wrap_mode(TextWrapMode::Truncate)
-                                                        .fallback_text_color(color),
-                                                );
-                                            }
-                                            Property::Created => {
-                                                g.add(
-                                                    AtomLayout::new(format_date(entry.created))
-                                                        .max_width(200.0)
-                                                        .wrap_mode(TextWrapMode::Truncate)
-                                                        .fallback_text_color(color),
-                                                );
-                                            }
-                                            Property::Size => {
-                                                g.add(
-                                                    AtomLayout::new(
-                                                        if let Some(size) = &entry.folder_size {
-                                                            format!("{} items", size)
-                                                        } else {
-                                                            file_system::bytes_to_string(
-                                                                entry.file_size.unwrap_or_default(),
-                                                            )
-                                                        },
-                                                    )
-                                                    .max_width(200.0)
-                                                    .wrap_mode(TextWrapMode::Truncate)
-                                                    .fallback_text_color(color),
-                                                );
-                                            }
-                                            Property::Type => {
-                                                g.add(
-                                                    AtomLayout::new(entry.file_type)
-                                                        .max_width(200.0)
-                                                        .wrap_mode(TextWrapMode::Truncate)
-                                                        .fallback_text_color(color),
-                                                );
-                                            }
-                                            Property::Path => {
-                                                g.add(
-                                                    AtomLayout::new(format!(
-                                                        "{}",
-                                                        entry.path.display()
-                                                    ))
-                                                    .max_width(200.0)
-                                                    .wrap_mode(TextWrapMode::Truncate)
-                                                    .fallback_text_color(color),
-                                                );
-                                            }
-                                        });
-                                    });
-                                })
-                                .response;
-
-                            let btn_interact = h.interact(
-                                fr.rect,
-                                Id::new(("button", &index)),
-                                Sense::click_and_drag(),
-                            );
-                            btn_interact.dnd_set_drag_payload(entry_index);
-
-                            if btn_interact.drag_started() {
-                                req_modify_selected = Some(index);
-                            }
-
-                            if btn_interact.dragged() {
-                                let popup = Popup::new(
-                                    Id::new(("drag_pop", &index)),
-                                    ctx.clone(),
-                                    PopupAnchor::Pointer,
-                                    drag_layer_id,
-                                );
-                                popup.show(|pop| {
-                                    pop.label("HIII!!!");
-                                    pop.label(self.selected.len().to_string());
-                                });
-                            }
-
-                            if let Some(hovered_payload) = fr.dnd_hover_payload::<usize>() {
-                                if *hovered_payload != entry_index {
-                                    h.painter().rect_filled(
-                                        fr.rect,
-                                        CornerRadius::from(4.0),
-                                        visuals.text_color().gamma_multiply(0.1),
-                                    );
-                                }
-                                if let Some(dragged_payload) = fr.dnd_release_payload() {
-                                    from = Some(dragged_payload);
-                                    to = Some(entry_index)
-                                }
-                            }
-
-                            if is_current_index && self.scroll_signal {
-                                btn_interact.scroll_to_me(None);
-                                self.scroll_signal = false;
-                            }
-
-                            btn_interact.context_menu(|ui| {
-                                ui.label(entry.name.clone());
-                                if ui
-                                    .add(
-                                        Button::new("rename").shortcut_text(
-                                            ctx.format_shortcut(&keybinds.rename_file),
-                                        ),
-                                    )
-                                    .clicked()
-                                {
-                                    req_open_overlay = Some(OverlayKind::Rename);
-                                }
-                                if ui
-                                    .add(Button::new("delete").shortcut_text(
-                                        ctx.format_shortcut(&keybinds.delete_selections),
-                                    ))
-                                    .clicked()
-                                {
-                                    req_open_overlay = Some(OverlayKind::Delete);
-                                }
-                                if ui
-                                    .add(Button::new("cut").shortcut_text(
-                                        ctx.format_shortcut(&keybinds.cut_to_clipboard),
-                                    ))
-                                    .clicked()
-                                {
-                                    req_set_clipboard = Some(ClipboardMode::Cut);
-                                }
-                                if ui
-                                    .add(Button::new("copy").shortcut_text(
-                                        ctx.format_shortcut(&keybinds.copy_to_clipboard),
-                                    ))
-                                    .clicked()
-                                {
-                                    req_set_clipboard = Some(ClipboardMode::Copy);
-                                }
-                                if ui
-                                    .add(
-                                        Button::new("info").shortcut_text(
-                                            ctx.format_shortcut(&keybinds.view_info),
-                                        ),
-                                    )
-                                    .clicked()
-                                {
-                                    req_open_overlay = Some(OverlayKind::Metadata);
-                                }
-                            });
-
-                            if btn_interact.clicked() {
-                                req_modify_selected = Some(index);
-                            }
-
-                            if btn_interact.double_clicked() {
-                                req_navigate_forward = true;
-                            }
-
-                            if btn_interact.secondary_clicked() {
-                                req_swap_selected = Some(index);
-                            }
-                        });
+                for (index, entry_index) in displaying.into_iter().enumerate() {
+                    let is_current_index = index == *current_index;
+                    let entry_opt = self.entries.children.get(entry_index);
+                    if entry_opt.is_none() || (!range.contains(&index) && !is_current_index) {
+                        continue;
                     }
 
-                    bg_response
-                });
+                    let entry = entry_opt.unwrap();
 
-            if bg_response.inner.clicked()
+                    sa.horizontal(|h| {
+                        let mut frame = Frame::NONE
+                            .stroke(Stroke::new(1.0, Color32::TRANSPARENT))
+                            .corner_radius(4.0);
+
+                        if self.selected.contains(&entry_index) {
+                            frame.fill = Color32::LIGHT_GREEN.gamma_multiply(0.3);
+                        }
+                        if is_current_index {
+                            frame.stroke.color = visuals.text_color().gamma_multiply(0.3);
+                        }
+
+                        let mut color = visuals.text_color();
+                        let mut icon = &entry.file_icon;
+                        if entry.is_hidden {
+                            color = visuals.text_color().gamma_multiply(0.5);
+                        }
+                        if self.clipboard.entries.contains(&entry.path) {
+                            icon = match self.clipboard.mode.as_ref().unwrap() {
+                                ClipboardMode::Copy => &IconKind::Copy,
+                                ClipboardMode::Cut => &IconKind::Scissors,
+                            };
+                            color = Color32::BLUE.gamma_multiply(0.3);
+                        }
+
+                        let fr = frame
+                            .show(h, |f| {
+                                let another_frame =
+                                    Frame::NONE.inner_margin(Margin::symmetric(2, 8));
+                                another_frame.show(f, |a| {
+                                    a.add(
+                                        Image::new(icons::match_icon(icon))
+                                            .fit_to_exact_size(Vec2::new(14.0, 14.0)),
+                                    );
+                                });
+
+                                let mut grid = Grid::new(Id::new(("explorer-grid", &index)));
+
+                                grid = grid.min_col_width(200.0);
+                                grid.show(f, |g| {
+                                    view.iter().for_each(|p| match p {
+                                        Property::Name => {
+                                            g.add(
+                                                AtomLayout::new(&entry.name)
+                                                    .wrap_mode(TextWrapMode::Truncate)
+                                                    .max_width(200.0)
+                                                    .fallback_text_color(color),
+                                            );
+                                        }
+                                        Property::Accessed => {
+                                            g.add(
+                                                AtomLayout::new(format_date(entry.accessed))
+                                                    .max_width(200.0)
+                                                    .wrap_mode(TextWrapMode::Truncate)
+                                                    .fallback_text_color(color),
+                                            );
+                                        }
+                                        Property::Created => {
+                                            g.add(
+                                                AtomLayout::new(format_date(entry.created))
+                                                    .max_width(200.0)
+                                                    .wrap_mode(TextWrapMode::Truncate)
+                                                    .fallback_text_color(color),
+                                            );
+                                        }
+                                        Property::Size => {
+                                            g.add(
+                                                AtomLayout::new(
+                                                    if let Some(size) = &entry.folder_size {
+                                                        format!("{} items", size)
+                                                    } else {
+                                                        file_system::bytes_to_string(
+                                                            entry.file_size.unwrap_or_default(),
+                                                        )
+                                                    },
+                                                )
+                                                .max_width(200.0)
+                                                .wrap_mode(TextWrapMode::Truncate)
+                                                .fallback_text_color(color),
+                                            );
+                                        }
+                                        Property::Type => {
+                                            g.add(
+                                                AtomLayout::new(entry.file_type)
+                                                    .max_width(200.0)
+                                                    .wrap_mode(TextWrapMode::Truncate)
+                                                    .fallback_text_color(color),
+                                            );
+                                        }
+                                        Property::Path => {
+                                            g.add(
+                                                AtomLayout::new(format!(
+                                                    "{}",
+                                                    entry.path.display()
+                                                ))
+                                                .max_width(200.0)
+                                                .wrap_mode(TextWrapMode::Truncate)
+                                                .fallback_text_color(color),
+                                            );
+                                        }
+                                    });
+                                });
+                            })
+                            .response;
+
+                        let btn_interact = h.interact(
+                            fr.rect,
+                            Id::new(("button", &index)),
+                            Sense::click_and_drag(),
+                        );
+                        btn_interact.dnd_set_drag_payload(entry_index);
+
+                        if btn_interact.drag_started() {
+                            req_swap_selected = Some(index);
+                        }
+
+                        if btn_interact.dragged() {
+                            let popup = Popup::new(
+                                Id::new(("drag_pop", &index)),
+                                ctx.clone(),
+                                PopupAnchor::Pointer,
+                                drag_layer_id,
+                            );
+                            popup.show(|pop| {
+                                pop.label("HIII!!!");
+                                pop.label(self.selected.len().to_string());
+                            });
+                        }
+
+                        if let Some(hovered_payload) = fr.dnd_hover_payload::<usize>() {
+                            if *hovered_payload != entry_index {
+                                h.painter().rect_filled(
+                                    fr.rect,
+                                    CornerRadius::from(4.0),
+                                    visuals.text_color().gamma_multiply(0.1),
+                                );
+                            }
+                            if let Some(dragged_payload) = fr.dnd_release_payload() {
+                                from = Some(dragged_payload);
+                                to = Some(entry_index)
+                            }
+                        }
+
+                        if is_current_index && self.scroll_signal {
+                            btn_interact.scroll_to_me(None);
+                            self.scroll_signal = false;
+                        }
+
+                        btn_interact.context_menu(|ui| {
+                            ui.label(entry.name.clone());
+                            if ui
+                                .add(
+                                    Button::new("rename")
+                                        .shortcut_text(ctx.format_shortcut(&keybinds.rename_file)),
+                                )
+                                .clicked()
+                            {
+                                req_new_overlay = Some(OverlayKind::Rename);
+                            }
+                            if ui
+                                .add(Button::new("delete").shortcut_text(
+                                    ctx.format_shortcut(&keybinds.delete_selections),
+                                ))
+                                .clicked()
+                            {
+                                req_new_overlay = Some(OverlayKind::Delete);
+                            }
+                            if ui
+                                .add(
+                                    Button::new("cut").shortcut_text(
+                                        ctx.format_shortcut(&keybinds.cut_to_clipboard),
+                                    ),
+                                )
+                                .clicked()
+                            {
+                                req_set_clipboard = Some(ClipboardMode::Cut);
+                            }
+                            if ui
+                                .add(Button::new("copy").shortcut_text(
+                                    ctx.format_shortcut(&keybinds.copy_to_clipboard),
+                                ))
+                                .clicked()
+                            {
+                                req_set_clipboard = Some(ClipboardMode::Copy);
+                            }
+                            if ui
+                                .add(
+                                    Button::new("info")
+                                        .shortcut_text(ctx.format_shortcut(&keybinds.view_info)),
+                                )
+                                .clicked()
+                            {
+                                req_new_overlay = Some(OverlayKind::Metadata);
+                            }
+                        });
+
+                        if btn_interact.clicked() {
+                            req_modify_selected = Some(index);
+                        }
+
+                        if btn_interact.double_clicked() {
+                            req_navigate_forward = true;
+                        }
+
+                        if btn_interact.secondary_clicked() {
+                            req_swap_selected = Some(index);
+                        }
+                    });
+                }
+            });
+
+            if bg_response.clicked()
                 && !(ui.input(|i| {
                     i.key_pressed(Key::ControlLeft)
                         && i.key_pressed(Key::ControlRight)
@@ -1273,7 +1275,7 @@ impl eframe::App for App {
                 self.clear_selected();
             }
 
-            bg_response.inner.context_menu(|ui| {
+            bg_response.context_menu(|ui| {
                 let keybinds = &self.config.keybinds;
                 ui.label("create");
 
@@ -1284,7 +1286,7 @@ impl eframe::App for App {
                     )
                     .clicked()
                 {
-                    req_open_overlay = Some(OverlayKind::CreateFile);
+                    req_new_overlay = Some(OverlayKind::CreateFile);
                 }
                 if ui
                     .add(
@@ -1293,7 +1295,7 @@ impl eframe::App for App {
                     )
                     .clicked()
                 {
-                    req_open_overlay = Some(OverlayKind::CreateFolder);
+                    req_new_overlay = Some(OverlayKind::CreateFolder);
                 }
 
                 ui.separator();
@@ -1334,7 +1336,7 @@ impl eframe::App for App {
                 }
 
                 if ui.add(del_button).clicked() {
-                    req_open_overlay = Some(OverlayKind::Delete);
+                    req_new_overlay = Some(OverlayKind::Delete);
                 }
                 if ui.add(cut_button).clicked() {
                     req_set_clipboard = Some(ClipboardMode::Cut);
@@ -1377,13 +1379,11 @@ impl eframe::App for App {
             });
 
             // drag n drop handler
-            if let (Some(from), Some(to)) = (from, to) {
-                //println!("dragged from {:?} to {:?}", from, to);
-                //println!("current index is {:?}", self.current_index);
-
-                if *from != to && !self.selected.contains(&to) {
-                    req_transfer = Some(to);
-                }
+            if let (Some(from), Some(to)) = (from, to)
+                && *from != to
+                && !self.selected.contains(&to)
+            {
+                req_transfer = Some(to);
             }
         });
 
@@ -1642,8 +1642,8 @@ impl eframe::App for App {
             self.nav_back();
         }
 
-        if let Some(kind) = req_open_overlay {
-            self.open_overlay(kind, None);
+        if let Some(kind) = req_new_overlay {
+            self.new_overlay(kind, None);
         }
 
         if req_reset_clipboard {
@@ -1736,7 +1736,7 @@ impl eframe::App for App {
 
                     frame.show(overlay, |fr| {
                         fr.vertical(|hor| {
-                            hor.label(toast.title.clone());
+                            hor.label(toast.title);
                             hor.label(toast.content.clone());
                             hor.add(
                                 ProgressBar::new(

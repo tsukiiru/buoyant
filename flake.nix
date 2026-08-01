@@ -5,7 +5,6 @@
 
   outputs =
     {
-      self,
       nixpkgs,
       ...
     }:
@@ -18,6 +17,8 @@
         targetPkgs =
           pkgs: with pkgs; [
             pkg-config
+            libxkbcommon
+            libxkbcommon.dev
           ];
         multiPkgs =
           pkgs: with pkgs; [
@@ -30,7 +31,6 @@
             libXrandr
             libXi
             libxcb
-            libxkbcommon
             vulkan-loader
             wayland
           ];

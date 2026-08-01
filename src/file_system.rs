@@ -4,6 +4,7 @@ use crate::{
     types::{CreateType, PasteKind, WorkerRequest},
 };
 use rayon::iter::{IntoParallelRefIterator, ParallelIterator};
+use rustc_hash::FxHashSet;
 use std::{
     fs,
     os::unix::fs::MetadataExt,
@@ -122,8 +123,11 @@ fn paste<'a>(
         path: joined.to_path_buf(),
     });
 
-    let paste_kind = to_worker.recv().unwrap();
-    match paste_kind {
+    let paste_kind = to_worker.recv();
+    if paste_kind.is_err() {
+        return None;
+    }
+    match paste_kind.unwrap() {
         PasteKind::Duplicate => {
             let result = file_extension(path);
             let ext = if result.is_empty() {
@@ -227,7 +231,7 @@ pub fn file_type(path: &Path) -> (&'static str, IconKind) {
 }
 
 pub fn move_dir(
-    old_files: Vec<PathBuf>,
+    old_files: FxHashSet<PathBuf>,
     dest: PathBuf,
     from_worker: &mpsc::Sender<WorkerRequest>,
     to_worker: &mpsc::Receiver<PasteKind>,
@@ -261,7 +265,7 @@ pub fn move_dir(
 }
 
 pub fn copy_dir(
-    old_files: Vec<PathBuf>,
+    old_files: FxHashSet<PathBuf>,
     dest: PathBuf,
     from_worker: &mpsc::Sender<WorkerRequest>,
     to_worker: &mpsc::Receiver<PasteKind>,

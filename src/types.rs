@@ -1,4 +1,5 @@
 use std::{
+    borrow::Cow,
     fmt::Display,
     path::{Path, PathBuf},
     sync::Arc,
@@ -143,8 +144,8 @@ impl Default for Entries {
 
 #[derive(Debug)]
 pub struct Toast {
-    pub title: String,
-    pub content: String,
+    pub title: &'static str,
+    pub content: Cow<'static, str>,
     pub start_time: Instant,
     pub duration: Duration,
     pub kind: ToastKind,
@@ -153,8 +154,8 @@ pub struct Toast {
 impl Default for Toast {
     fn default() -> Self {
         Toast {
-            title: String::new(),
-            content: String::new(),
+            title: "",
+            content: Cow::Borrowed(""),
             start_time: Instant::now(),
             duration: Duration::ZERO,
             kind: ToastKind::Info,

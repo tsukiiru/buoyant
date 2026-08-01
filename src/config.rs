@@ -1,4 +1,7 @@
-use rayon::iter::{IntoParallelRefIterator, ParallelIterator};
+use rayon::{
+    iter::{IntoParallelRefIterator, ParallelIterator},
+    slice::ParallelSliceMut,
+};
 use std::{env, fs};
 
 use eframe::egui::{Key, KeyboardShortcut, Modifiers};
@@ -7,23 +10,6 @@ use serde::Deserialize;
 use crate::types::Property;
 
 pub type Keybind = (KeybindAction, KeyboardShortcut);
-
-#[derive(Clone, Debug)]
-pub struct Actions {
-    pub copy: KeybindAction,
-    pub cut: KeybindAction,
-    pub paste: KeybindAction,
-}
-
-impl Default for Actions {
-    fn default() -> Self {
-        Actions {
-            copy: KeybindAction::Copy,
-            cut: KeybindAction::Cut,
-            paste: KeybindAction::Paste,
-        }
-    }
-}
 
 pub struct Config {
     pub keybinds: Keybinds,
@@ -97,11 +83,11 @@ pub struct Keybinds {
 }
 
 const NONE: Modifiers = Modifiers::NONE;
-pub const CTRL: Modifiers = Modifiers::CTRL.plus(Modifiers::COMMAND);
+pub const CTRL: Modifiers = Modifiers::CTRL;
 // egui registers ctrl as ctrl + command
 const SHIFT: Modifiers = Modifiers::SHIFT;
 const ALT: Modifiers = Modifiers::ALT;
-const CTRL_SHIFT: Modifiers = Modifiers::CTRL.plus(SHIFT);
+pub const CTRL_SHIFT: Modifiers = CTRL.plus(SHIFT);
 
 impl Default for Keybinds {
     fn default() -> Self {
@@ -556,6 +542,25 @@ fn listing_keybinds(keybinds: &Keybinds, list: &mut Vec<Keybind>) {
     list.push((KeybindAction::Choice(7), keybinds.choice_7));
     list.push((KeybindAction::Choice(8), keybinds.choice_8));
     list.push((KeybindAction::Choice(9), keybinds.choice_9));
+
+    list.par_sort_by(|a, b| {
+        let (x, y) = (count_mod(&a.1.modifiers), count_mod(&b.1.modifiers));
+        y.cmp(&x)
+    });
+}
+
+fn count_mod(modifiers: &Modifiers) -> u8 {
+    let mut count = 0;
+    if modifiers.contains(CTRL) {
+        count += 1;
+    }
+    if modifiers.contains(SHIFT) {
+        count += 1;
+    }
+    if modifiers.contains(ALT) {
+        count += 1;
+    }
+    count
 }
 
 #[derive(Deserialize)]
