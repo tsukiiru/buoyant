@@ -1,9 +1,9 @@
 use chrono::{DateTime, Datelike, Utc};
 use eframe::egui::{
     Align, Align2, AtomLayout, Button, CentralPanel, Color32, Context, CornerRadius, Event, Frame,
-    Grid, Id, Image, Key, Label, LayerId, Margin, Modal, Modifiers, Order, Popup, PopupAnchor,
-    ProgressBar, RichText, ScrollArea, Sense, Stroke, TextEdit, TextWrapMode, Theme, Ui, Vec2,
-    Window, mutex::RwLock,
+    Grid, Id, Image, Key, Label, LayerId, Layout, Margin, Modal, Modifiers, Order, Popup,
+    PopupAnchor, ProgressBar, RectAlign, RichText, ScrollArea, Sense, Stroke, TextEdit,
+    TextWrapMode, Theme, Ui, Vec2, Window, mutex::RwLock,
 };
 use rayon::{
     iter::{
@@ -562,6 +562,10 @@ impl App {
         }
     }
 
+    fn unfocus_field(&mut self) {
+        self.field.focused = false;
+    }
+
     fn new_overlay(&mut self, kind: OverlayKind, path: Option<&Path>) {
         let overlay = &mut self.overlay;
         overlay.kind = Some(kind);
@@ -698,6 +702,10 @@ impl App {
     }
 
     fn transfer(&mut self, to: usize) {
+        if self.selected.contains(&to) {
+            return;
+        }
+
         let selected = self
             .selected
             .iter()
@@ -748,17 +756,15 @@ impl App {
         let result = get_contents(ClipboardType::Regular, Seat::Unspecified, MimeType::Any);
 
         match result {
-            Ok((mut pipe, _mime_type)) => {
-                //println!("mime-type: {}", mime_type);
+            Ok((mut pipe, mime_type)) => {
+                println!("mime-type: {}", mime_type);
                 let mut contents = vec![];
                 pipe.read_to_end(&mut contents).unwrap();
-                //println!("{}", String::from_utf8_lossy(&contents));
+                println!("{}", String::from_utf8_lossy(&contents));
             }
-
             Err(Error::NoSeats) | Err(Error::ClipboardEmpty) | Err(Error::NoMimeType) => {
                 println!("boog");
             }
-
             Err(_err) => {
                 println!("goog");
             }
@@ -986,7 +992,8 @@ impl eframe::App for App {
             mut req_close_field,
             mut req_update_field_buffer,
             mut req_logic_field,
-        ) = (None, false, None, None);
+            mut req_unfocus_field,
+        ) = (None, false, None, None, false);
         //
 
         CentralPanel::default().show(main_ui, |ui| {
@@ -1003,7 +1010,7 @@ impl eframe::App for App {
             });
 
             let mut content = self.field.buffer.clone();
-            let bol = if let Some(kind) = self.field.kind
+            let is_searching = if let Some(kind) = self.field.kind
                 && kind == FieldKind::Search
             {
                 true
@@ -1022,18 +1029,24 @@ impl eframe::App for App {
                     .desired_width(f32::INFINITY),
             );
 
-            if input.gained_focus() && !bol {
+            if input.gained_focus() && !is_searching {
                 req_open_field = Some(FieldKind::Search);
             }
-            if input.changed() {
+            if is_searching && input.changed() {
                 req_update_field_buffer = Some(content);
                 req_logic_field = Some(FieldKind::Search);
             }
-            if self.field.kind.is_some() && ui.input(|i| i.key_pressed(Key::Escape)) {
+            if is_searching && ui.input(|i| i.key_pressed(Key::Escape)) {
                 req_close_field = true;
             }
-            if self.field.focused {
+            if is_searching && ui.input(|i| i.key_pressed(Key::Enter)) || input.lost_focus() {
+                req_unfocus_field = true;
+            }
+            if is_searching && self.field.focused {
                 input.request_focus();
+            }
+            if is_searching && !self.field.focused {
+                input.surrender_focus();
             }
 
             ui.separator();
@@ -1198,10 +1211,15 @@ impl eframe::App for App {
                                 ctx.clone(),
                                 PopupAnchor::Pointer,
                                 drag_layer_id,
-                            );
+                            )
+                            .align(RectAlign::TOP_START)
+                            .layout(Layout::left_to_right(Align::TOP));
                             popup.show(|pop| {
-                                pop.label("HIII!!!");
-                                pop.label(self.selected.len().to_string());
+                                pop.add(
+                                    Image::new(icons::match_icon(&IconKind::Files))
+                                        .fit_to_exact_size(Vec2::new(14.0, 14.0)),
+                                );
+                                pop.label(format!("files [{}]", self.selected.len()));
                             });
                         }
 
@@ -1404,7 +1422,6 @@ impl eframe::App for App {
             // drag n drop handler
             if let (Some(from), Some(to)) = (from, to)
                 && *from != to
-                && !self.selected.contains(&to)
             {
                 req_transfer = Some(to);
             }
@@ -1660,7 +1677,6 @@ impl eframe::App for App {
         if req_paste {
             self.paste();
         }
-
         if req_navigate_backward {
             self.nav_back();
         }
@@ -1714,22 +1730,22 @@ impl eframe::App for App {
             self.nav_forward();
         }
 
+        if req_unfocus_field {
+            self.unfocus_field();
+        }
         if let Some(kind) = req_open_field {
             self.new_field(kind);
         }
-
         if req_close_field {
             self.close_field();
-        }
-
-        if let Some(kind) = req_logic_field {
-            self.logic_field(&kind);
         }
 
         if let Some(content) = req_update_field_buffer {
             self.update_field_buffer(content);
         }
-
+        if let Some(kind) = req_logic_field {
+            self.logic_field(&kind);
+        }
         if let Some(to) = req_transfer {
             self.transfer(to);
         }

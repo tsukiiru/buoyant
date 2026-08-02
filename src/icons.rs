@@ -27,6 +27,7 @@ pub enum IconKind {
     Sqlite,
     Cube,
     File,
+    Files,
     Link,
     QuestionMark,
     BrokenLink,
@@ -68,5 +69,6 @@ pub fn match_icon(kind: &IconKind) -> ImageSource<'_> {
         IconKind::Link => include_image!("../assets/icons/link.svg"),
         IconKind::Scissors => include_image!("../assets/icons/scissors.svg"),
         IconKind::Copy => include_image!("../assets/icons/copy-simple.svg"),
+        IconKind::Files => include_image!("../assets/icons/files.svg"),
     }
 }
