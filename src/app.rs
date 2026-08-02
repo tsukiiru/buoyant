@@ -143,7 +143,7 @@ impl App {
                 if self.selected.is_empty() {
                     self.new_toast(
                         "Clipboard",
-                        "nothing is selected to be copied!",
+                        Cow::Borrowed("nothing is selected to be copied!"),
                         ToastKind::Info,
                         Duration::from_secs(3),
                     );
@@ -152,10 +152,10 @@ impl App {
 
                 self.new_toast(
                     "Clipboard",
-                    &format!(
+                    Cow::Owned(format!(
                         "successfully added {} items into clipboard!",
-                        self.selected.len()
-                    ),
+                        self.selected.len(),
+                    )),
                     ToastKind::Success,
                     Duration::from_secs(3),
                 );
@@ -165,7 +165,7 @@ impl App {
                 if self.selected.is_empty() {
                     self.new_toast(
                         "Clipboard",
-                        "nothing is selected to be cut!",
+                        Cow::Borrowed("nothing is selected to be cut!"),
                         ToastKind::Info,
                         Duration::from_secs(3),
                     );
@@ -174,10 +174,10 @@ impl App {
 
                 self.new_toast(
                     "Clipboard",
-                    &format!(
+                    Cow::Owned(format!(
                         "successfully added {} items into clipboard!",
                         self.selected.len()
-                    ),
+                    )),
                     ToastKind::Success,
                     Duration::from_secs(3),
                 );
@@ -191,7 +191,7 @@ impl App {
                 if self.selected.is_empty() {
                     self.new_toast(
                         "Delete",
-                        "nothing is selected to be deleted!",
+                        Cow::Borrowed("nothing is selected to be deleted!"),
                         ToastKind::Info,
                         Duration::from_secs(3),
                     );
@@ -205,7 +205,7 @@ impl App {
                 self.clear_clipboard();
                 self.new_toast(
                     "Success!",
-                    "successfully cleared clipboard!",
+                    Cow::Borrowed("successfully cleared clipboard!"),
                     ToastKind::Success,
                     Duration::from_secs(3),
                 );
@@ -241,7 +241,12 @@ impl App {
         let fetch_current_path = file_system::read_dir(&self.current_path);
 
         if let Err(err) = &fetch_current_path {
-            self.new_toast("Error", err, ToastKind::Danger, Duration::from_millis(5000));
+            self.new_toast(
+                "Error",
+                Cow::Owned(err.to_string()),
+                ToastKind::Danger,
+                Duration::from_millis(5000),
+            );
         }
 
         let mut index: usize = 0;
@@ -440,7 +445,7 @@ impl App {
             if let Err(err) = res {
                 self.new_toast(
                     "xdg-open",
-                    &err.to_string(),
+                    Cow::Owned(err.to_string()),
                     ToastKind::Danger,
                     Duration::from_millis(5000),
                 );
@@ -468,7 +473,12 @@ impl App {
                 .path
                 .as_ref()
         })) {
-            self.new_toast("Delete", &e, ToastKind::Danger, Duration::from_secs(3));
+            self.new_toast(
+                "Delete",
+                Cow::Owned(e),
+                ToastKind::Danger,
+                Duration::from_secs(3),
+            );
         }
         self.fetch_entries(None);
     }
@@ -512,7 +522,12 @@ impl App {
         let rename_res = file_system::rename(overlay.path.as_ref().unwrap(), &overlay.buffer);
 
         if let Err(err) = &rename_res {
-            self.new_toast("Rename", err, ToastKind::Danger, Duration::from_secs(3));
+            self.new_toast(
+                "Rename",
+                Cow::Owned(err.to_string()),
+                ToastKind::Danger,
+                Duration::from_secs(3),
+            );
         }
 
         self.fetch_entries(rename_res.ok());
@@ -654,7 +669,10 @@ impl App {
                 if buf.is_err() {
                     self.new_toast(
                         "System Clipboard",
-                        &format!("failed to read file contents for {}", path.display()),
+                        Cow::Owned(format!(
+                            "failed to read file contents for {}",
+                            path.display()
+                        )),
                         ToastKind::Info,
                         Duration::from_secs(3),
                     );
@@ -821,9 +839,14 @@ impl App {
         self.selected.clear();
     }
 
-    fn new_toast(&self, title: &'static str, content: &str, kind: ToastKind, duration: Duration) {
+    fn new_toast(
+        &self,
+        title: &'static str,
+        content: Cow<'static, str>,
+        kind: ToastKind,
+        duration: Duration,
+    ) {
         let toasts = Arc::clone(&self.toasts);
-        let content = Cow::Owned(content.to_string());
 
         tokio::spawn(async move {
             let id = {
