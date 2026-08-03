@@ -89,13 +89,15 @@ impl App {
             .map(|i| self.entries.children[*i].path.clone())
             .collect();
 
-        self.filter_entries(Some(
-            self.entries
+        self.filter_and_sort();
+        self.highlight_path(
+            &self
+                .entries
                 .entry(&self.current_index)
                 .unwrap()
                 .path
                 .clone(),
-        ));
+        );
         for p in selected_paths {
             for (id, e) in self.entries.children.iter().enumerate() {
                 if p == e.path
@@ -114,7 +116,7 @@ impl App {
         } else {
             Theme::Light
         });
-        self.fetch_entries(None);
+        self.fetch_entries();
     }
 
     fn handle_actions(&mut self, action: &KeybindAction, is_ctrled: bool, is_shifted: bool) {
@@ -202,7 +204,7 @@ impl App {
             }
             KeybindAction::Rename => self.new_overlay(OverlayKind::Rename, None),
             KeybindAction::ClearClipboard => {
-                self.clear_clipboard();
+                self.clipboard.reset();
                 self.new_toast(
                     "Success!",
                     Cow::Borrowed("successfully cleared clipboard!"),
@@ -225,8 +227,9 @@ impl App {
         config.view.explorer.contains(&property) || config.sorting.sorting_by == property
     }
 
-    fn fetch_entries(&mut self, prev_path: Option<PathBuf>) {
-        self.close_overlay();
+    fn fetch_entries(&mut self) {
+        self.field.reset();
+        self.overlay.reset();
         // clear entries
         self.entries.children.iter_mut().for_each(|e| {
             e.name.clear();
@@ -261,17 +264,17 @@ impl App {
                 file_system::accessed_and_created(&path, &fetch_accessed, &fetch_created);
             let (file_type, file_icon) = file_system::file_type(&path);
 
-            self.push_entry(
+            self.entries.push(
                 &TempEntry {
                     name: path.file_name().unwrap().to_str().unwrap(),
-                    file_type,
-                    file_icon,
-                    is_hidden: file_system::is_hidden(&path),
                     path: &path,
-                    accessed,
-                    created,
+                    is_hidden: file_system::is_hidden(&path),
                     folder_size: file_system::folder_size(&path, &fetch_size),
                     file_size: file_system::file_size(&path, &fetch_size),
+                    file_type,
+                    file_icon,
+                    accessed,
+                    created,
                 },
                 index,
             );
@@ -281,7 +284,6 @@ impl App {
         self.entries.children.truncate(index);
 
         // freed some mem from the greedy alloc
-        #[cfg(target_env = "gnu")]
         unsafe {
             unsafe extern "C" {
                 fn malloc_trim(pad: usize) -> i32;
@@ -289,44 +291,12 @@ impl App {
             malloc_trim(0);
         }
 
-        self.filter_entries(prev_path);
+        self.filter_and_sort();
     }
 
-    fn push_entry(&mut self, temp_entry: &TempEntry, index: usize) {
-        if let Some(entry) = self.entries.children.get_mut(index) {
-            entry.is_hidden = temp_entry.is_hidden;
-            entry.using = true;
-            entry.file_size = temp_entry.file_size;
-            entry.accessed = temp_entry.accessed;
-            entry.created = temp_entry.created;
-            entry.folder_size = temp_entry.folder_size;
-            entry.file_type = temp_entry.file_type;
-            entry.file_icon = temp_entry.file_icon.clone();
-
-            entry.name.push_str(temp_entry.name);
-            entry.path.push(temp_entry.path);
-        } else {
-            let mut entry = Entry {
-                is_hidden: temp_entry.is_hidden,
-                folder_size: temp_entry.folder_size,
-                file_size: temp_entry.file_size,
-                accessed: temp_entry.accessed,
-                created: temp_entry.created,
-                file_type: temp_entry.file_type,
-                file_icon: temp_entry.file_icon.clone(),
-                using: true,
-                ..Default::default()
-            };
-            entry.name.push_str(temp_entry.name);
-            entry.path.push(temp_entry.path);
-
-            self.entries.children.push(entry);
-        }
-    }
-
-    fn filter_entries(&mut self, prev_path: Option<PathBuf>) {
-        self.entries.displaying.clear();
+    fn filter_and_sort(&mut self) {
         self.current_index = 0;
+        self.entries.displaying.clear();
         self.selected.clear();
 
         let mut filter = "";
@@ -346,91 +316,25 @@ impl App {
             self.entries.displaying.push(i);
         }
 
-        self.entries.displaying.par_sort_by(|a, b| {
-            let (x, y) = (
-                &self.entries.children[*a].is_hidden,
-                &self.entries.children[*b].is_hidden,
-            );
-            y.cmp(x)
-        });
-
-        let mut last_hidden_index: usize = 0;
-
-        for (index, entry_index) in self.entries.displaying.iter().enumerate() {
-            if !self.entries.children[*entry_index].is_hidden {
-                last_hidden_index = index;
-                break;
-            }
-        }
-
-        self.sort(last_hidden_index, true);
-        self.sort(last_hidden_index, false);
-
-        // highlight from lower directory if provided
-        if let Some(path) = prev_path {
-            self.entries
-                .displaying
-                .iter()
-                .enumerate()
-                .for_each(|(index, entry_index)| {
-                    if let Some(entry) = self.entries.children.get(*entry_index)
-                        && entry.path == path
-                    {
-                        self.current_index = index;
-                        self.scroll_signal = true;
-                    }
-                });
-        }
+        self.entries.sort(
+            &self.config.sorting.sorting_by,
+            self.config.sorting.reversed,
+        );
     }
 
-    fn sort(&mut self, index: usize, is_from_start: bool) {
-        let reference = &self.entries.children;
-        let displaying = if is_from_start {
-            &mut self.entries.displaying[..index]
-        } else {
-            &mut self.entries.displaying[index..]
-        };
-
-        match &self.config.sorting.sorting_by {
-            Property::Name => {
-                let mut lowercased: Vec<(usize, String)> = displaying
-                    .par_iter()
-                    .map(|&entry_index| {
-                        (
-                            entry_index,
-                            self.entries.children[entry_index].name.to_lowercase(),
-                        )
-                    })
-                    .collect();
-
-                lowercased.par_sort_by(|a, b| a.1.cmp(&b.1));
-                displaying
-                    .par_iter_mut()
-                    .zip(lowercased.par_iter())
-                    .for_each(|(d, (i, _))| *d = *i);
-            }
-            Property::Size => displaying.par_sort_by(|a, b| {
-                let (x, y) = (&reference[*a].file_size, &reference[*b].file_size);
-                x.cmp(y)
-            }),
-            Property::Created => displaying.par_sort_by(|a, b| {
-                let (x, y) = (&reference[*a].created, &reference[*b].created);
-                x.cmp(y)
-            }),
-            Property::Accessed => displaying.par_sort_by(|a, b| {
-                let (x, y) = (&reference[*a].accessed, &reference[*b].accessed);
-                x.cmp(y)
-            }),
-            Property::Type => displaying.par_sort_by(|a, b| {
-                let (x, y) = (&reference[*a].file_type, &reference[*b].file_type);
-                x.cmp(y)
-            }),
-            _ => {}
-        }
-
-        if self.config.sorting.reversed {
-            displaying.reverse();
-        }
+    fn highlight_path(&mut self, path: &Path) {
+        self.entries
+            .displaying
+            .iter()
+            .enumerate()
+            .for_each(|(index, entry_index)| {
+                if let Some(entry) = self.entries.children.get(*entry_index)
+                    && entry.path == path
+                {
+                    self.current_index = index;
+                    self.scroll_signal = true;
+                }
+            });
     }
 
     fn nav_forward(&mut self) {
@@ -454,14 +358,14 @@ impl App {
         }
 
         self.current_path = to.to_path_buf();
-        self.fetch_entries(None);
+        self.fetch_entries();
     }
 
     fn nav_back(&mut self) {
         let old_path = self.current_path.clone();
         self.current_path.pop();
-        self.close_field();
-        self.fetch_entries(Some(old_path));
+        self.fetch_entries();
+        self.highlight_path(&old_path);
     }
 
     fn delete(&mut self) {
@@ -480,13 +384,10 @@ impl App {
                 Duration::from_secs(3),
             );
         }
-        self.fetch_entries(None);
+        self.fetch_entries();
     }
 
     fn create(&mut self, mode: CreateType) {
-        // true: file
-        // false: folder
-
         let overlay = &mut self.overlay;
         let mut content = overlay.buffer.trim();
         if content.starts_with("/") {
@@ -501,8 +402,9 @@ impl App {
             return;
         }
 
-        self.close_overlay();
-        self.fetch_entries(try_create.ok());
+        self.overlay.reset();
+        self.fetch_entries();
+        self.highlight_path(&try_create.unwrap());
     }
 
     fn rename(&mut self) {
@@ -530,8 +432,9 @@ impl App {
             );
         }
 
-        self.fetch_entries(rename_res.ok());
-        self.close_overlay();
+        self.overlay.reset();
+        self.fetch_entries();
+        self.highlight_path(&rename_res.unwrap());
     }
 
     fn new_field(&mut self, kind: FieldKind) {
@@ -540,30 +443,17 @@ impl App {
 
         if field.kind.is_some() {
             field.buffer = String::new();
-            self.filter_entries(None);
+            self.filter_and_sort();
             return;
         }
 
         field.kind = Some(kind);
     }
 
-    fn close_field(&mut self) {
-        self.field.reset();
-        self.filter_entries(None);
-    }
-
-    fn update_field_buffer(&mut self, buffer: String) {
-        self.field.buffer = buffer;
-    }
-
     fn logic_field(&mut self, kind: &FieldKind) {
         match kind {
-            FieldKind::Search => self.filter_entries(None),
+            FieldKind::Search => self.filter_and_sort(),
         }
-    }
-
-    fn unfocus_field(&mut self) {
-        self.field.focused = false;
     }
 
     fn new_overlay(&mut self, kind: OverlayKind, path: Option<&Path>) {
@@ -636,7 +526,7 @@ impl App {
             }
             OverlayKind::Delete => {
                 if choice != 0 {
-                    self.close_overlay();
+                    self.overlay.reset();
                 }
 
                 self.delete();
@@ -644,17 +534,7 @@ impl App {
             _ => {}
         }
 
-        self.close_overlay();
-    }
-
-    fn update_overlay_buffer(&mut self, buffer: String) {
-        self.overlay.buffer = buffer;
-    }
-
-    fn close_overlay(&mut self) {
-        self.overlay.kind = None;
-        self.overlay.error.clear();
-        self.overlay.buffer = String::new();
+        self.overlay.reset();
     }
 
     fn add_to_clipboard(&mut self, clipboard_mode: ClipboardMode) {
@@ -693,12 +573,6 @@ impl App {
         }
 
         self.clipboard.mode = Some(clipboard_mode);
-    }
-
-    fn clear_clipboard(&mut self) {
-        let clipboard = &mut self.clipboard;
-        clipboard.entries.clear();
-        clipboard.mode = None;
     }
 
     fn transfer(&mut self, to: usize) {
@@ -878,6 +752,141 @@ impl App {
     }
 }
 
+impl Entries {
+    fn entry(&self, index: &usize) -> Option<&Entry> {
+        self.children.get(*self.displaying.get(*index).unwrap())
+    }
+
+    fn push(&mut self, temp_entry: &TempEntry, index: usize) {
+        if let Some(entry) = self.children.get_mut(index) {
+            entry.is_hidden = temp_entry.is_hidden;
+            entry.using = true;
+            entry.file_size = temp_entry.file_size;
+            entry.accessed = temp_entry.accessed;
+            entry.created = temp_entry.created;
+            entry.folder_size = temp_entry.folder_size;
+            entry.file_type = temp_entry.file_type;
+            entry.file_icon = temp_entry.file_icon.clone();
+
+            entry.name.push_str(temp_entry.name);
+            entry.path.push(temp_entry.path);
+        } else {
+            let mut entry = Entry {
+                is_hidden: temp_entry.is_hidden,
+                folder_size: temp_entry.folder_size,
+                file_size: temp_entry.file_size,
+                accessed: temp_entry.accessed,
+                created: temp_entry.created,
+                file_type: temp_entry.file_type,
+                file_icon: temp_entry.file_icon.clone(),
+                using: true,
+                ..Default::default()
+            };
+            entry.name.push_str(temp_entry.name);
+            entry.path.push(temp_entry.path);
+
+            self.children.push(entry);
+        }
+    }
+
+    fn sort(&mut self, sorting_by: &Property, reversed: bool) {
+        // sort hidden entries from non-hidden
+        self.displaying.par_sort_by(|a, b| {
+            let (x, y) = (&self.children[*a].is_hidden, &self.children[*b].is_hidden);
+            y.cmp(x)
+        });
+
+        // find the split index between hidden and non-hidden
+        let mut split_index = 0;
+        for (index, entry_index) in self.displaying.iter().enumerate() {
+            if !self.children[*entry_index].is_hidden {
+                split_index = index;
+                break;
+            }
+        }
+
+        let reference = &self.children;
+        let (first, second) = self.displaying.split_at_mut(split_index);
+        let mut coll = [first, second];
+
+        // sort them separately
+        coll.iter_mut().for_each(|displaying| {
+            match sorting_by {
+                Property::Name => {
+                    let mut lowercased: Vec<(usize, String)> = displaying
+                        .par_iter()
+                        .map(|&entry_index| {
+                            (entry_index, reference[entry_index].name.to_lowercase())
+                        })
+                        .collect();
+
+                    lowercased.par_sort_by(|a, b| a.1.cmp(&b.1));
+                    displaying
+                        .par_iter_mut()
+                        .zip(lowercased.par_iter())
+                        .for_each(|(d, (i, _))| *d = *i);
+                }
+                Property::Size => displaying.par_sort_by(|a, b| {
+                    let (x, y) = (&reference[*a].file_size, &reference[*b].file_size);
+                    x.cmp(y)
+                }),
+                Property::Created => displaying.par_sort_by(|a, b| {
+                    let (x, y) = (&reference[*a].created, &reference[*b].created);
+                    x.cmp(y)
+                }),
+                Property::Accessed => displaying.par_sort_by(|a, b| {
+                    let (x, y) = (&reference[*a].accessed, &reference[*b].accessed);
+                    x.cmp(y)
+                }),
+                Property::Type => displaying.par_sort_by(|a, b| {
+                    let (x, y) = (&reference[*a].file_type, &reference[*b].file_type);
+                    x.cmp(y)
+                }),
+                _ => {}
+            }
+
+            if reversed {
+                displaying.reverse();
+            }
+        });
+    }
+}
+
+impl Overlay {
+    fn reset(&mut self) {
+        self.kind = None;
+        self.error.clear();
+        self.buffer = String::new();
+    }
+
+    fn buffer(&mut self, buffer: String) {
+        self.buffer = buffer;
+    }
+}
+
+impl Field {
+    fn reset(&mut self) {
+        self.buffer = String::new();
+        self.kind = None;
+        self.focused = false;
+    }
+
+    fn buffer(&mut self, buffer: String) {
+        self.buffer = buffer;
+    }
+
+    fn unfocus(&mut self) {
+        self.focused = false;
+    }
+}
+
+impl Clipboard {
+    fn reset(&mut self) {
+        self.entries.clear();
+        self.mode = None;
+    }
+}
+
 impl eframe::App for App {
     fn logic(&mut self, ctx: &eframe::egui::Context, _frame: &mut eframe::Frame) {
         let mut action_to_handle: Option<KeybindAction> = None;
@@ -931,11 +940,10 @@ impl eframe::App for App {
                     self.new_overlay(OverlayKind::Paste, Some(&path));
                 }
                 WorkerRequest::Done { paths } => {
-                    self.fetch_entries(if !paths.is_empty() {
-                        Some(paths[0].to_owned())
-                    } else {
-                        None
-                    });
+                    self.fetch_entries();
+                    if !paths.is_empty() {
+                        self.highlight_path(&paths[0]);
+                    }
 
                     for p in paths {
                         for (id, e) in self.entries.children.iter().enumerate() {
@@ -1038,6 +1046,7 @@ impl eframe::App for App {
             }
             if is_searching && ui.input(|i| i.key_pressed(Key::Escape)) {
                 req_close_field = true;
+                input.surrender_focus();
             }
             if is_searching && ui.input(|i| i.key_pressed(Key::Enter)) || input.lost_focus() {
                 req_unfocus_field = true;
@@ -1671,7 +1680,7 @@ impl eframe::App for App {
         }
 
         if req_close_overlay {
-            self.close_overlay();
+            self.overlay.reset();
         }
 
         if req_paste {
@@ -1686,7 +1695,7 @@ impl eframe::App for App {
         }
 
         if req_reset_clipboard {
-            self.clear_clipboard();
+            self.clipboard.reset();
         }
 
         if req_reset_selected {
@@ -1706,7 +1715,7 @@ impl eframe::App for App {
         }
 
         if let Some(content) = req_update_overlay_buffer {
-            self.update_overlay_buffer(content);
+            self.overlay.buffer(content);
         }
 
         if let Some(kind) = req_create {
@@ -1731,17 +1740,18 @@ impl eframe::App for App {
         }
 
         if req_unfocus_field {
-            self.unfocus_field();
+            self.field.unfocus();
         }
         if let Some(kind) = req_open_field {
             self.new_field(kind);
         }
         if req_close_field {
-            self.close_field();
+            self.field.reset();
+            self.filter_and_sort();
         }
 
         if let Some(content) = req_update_field_buffer {
-            self.update_field_buffer(content);
+            self.field.buffer(content);
         }
         if let Some(kind) = req_logic_field {
             self.logic_field(&kind);

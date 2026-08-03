@@ -43,14 +43,6 @@ pub struct Field {
     pub focused: bool,
 }
 
-impl Field {
-    pub fn reset(&mut self) {
-        self.buffer = String::new();
-        self.kind = None;
-        self.focused = false;
-    }
-}
-
 #[derive(Clone, Copy, PartialEq, Debug)]
 pub enum FieldKind {
     Search,
@@ -100,7 +92,7 @@ impl Default for Entry {
     fn default() -> Self {
         Entry {
             name: String::with_capacity(16),
-            file_icon: IconKind::File,
+            file_icon: IconKind::QuestionMark,
             file_type: "",
             path: PathBuf::new(),
             using: false,
@@ -117,12 +109,6 @@ impl Default for Entry {
 pub struct Entries {
     pub children: Vec<Entry>,
     pub displaying: Vec<usize>,
-}
-
-impl Entries {
-    pub fn entry(&self, index: &usize) -> Option<&Entry> {
-        self.children.get(*self.displaying.get(*index).unwrap())
-    }
 }
 
 impl Default for Entries {
