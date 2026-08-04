@@ -52,42 +52,51 @@ pub enum KeybindAction {
     Choice(usize),
 }
 
-pub struct Keybinds {
-    pub navigate_up: KeyboardShortcut,
-    pub navigate_down: KeyboardShortcut,
-    pub navigate_forward: KeyboardShortcut,
-    pub navigate_backward: KeyboardShortcut,
-    pub copy_to_clipboard: KeyboardShortcut,
-    pub cut_to_clipboard: KeyboardShortcut,
-    pub paste_from_clipboard: KeyboardShortcut,
-    pub clear_clipboard: KeyboardShortcut,
-    pub delete_selections: KeyboardShortcut,
-    pub rename_file: KeyboardShortcut,
-    pub toggle_hidden_view: KeyboardShortcut,
-    pub create_file_path: KeyboardShortcut,
-    pub create_folder_path: KeyboardShortcut,
-    pub toggle_visual_mode: KeyboardShortcut,
-    pub refresh: KeyboardShortcut,
-    pub view_info: KeyboardShortcut,
-    pub search: KeyboardShortcut,
-    pub choice_0: KeyboardShortcut,
-    pub choice_1: KeyboardShortcut,
-    pub choice_2: KeyboardShortcut,
-    pub choice_3: KeyboardShortcut,
-    pub choice_4: KeyboardShortcut,
-    pub choice_5: KeyboardShortcut,
-    pub choice_6: KeyboardShortcut,
-    pub choice_7: KeyboardShortcut,
-    pub choice_8: KeyboardShortcut,
-    pub choice_9: KeyboardShortcut,
+macro_rules! create_keybinds {
+    ($($field:ident),* $(,)?) => {
+        pub struct Keybinds {
+        $(
+            pub $field: KeyboardShortcut,
+        )*
+        }
+    };
 }
+
+create_keybinds!(
+    navigate_up,
+    navigate_down,
+    navigate_forward,
+    navigate_backward,
+    copy_to_clipboard,
+    cut_to_clipboard,
+    paste_from_clipboard,
+    clear_clipboard,
+    delete_selections,
+    rename_file,
+    toggle_hidden_view,
+    create_file_path,
+    create_folder_path,
+    toggle_visual_mode,
+    refresh,
+    view_info,
+    search,
+    choice_0,
+    choice_1,
+    choice_2,
+    choice_3,
+    choice_4,
+    choice_5,
+    choice_6,
+    choice_7,
+    choice_8,
+    choice_9,
+);
 
 const NONE: Modifiers = Modifiers::NONE;
 pub const CTRL: Modifiers = Modifiers::CTRL;
-// egui registers ctrl as ctrl + command
 const SHIFT: Modifiers = Modifiers::SHIFT;
 const ALT: Modifiers = Modifiers::ALT;
-pub const CTRL_SHIFT: Modifiers = CTRL.plus(SHIFT);
+const CTRL_SHIFT: Modifiers = CTRL.plus(SHIFT);
 
 impl Default for Keybinds {
     fn default() -> Self {
@@ -127,18 +136,10 @@ fn bind(modifiers: Modifiers, key: Key) -> KeyboardShortcut {
     KeyboardShortcut::new(modifiers, key)
 }
 
+#[derive(Default)]
 pub struct Sorting {
     pub sorting_by: Property,
     pub reversed: bool,
-}
-
-impl Default for Sorting {
-    fn default() -> Self {
-        Sorting {
-            sorting_by: Property::Name,
-            reversed: false,
-        }
-    }
 }
 
 pub struct View {
@@ -193,184 +194,99 @@ struct RawConfig {
 }
 
 fn process_raw_config(raw_config: &RawConfig, config: &mut Config) {
-    if let Some(table) = &raw_config.keybinds {
-        process_raw_keybinds(table, &mut config.keybinds);
+    macro_rules! process_field {
+        ($n:ident, $f:expr) => {
+            if let Some(table) = &raw_config.$n {
+                $f(table, &mut config.$n);
+            }
+        };
     }
-    if let Some(table) = &raw_config.sorting {
-        process_raw_sorting(table, &mut config.sorting);
-    }
-    if let Some(table) = &raw_config.view {
-        process_raw_view(table, &mut config.view);
-    }
+
+    process_field!(keybinds, process_raw_keybinds);
+    process_field!(sorting, process_raw_sorting);
+    process_field!(view, process_raw_view);
 }
 
-#[derive(Deserialize)]
-struct RawKeybinds {
-    pub navigate_up: Option<String>,
-    pub navigate_down: Option<String>,
-    pub navigate_forward: Option<String>,
-    pub navigate_backward: Option<String>,
-    pub copy_to_clipboard: Option<String>,
-    pub cut_to_clipboard: Option<String>,
-    pub paste_from_clipboard: Option<String>,
-    pub clear_clipboard: Option<String>,
-    pub delete_selections: Option<String>,
-    pub rename_file: Option<String>,
-    pub toggle_hidden_view: Option<String>,
-    pub create_file_path: Option<String>,
-    pub create_folder_path: Option<String>,
-    pub toggle_visual_mode: Option<String>,
-    pub refresh: Option<String>,
-    pub search: Option<String>,
-    pub view_info: Option<String>,
-    pub choice_0: Option<String>,
-    pub choice_1: Option<String>,
-    pub choice_2: Option<String>,
-    pub choice_3: Option<String>,
-    pub choice_4: Option<String>,
-    pub choice_5: Option<String>,
-    pub choice_6: Option<String>,
-    pub choice_7: Option<String>,
-    pub choice_8: Option<String>,
-    pub choice_9: Option<String>,
+// create an entry for every keybinds as Option<String>
+macro_rules! create_raw_keybinds {
+    ($($field:ident),* $(,)?) => {
+        #[derive(Deserialize)]
+        struct RawKeybinds {
+        $(
+            $field: Option<String>,
+        )*
+        }
+    };
 }
 
-fn process_raw_keybinds(raw_keybinds: &RawKeybinds, kb_config: &mut Keybinds) {
-    if let Some(key_str) = &raw_keybinds.navigate_up
-        && let Some(fresh_key) = match_key(key_str)
-    {
-        kb_config.navigate_up = fresh_key;
+create_raw_keybinds!(
+    navigate_up,
+    navigate_down,
+    navigate_forward,
+    navigate_backward,
+    copy_to_clipboard,
+    cut_to_clipboard,
+    paste_from_clipboard,
+    clear_clipboard,
+    delete_selections,
+    rename_file,
+    toggle_hidden_view,
+    create_file_path,
+    create_folder_path,
+    toggle_visual_mode,
+    refresh,
+    view_info,
+    search,
+    choice_0,
+    choice_1,
+    choice_2,
+    choice_3,
+    choice_4,
+    choice_5,
+    choice_6,
+    choice_7,
+    choice_8,
+    choice_9,
+);
+
+fn process_raw_keybinds(raw_config: &RawKeybinds, config: &mut Keybinds) {
+    macro_rules! process_field {
+        ($n:ident) => {
+            if let Some(v) = &raw_config.$n
+                && let Some(keybind) = match_key(v)
+            {
+                config.$n = keybind;
+            }
+        };
     }
-    if let Some(key_str) = &raw_keybinds.navigate_down
-        && let Some(fresh_key) = match_key(key_str)
-    {
-        kb_config.navigate_down = fresh_key;
-    }
-    if let Some(key_str) = &raw_keybinds.navigate_forward
-        && let Some(fresh_key) = match_key(key_str)
-    {
-        kb_config.navigate_forward = fresh_key;
-    }
-    if let Some(key_str) = &raw_keybinds.navigate_backward
-        && let Some(fresh_key) = match_key(key_str)
-    {
-        kb_config.navigate_backward = fresh_key;
-    }
-    if let Some(key_str) = &raw_keybinds.copy_to_clipboard
-        && let Some(fresh_key) = match_key(key_str)
-    {
-        kb_config.copy_to_clipboard = fresh_key;
-    }
-    if let Some(key_str) = &raw_keybinds.cut_to_clipboard
-        && let Some(fresh_key) = match_key(key_str)
-    {
-        kb_config.cut_to_clipboard = fresh_key;
-    }
-    if let Some(key_str) = &raw_keybinds.paste_from_clipboard
-        && let Some(fresh_key) = match_key(key_str)
-    {
-        kb_config.paste_from_clipboard = fresh_key;
-    }
-    if let Some(key_str) = &raw_keybinds.clear_clipboard
-        && let Some(fresh_key) = match_key(key_str)
-    {
-        kb_config.clear_clipboard = fresh_key;
-    }
-    if let Some(key_str) = &raw_keybinds.delete_selections
-        && let Some(fresh_key) = match_key(key_str)
-    {
-        kb_config.delete_selections = fresh_key;
-    }
-    if let Some(key_str) = &raw_keybinds.rename_file
-        && let Some(fresh_key) = match_key(key_str)
-    {
-        kb_config.rename_file = fresh_key;
-    }
-    if let Some(key_str) = &raw_keybinds.toggle_hidden_view
-        && let Some(fresh_key) = match_key(key_str)
-    {
-        kb_config.toggle_hidden_view = fresh_key;
-    }
-    if let Some(key_str) = &raw_keybinds.create_file_path
-        && let Some(fresh_key) = match_key(key_str)
-    {
-        kb_config.create_file_path = fresh_key;
-    }
-    if let Some(key_str) = &raw_keybinds.create_folder_path
-        && let Some(fresh_key) = match_key(key_str)
-    {
-        kb_config.create_folder_path = fresh_key;
-    }
-    if let Some(key_str) = &raw_keybinds.toggle_visual_mode
-        && let Some(fresh_key) = match_key(key_str)
-    {
-        kb_config.toggle_visual_mode = fresh_key;
-    }
-    if let Some(key_str) = &raw_keybinds.refresh
-        && let Some(fresh_key) = match_key(key_str)
-    {
-        kb_config.refresh = fresh_key;
-    }
-    if let Some(key_str) = &raw_keybinds.search
-        && let Some(fresh_key) = match_key(key_str)
-    {
-        kb_config.search = fresh_key
-    }
-    if let Some(key_str) = &raw_keybinds.view_info
-        && let Some(fresh_key) = match_key(key_str)
-    {
-        kb_config.view_info = fresh_key
-    }
-    if let Some(key_str) = &raw_keybinds.choice_0
-        && let Some(fresh_key) = match_key(key_str)
-    {
-        kb_config.choice_0 = fresh_key
-    }
-    if let Some(key_str) = &raw_keybinds.choice_1
-        && let Some(fresh_key) = match_key(key_str)
-    {
-        kb_config.choice_1 = fresh_key
-    }
-    if let Some(key_str) = &raw_keybinds.choice_2
-        && let Some(fresh_key) = match_key(key_str)
-    {
-        kb_config.choice_2 = fresh_key
-    }
-    if let Some(key_str) = &raw_keybinds.choice_3
-        && let Some(fresh_key) = match_key(key_str)
-    {
-        kb_config.choice_3 = fresh_key
-    }
-    if let Some(key_str) = &raw_keybinds.choice_4
-        && let Some(fresh_key) = match_key(key_str)
-    {
-        kb_config.choice_4 = fresh_key
-    }
-    if let Some(key_str) = &raw_keybinds.choice_5
-        && let Some(fresh_key) = match_key(key_str)
-    {
-        kb_config.choice_5 = fresh_key
-    }
-    if let Some(key_str) = &raw_keybinds.choice_6
-        && let Some(fresh_key) = match_key(key_str)
-    {
-        kb_config.choice_6 = fresh_key
-    }
-    if let Some(key_str) = &raw_keybinds.choice_7
-        && let Some(fresh_key) = match_key(key_str)
-    {
-        kb_config.choice_7 = fresh_key
-    }
-    if let Some(key_str) = &raw_keybinds.choice_8
-        && let Some(fresh_key) = match_key(key_str)
-    {
-        kb_config.choice_8 = fresh_key
-    }
-    if let Some(key_str) = &raw_keybinds.choice_9
-        && let Some(fresh_key) = match_key(key_str)
-    {
-        kb_config.choice_9 = fresh_key
-    }
+
+    process_field!(navigate_up);
+    process_field!(navigate_down);
+    process_field!(navigate_forward);
+    process_field!(navigate_backward);
+    process_field!(copy_to_clipboard);
+    process_field!(cut_to_clipboard);
+    process_field!(paste_from_clipboard);
+    process_field!(clear_clipboard);
+    process_field!(delete_selections);
+    process_field!(rename_file);
+    process_field!(toggle_hidden_view);
+    process_field!(create_file_path);
+    process_field!(create_folder_path);
+    process_field!(toggle_visual_mode);
+    process_field!(refresh);
+    process_field!(view_info);
+    process_field!(search);
+    process_field!(choice_0);
+    process_field!(choice_1);
+    process_field!(choice_2);
+    process_field!(choice_3);
+    process_field!(choice_4);
+    process_field!(choice_5);
+    process_field!(choice_6);
+    process_field!(choice_7);
+    process_field!(choice_8);
+    process_field!(choice_9);
 }
 
 fn match_key(raw_key: &str) -> Option<KeyboardShortcut> {
@@ -569,40 +485,63 @@ struct RawSorting {
     reversed: Option<bool>,
 }
 
-fn process_raw_sorting(raw_sorting: &RawSorting, sorting_config: &mut Sorting) {
-    if let Some(by) = &raw_sorting.sorting_by {
-        sorting_config.sorting_by = match_property(by);
+fn process_raw_sorting(raw_config: &RawSorting, config: &mut Sorting) {
+    macro_rules! process_match {
+        ($n:ident) => {
+            if let Some(v) = &raw_config.$n {
+                config.$n = match_property(v);
+            }
+        };
     }
-    if let Some(bol) = &raw_sorting.reversed {
-        sorting_config.reversed = bol.to_owned();
+    macro_rules! process_owned {
+        ($n:ident) => {
+            if let Some(v) = &raw_config.$n {
+                config.$n = v.to_owned();
+            }
+        };
     }
+
+    process_match!(sorting_by);
+    process_owned!(reversed);
 }
 
 #[derive(Deserialize)]
 struct RawView {
     explorer: Option<Vec<String>>,
     metadata: Option<Vec<String>>,
+    format_date: Option<String>,
     dark_mode: Option<bool>,
     view_hidden_files: Option<bool>,
-    format_date: Option<String>,
 }
 
-fn process_raw_view(raw_view: &RawView, view_conf: &mut View) {
-    if let Some(list) = &raw_view.explorer {
-        view_conf.explorer = list.par_iter().map(|i| match_property(i)).collect();
+fn process_raw_view(raw_config: &RawView, config: &mut View) {
+    macro_rules! process_match {
+        ($n:ident) => {
+            if let Some(v) = &raw_config.$n {
+                config.$n = v.par_iter().map(|i| match_property(i)).collect();
+            }
+        };
     }
-    if let Some(list) = &raw_view.metadata {
-        view_conf.metadata = list.par_iter().map(|i| match_property(i)).collect();
+    macro_rules! process_deref {
+        ($n:ident) => {
+            if let Some(v) = &raw_config.$n {
+                config.$n = *v;
+            }
+        };
     }
-    if let Some(b) = &raw_view.dark_mode {
-        view_conf.dark_mode = *b;
+    macro_rules! process_owned {
+        ($n:ident) => {
+            if let Some(v) = &raw_config.$n {
+                config.$n = v.to_owned();
+            }
+        };
     }
-    if let Some(b) = &raw_view.view_hidden_files {
-        view_conf.view_hidden_files = *b;
-    }
-    if let Some(s) = &raw_view.format_date {
-        view_conf.format_date = s.to_string();
-    }
+
+    process_match!(explorer);
+    process_match!(metadata);
+    process_deref!(dark_mode);
+    process_deref!(view_hidden_files);
+    process_owned!(format_date);
 }
 
 fn match_property(input: &str) -> Property {

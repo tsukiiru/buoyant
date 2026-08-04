@@ -398,81 +398,67 @@ impl App {
                 ui.separator();
                 ui.label("clipboard");
 
-                let (mut del_label, mut cut_label, mut copy_label, mut clear_s_label) = (
-                    RichText::new("delete"),
-                    RichText::new("cut"),
-                    RichText::new("copy"),
-                    RichText::new("clear selection"),
+                macro_rules! button {
+                    ($name:ident, $text:literal, $callback:expr, $condition:expr $(, $kb:ident)?) => {
+                        let mut $name = RichText::new($text);
+                        if self.selected.is_empty() {
+                            $name = $name.color(visuals.text_color().gamma_multiply(0.5));
+                        }
+                        let mut $name = Button::new($name)
+                            .stroke(Stroke::NONE);
+                        $(
+                        $name = $name.shortcut_text(ctx.format_shortcut(&keybinds.$kb));
+                        )?
+                        if $condition {
+                            $name = $name.sense(Sense::empty());
+                        }
+                        if ui.add($name).clicked() {
+                            $callback;
+                        }
+                    };
+                }
+
+                macro_rules! selected_btn {
+                    ($name:ident, $text:literal, $callback:expr $(, $kb:ident)?) => {
+                        button!($name, $text, $callback, self.selected.is_empty()
+                        $(
+                        , $kb
+                        )?
+                        );
+                    }
+                }
+
+                macro_rules! clipboard_btn {
+                    ($name:ident, $text:literal, $callback:expr $(, $kb:ident)?) => {
+                        button!($name, $text, $callback, self.clipboard.entries.is_empty()
+                        $(
+                        , $kb
+                        )?
+                        );
+                    }
+                }
+
+                selected_btn!(
+                    del,
+                    "delete",
+                    req_new_overlay = Some(OverlayKind::Delete),
+                    delete_selections
                 );
-
-                if self.selected.is_empty() {
-                    del_label = del_label.color(visuals.text_color().gamma_multiply(0.5));
-                    cut_label = cut_label.color(visuals.text_color().gamma_multiply(0.5));
-                    copy_label = copy_label.color(visuals.text_color().gamma_multiply(0.5));
-                    clear_s_label = clear_s_label.color(visuals.text_color().gamma_multiply(0.5));
-                }
-
-                let (mut del_button, mut cut_button, mut copy_button, mut clear_s_button) = (
-                    Button::new(del_label)
-                        .stroke(Stroke::NONE)
-                        .shortcut_text(ctx.format_shortcut(&keybinds.delete_selections)),
-                    Button::new(cut_label)
-                        .stroke(Stroke::NONE)
-                        .shortcut_text(ctx.format_shortcut(&keybinds.cut_to_clipboard)),
-                    Button::new(copy_label)
-                        .stroke(Stroke::NONE)
-                        .shortcut_text(ctx.format_shortcut(&keybinds.copy_to_clipboard)),
-                    Button::new(clear_s_label).stroke(Stroke::NONE),
+                selected_btn!(
+                    cut,
+                    "cut",
+                    req_set_clipboard = Some(ClipboardMode::Cut),
+                    cut_to_clipboard
                 );
-
-                if self.selected.is_empty() {
-                    del_button = del_button.sense(Sense::empty());
-                    cut_button = cut_button.sense(Sense::empty());
-                    copy_button = copy_button.sense(Sense::empty());
-                    clear_s_button = clear_s_button.sense(Sense::empty());
-                }
-
-                if ui.add(del_button).clicked() {
-                    req_new_overlay = Some(OverlayKind::Delete);
-                }
-                if ui.add(cut_button).clicked() {
-                    req_set_clipboard = Some(ClipboardMode::Cut);
-                }
-                if ui.add(copy_button).clicked() {
-                    req_set_clipboard = Some(ClipboardMode::Copy);
-                }
-                if ui.add(clear_s_button).clicked() {
-                    req_reset_selected = true;
-                }
-
-                let (mut p_text, mut cp_text) =
-                    (RichText::new("paste"), RichText::new("clear clipboard"));
-
-                if self.clipboard.entries.is_empty() {
-                    p_text = p_text.color(visuals.text_color().gamma_multiply(0.5));
-                    cp_text = cp_text.color(visuals.text_color().gamma_multiply(0.5));
-                }
-
-                let (mut paste_button, mut clearcp_button) = (
-                    Button::new(p_text)
-                        .stroke(Stroke::NONE)
-                        .shortcut_text(ctx.format_shortcut(&keybinds.paste_from_clipboard)),
-                    Button::new(cp_text)
-                        .stroke(Stroke::NONE)
-                        .shortcut_text(ctx.format_shortcut(&keybinds.clear_clipboard)),
+                selected_btn!(
+                    copy,
+                    "copy",
+                    req_set_clipboard = Some(ClipboardMode::Copy),
+                    copy_to_clipboard
                 );
-
-                if self.clipboard.entries.is_empty() {
-                    paste_button = paste_button.sense(Sense::empty());
-                    clearcp_button = clearcp_button.sense(Sense::empty());
-                }
-
-                if ui.add(paste_button).clicked() {
-                    req_paste = true;
-                }
-                if ui.add(clearcp_button).clicked() {
-                    req_reset_clipboard = true;
-                }
+                selected_btn!(clear_s, "clear selection", req_reset_selected = true);
+                clipboard_btn!(paste, "paste", req_paste = true, paste_from_clipboard);
+                clipboard_btn!(clear_cp, "clear clipboard", req_reset_clipboard = true, clear_clipboard);
             });
 
             // drag n drop handler

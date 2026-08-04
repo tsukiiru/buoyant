@@ -908,34 +908,39 @@ impl Entries {
 
     fn push(&mut self, temp_entry: &TempEntry, index: usize) {
         if let Some(entry) = self.children.get_mut(index) {
-            entry.is_hidden = temp_entry.is_hidden;
             entry.using = true;
+
+            entry.is_hidden = temp_entry.is_hidden;
             entry.file_size = temp_entry.file_size;
             entry.accessed = temp_entry.accessed;
             entry.created = temp_entry.created;
             entry.folder_size = temp_entry.folder_size;
             entry.file_type = temp_entry.file_type;
-            entry.file_icon = temp_entry.file_icon.clone();
+            entry.file_icon = temp_entry.file_icon.to_owned();
 
             entry.name.push_str(temp_entry.name);
             entry.path.push(temp_entry.path);
-        } else {
-            let mut entry = Entry {
-                is_hidden: temp_entry.is_hidden,
-                folder_size: temp_entry.folder_size,
-                file_size: temp_entry.file_size,
-                accessed: temp_entry.accessed,
-                created: temp_entry.created,
-                file_type: temp_entry.file_type,
-                file_icon: temp_entry.file_icon.clone(),
-                using: true,
-                ..Default::default()
-            };
-            entry.name.push_str(temp_entry.name);
-            entry.path.push(temp_entry.path);
 
-            self.children.push(entry);
+            return;
         }
+
+        let mut entry = Entry {
+            using: true,
+
+            is_hidden: temp_entry.is_hidden,
+            folder_size: temp_entry.folder_size,
+            file_size: temp_entry.file_size,
+            accessed: temp_entry.accessed,
+            created: temp_entry.created,
+            file_type: temp_entry.file_type,
+            file_icon: temp_entry.file_icon.to_owned(),
+            ..Default::default()
+        };
+
+        entry.name.push_str(temp_entry.name);
+        entry.path.push(temp_entry.path);
+
+        self.children.push(entry);
     }
 
     fn sort(&mut self, sorting_by: &Property, reversed: bool) {
