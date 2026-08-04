@@ -1,4 +1,4 @@
-use crate::icons::IconKind;
+use crate::file::icons::IconKind;
 
 pub fn extension_to_file_type(extension: &str) -> Option<(&'static str, IconKind)> {
     let something: (&'static str, IconKind) = match extension {

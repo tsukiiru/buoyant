@@ -7,7 +7,7 @@ use std::{env, fs};
 use eframe::egui::{Key, KeyboardShortcut, Modifiers};
 use serde::Deserialize;
 
-use crate::types::Property;
+use crate::app::Property;
 
 pub type Keybind = (KeybindAction, KeyboardShortcut);
 
