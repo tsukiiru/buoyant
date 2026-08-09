@@ -16,6 +16,7 @@ pub struct Config {
     pub keybinds_list: Vec<Keybind>,
     pub sorting: Sorting,
     pub view: View,
+    pub clipboard: ClipboardConf,
 }
 
 impl Default for Config {
@@ -26,6 +27,7 @@ impl Default for Config {
             // NOTE: update allocation size matching the number of keybinds
             sorting: Sorting::default(),
             view: View::default(),
+            clipboard: ClipboardConf::default(),
         }
     }
 }
@@ -168,6 +170,18 @@ impl Default for View {
     }
 }
 
+#[derive(Default, PartialEq)]
+pub enum ClipboardBehaviour {
+    #[default]
+    Replace,
+    Addition,
+}
+
+#[derive(Default)]
+pub struct ClipboardConf {
+    pub behaviour: ClipboardBehaviour,
+}
+
 pub fn fetch(config: &mut Config) {
     let home_dir = env::home_dir();
 
@@ -191,6 +205,7 @@ struct RawConfig {
     keybinds: Option<RawKeybinds>,
     sorting: Option<RawSorting>,
     view: Option<RawView>,
+    clipboard: Option<RawClipboard>,
 }
 
 fn process_raw_config(raw_config: &RawConfig, config: &mut Config) {
@@ -205,6 +220,7 @@ fn process_raw_config(raw_config: &RawConfig, config: &mut Config) {
     process_field!(keybinds, process_raw_keybinds);
     process_field!(sorting, process_raw_sorting);
     process_field!(view, process_raw_view);
+    process_field!(clipboard, process_raw_clipboard);
 }
 
 // create an entry for every keybinds as Option<String>
@@ -553,5 +569,24 @@ fn match_property(input: &str) -> Property {
         "size" => Property::Size,
         "path" => Property::Path,
         _ => Property::Name,
+    }
+}
+
+#[derive(Deserialize)]
+struct RawClipboard {
+    behaviour: Option<String>,
+}
+
+fn process_raw_clipboard(raw_config: &RawClipboard, config: &mut ClipboardConf) {
+    if let Some(i) = &raw_config.behaviour {
+        config.behaviour = match_behav(i);
+    }
+}
+
+fn match_behav(i: &str) -> ClipboardBehaviour {
+    match i {
+        "replace" => ClipboardBehaviour::Replace,
+        "add" => ClipboardBehaviour::Addition,
+        _ => ClipboardBehaviour::default(),
     }
 }

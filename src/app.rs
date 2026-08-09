@@ -744,7 +744,9 @@ impl App {
     pub fn add_to_clipboard(&mut self, clipboard_mode: ClipboardMode) {
         use wl_clipboard_rs::copy::{MimeType, Options, Source};
 
-        self.clipboard.entries.clear();
+        if self.config.clipboard.behaviour == ClipboardBehaviour::Replace {
+            self.clipboard.entries.clear();
+        }
 
         let is_copy = clipboard_mode == ClipboardMode::Copy;
 
