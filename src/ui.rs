@@ -818,7 +818,7 @@ impl App {
             self.panels.close(kind);
         }
 
-        let toast_list = self.toasts.read();
+        let toast_list = self.toasts.toasts.read();
         if !toast_list.is_empty() {
             let toast_overlay = Window::new("toast")
                 .title_bar(false)
@@ -839,22 +839,33 @@ impl App {
                         ToastKind::Info => frame.stroke.color = Color32::LIGHT_BLUE,
                         ToastKind::Danger => frame.stroke.color = Color32::LIGHT_RED,
                         ToastKind::Success => frame.stroke.color = Color32::LIGHT_GREEN,
+                        ToastKind::Operation => frame.stroke.color = Color32::LIGHT_YELLOW,
                     }
 
                     frame.show(overlay, |fr| {
                         fr.vertical(|hor| {
                             hor.label(toast.title);
                             hor.label(toast.content.clone());
-                            hor.add(
-                                ProgressBar::new(
-                                    Instant::now()
-                                        .duration_since(toast.start_time)
-                                        .div_duration_f32(toast.duration),
-                                )
-                                .corner_radius(2.0)
-                                .desired_height(6.0)
-                                .fill(visuals.text_color().gamma_multiply(0.4)),
-                            );
+                            if let Some(durr) = toast.duration {
+                                hor.add(
+                                    ProgressBar::new(
+                                        Instant::now()
+                                            .duration_since(toast.start_time)
+                                            .div_duration_f32(durr),
+                                    )
+                                    .corner_radius(2.0)
+                                    .desired_height(6.0)
+                                    .fill(visuals.text_color().gamma_multiply(0.4)),
+                                );
+                            }
+                            if let Some(per) = toast.percent {
+                                hor.add(
+                                    ProgressBar::new(per)
+                                        .corner_radius(2.0)
+                                        .desired_height(6.0)
+                                        .fill(visuals.text_color().gamma_multiply(0.4)),
+                                );
+                            }
                         });
                     });
                 }

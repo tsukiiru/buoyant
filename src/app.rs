@@ -186,12 +186,73 @@ impl Default for Entries {
     }
 }
 
+#[derive(Default)]
+pub struct Toasts {
+    pub toasts: Arc<RwLock<Vec<Toast>>>,
+}
+
+impl Toasts {
+    fn add(
+        &self,
+        title: &'static str,
+        content: Cow<'static, str>,
+        kind: ToastKind,
+        id_chan: Option<mpsc::Sender<Instant>>,
+    ) {
+        let toasts = Arc::clone(&self.toasts);
+        let duration = match kind {
+            ToastKind::Info => Some(Duration::from_secs(5)),
+            ToastKind::Success => Some(Duration::from_secs(3)),
+            ToastKind::Danger => Some(Duration::from_secs(7)),
+            ToastKind::Operation => None,
+        };
+
+        tokio::spawn(async move {
+            let id_chan = id_chan;
+            let id = {
+                let mut list = toasts.write();
+                let toast = Toast {
+                    title,
+                    content,
+                    kind,
+                    duration,
+                    ..Default::default()
+                };
+                let instant = toast.start_time;
+                list.push(toast);
+
+                list.par_sort_by(|a, b| {
+                    let (x, y) = (
+                        a.kind == ToastKind::Operation,
+                        b.kind == ToastKind::Operation,
+                    );
+                    x.cmp(&y)
+                });
+
+                instant
+            };
+
+            if let Some(duration) = duration {
+                tokio::time::sleep(duration).await;
+
+                let mut list = toasts.write();
+                list.retain(|t| t.start_time != id);
+            }
+
+            if let Some(chan) = id_chan {
+                let _ = chan.send(id);
+            }
+        });
+    }
+}
+
 #[derive(Debug)]
 pub struct Toast {
     pub title: &'static str,
     pub content: Cow<'static, str>,
     pub start_time: Instant,
-    pub duration: Duration,
+    pub duration: Option<Duration>,
+    pub percent: Option<f32>,
     pub kind: ToastKind,
 }
 
@@ -201,17 +262,19 @@ impl Default for Toast {
             title: "",
             content: Cow::Borrowed(""),
             start_time: Instant::now(),
-            duration: Duration::ZERO,
+            duration: None,
+            percent: None,
             kind: ToastKind::Info,
         }
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub enum ToastKind {
     Info,
     Danger,
     Success,
+    Operation,
 }
 
 enum NavigateDirection {
@@ -245,11 +308,10 @@ impl Display for Property {
     }
 }
 
-pub type Toasts = Arc<RwLock<Vec<Toast>>>;
-
 pub struct WorkerChannels {
     request_chan: mpsc::Receiver<WorkerRequest>,
     response_chan: mpsc::Sender<PasteKind>,
+    id: Instant,
 }
 
 #[derive(Default)]
@@ -348,45 +410,45 @@ impl App {
             KeybindAction::NavigateBackward => self.nav_back(),
             KeybindAction::Copy => {
                 if self.selected.is_empty() {
-                    self.new_toast(
+                    self.toasts.add(
                         "Clipboard",
                         Cow::Borrowed("nothing is selected to be copied!"),
                         ToastKind::Info,
-                        Duration::from_secs(3),
+                        None,
                     );
                     return;
                 }
 
-                self.new_toast(
+                self.toasts.add(
                     "Clipboard",
                     Cow::Owned(format!(
                         "successfully added {} items into clipboard!",
                         self.selected.len(),
                     )),
                     ToastKind::Success,
-                    Duration::from_secs(3),
+                    None,
                 );
                 self.add_to_clipboard(ClipboardMode::Copy);
             }
             KeybindAction::Cut => {
                 if self.selected.is_empty() {
-                    self.new_toast(
+                    self.toasts.add(
                         "Clipboard",
                         Cow::Borrowed("nothing is selected to be cut!"),
                         ToastKind::Info,
-                        Duration::from_secs(3),
+                        None,
                     );
                     return;
                 }
 
-                self.new_toast(
+                self.toasts.add(
                     "Clipboard",
                     Cow::Owned(format!(
                         "successfully added {} items into clipboard!",
                         self.selected.len()
                     )),
                     ToastKind::Success,
-                    Duration::from_secs(3),
+                    None,
                 );
                 self.add_to_clipboard(ClipboardMode::Cut);
             }
@@ -396,11 +458,11 @@ impl App {
 
             KeybindAction::Delete => {
                 if self.selected.is_empty() {
-                    self.new_toast(
+                    self.toasts.add(
                         "Delete",
                         Cow::Borrowed("nothing is selected to be deleted!"),
                         ToastKind::Info,
-                        Duration::from_secs(3),
+                        None,
                     );
                     return;
                 }
@@ -410,11 +472,11 @@ impl App {
             KeybindAction::Rename => self.new_overlay(OverlayKind::Rename, None),
             KeybindAction::ClearClipboard => {
                 self.clipboard.reset();
-                self.new_toast(
+                self.toasts.add(
                     "Success!",
                     Cow::Borrowed("successfully cleared clipboard!"),
                     ToastKind::Success,
-                    Duration::from_secs(3),
+                    None,
                 );
             }
             KeybindAction::ToggleHidden => self.toggle_view_hidden(),
@@ -449,11 +511,11 @@ impl App {
         let fetch_current_path = read_dir(&self.current_path);
 
         if let Err(err) = &fetch_current_path {
-            self.new_toast(
+            self.toasts.add(
                 "Error",
                 Cow::Owned(err.to_string()),
                 ToastKind::Danger,
-                Duration::from_millis(5000),
+                None,
             );
         }
 
@@ -551,11 +613,11 @@ impl App {
         if to.is_file() {
             let res = Command::new("xdg-open").arg(to).spawn();
             if let Err(err) = res {
-                self.new_toast(
+                self.toasts.add(
                     "xdg-open",
                     Cow::Owned(err.to_string()),
                     ToastKind::Danger,
-                    Duration::from_millis(5000),
+                    None,
                 );
             }
             return;
@@ -581,12 +643,8 @@ impl App {
                 .path
                 .as_ref()
         })) {
-            self.new_toast(
-                "Delete",
-                Cow::Owned(e),
-                ToastKind::Danger,
-                Duration::from_secs(3),
-            );
+            self.toasts
+                .add("Delete", Cow::Owned(e), ToastKind::Danger, None);
         }
         self.fetch_entries();
     }
@@ -628,11 +686,11 @@ impl App {
         let rename_res = rename(overlay.path.as_ref().unwrap(), &overlay.buffer);
 
         if let Err(err) = &rename_res {
-            self.new_toast(
+            self.toasts.add(
                 "Rename",
                 Cow::Owned(err.to_string()),
                 ToastKind::Danger,
-                Duration::from_secs(3),
+                None,
             );
         }
 
@@ -757,14 +815,14 @@ impl App {
                 let opts = Options::new();
                 let buf = fs::read(&path);
                 if buf.is_err() {
-                    self.new_toast(
+                    self.toasts.add(
                         "System Clipboard",
                         Cow::Owned(format!(
                             "failed to read file contents for {}",
                             path.display()
                         )),
                         ToastKind::Info,
-                        Duration::from_secs(3),
+                        None,
                     );
                     continue;
                 }
@@ -786,18 +844,29 @@ impl App {
             return;
         }
 
-        let selected = self
+        let selected: FxHashSet<PathBuf> = self
             .selected
             .iter()
             .map(|e_index| self.entries.children[*e_index].path.clone())
             .collect();
 
-        let (worker_tx, worker_rx) = mpsc::channel(); // main use - worker recv
-        let (user_tx, user_rx) = mpsc::channel(); // main recv - worker use
+        let (worker_tx, worker_rx) = mpsc::channel::<PasteKind>(); // main use - worker recv
+        let (user_tx, user_rx) = mpsc::channel::<WorkerRequest>(); // main recv - worker use
+
+        let (id_tx, id_rx) = mpsc::channel::<Instant>();
+
+        self.toasts.add(
+            "Moving",
+            Cow::Owned(format!("Moving {} items", selected.len())),
+            ToastKind::Operation,
+            Some(id_tx),
+        );
+        let id = id_rx.recv().unwrap();
 
         self.worker_channels_queue.push(WorkerChannels {
             request_chan: user_rx,
             response_chan: worker_tx,
+            id,
         });
 
         let destination = self.entries.children[to].path.clone();
@@ -809,16 +878,27 @@ impl App {
 
     pub fn paste(&mut self) {
         if let Some(mode) = &self.clipboard.mode {
-            let (worker_tx, worker_rx) = mpsc::channel(); // main use - worker recv
-            let (user_tx, user_rx) = mpsc::channel(); // main recv - worker use
+            let (worker_tx, worker_rx) = mpsc::channel::<PasteKind>(); // main use - worker recv
+            let (user_tx, user_rx) = mpsc::channel::<WorkerRequest>(); // main recv - worker use
+
+            let entries = self.clipboard.entries.clone();
+
+            let (id_tx, id_rx) = mpsc::channel::<Instant>();
+            self.toasts.add(
+                "Pasting",
+                Cow::Owned(format!("Pasting {} items", entries.len())),
+                ToastKind::Operation,
+                Some(id_tx),
+            );
+            let id = id_rx.recv().unwrap();
 
             self.worker_channels_queue.push(WorkerChannels {
                 request_chan: user_rx,
                 response_chan: worker_tx,
+                id,
             });
 
             let current_path = self.current_path.clone();
-            let entries = self.clipboard.entries.clone();
 
             match mode {
                 ClipboardMode::Copy => {
@@ -930,38 +1010,6 @@ impl App {
 
     pub fn clear_selected(&mut self) {
         self.selected.clear();
-    }
-
-    fn new_toast(
-        &self,
-        title: &'static str,
-        content: Cow<'static, str>,
-        kind: ToastKind,
-        duration: Duration,
-    ) {
-        let toasts = Arc::clone(&self.toasts);
-
-        tokio::spawn(async move {
-            let id = {
-                let mut list = toasts.write();
-                let toast = Toast {
-                    title,
-                    content,
-                    kind,
-                    duration,
-                    ..Default::default()
-                };
-                let instant = toast.start_time;
-                list.push(toast);
-
-                instant
-            };
-
-            tokio::time::sleep(duration).await;
-
-            let mut list = toasts.write();
-            list.retain(|t| t.start_time != id);
-        });
     }
 }
 
@@ -1162,6 +1210,16 @@ impl eframe::App for App {
                         pending_using_index = Some(i);
                         break;
                     }
+                    WorkerRequest::Update { percent } => {
+                        let mut toasts = self.toasts.toasts.write();
+                        let mut toasts = toasts
+                            .iter_mut()
+                            .filter(|t| t.start_time == worker_chans.id)
+                            .collect::<Vec<&mut Toast>>();
+                        let toast: &mut Toast = toasts[0];
+
+                        toast.percent = Some(percent);
+                    }
                     WorkerRequest::Done { paths } => {
                         pending_fetch_entries = true;
                         if !paths.is_empty() {
@@ -1185,6 +1243,9 @@ impl eframe::App for App {
                             self.clipboard.entries.clear();
                             self.clipboard.mode = None;
                         }
+
+                        let mut toasts = self.toasts.toasts.write();
+                        toasts.retain(|t| t.start_time != worker_chans.id);
 
                         pending_removal_indicies.push(i);
                     }

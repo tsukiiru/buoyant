@@ -167,7 +167,15 @@ pub fn move_dir(
     }
 
     let mut resulte = Vec::with_capacity(old_files.len());
+
+    let total = old_files.len();
+    let mut remaining = total;
+
     for path in old_files {
+        let _ = from_worker.send(WorkerRequest::Update {
+            percent: (remaining / total) as f32,
+        });
+
         let mut clean_path = path.clone();
         clean_path.pop();
 
@@ -184,6 +192,8 @@ pub fn move_dir(
             resulte.push(p);
             continue;
         }
+
+        remaining -= 1;
     }
 
     let _ = from_worker.send(WorkerRequest::Done { paths: resulte });

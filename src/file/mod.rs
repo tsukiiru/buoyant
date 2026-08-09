@@ -20,5 +20,6 @@ pub enum CreateType {
 #[derive(Debug)]
 pub enum WorkerRequest {
     OperationType { path: PathBuf },
+    Update { percent: f32 },
     Done { paths: Vec<PathBuf> },
 }
