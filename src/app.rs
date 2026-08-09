@@ -199,6 +199,11 @@ impl Display for Property {
 
 pub type Toasts = Arc<RwLock<Vec<Toast>>>;
 
+pub struct WorkerChannels {
+    request_chan: mpsc::Receiver<WorkerRequest>,
+    response_chan: mpsc::Sender<PasteKind>,
+}
+
 #[derive(Default)]
 pub struct App {
     pub ctx: Context,
@@ -212,8 +217,8 @@ pub struct App {
     pub field: Field,
     pub config: Config,
     pub toasts: Toasts, // mhm toasts :3
-    from_worker: Option<mpsc::Receiver<WorkerRequest>>,
-    to_worker: Option<mpsc::Sender<PasteKind>>,
+    worker_channels_queue: Vec<WorkerChannels>,
+    queued_chan_index: usize,
 }
 
 impl App {
@@ -665,13 +670,14 @@ impl App {
     pub fn finalize_overlay_choice(&mut self, choice: usize) {
         match self.overlay.kind.unwrap() {
             OverlayKind::Paste => {
-                if choice == 0 {
-                    let _ = self.to_worker.as_ref().unwrap().send(PasteKind::Replace);
-                } else if choice == 1 {
-                    let _ = self.to_worker.as_ref().unwrap().send(PasteKind::Duplicate);
-                }
+                let response_chan =
+                    &self.worker_channels_queue[self.queued_chan_index].response_chan;
 
-                self.to_worker = None;
+                if choice == 0 {
+                    let _ = response_chan.send(PasteKind::Replace);
+                } else if choice == 1 {
+                    let _ = response_chan.send(PasteKind::Duplicate);
+                }
             }
             OverlayKind::Delete => {
                 if choice != 0 {
@@ -737,8 +743,11 @@ impl App {
 
         let (worker_tx, worker_rx) = mpsc::channel(); // main use - worker recv
         let (user_tx, user_rx) = mpsc::channel(); // main recv - worker use
-        self.from_worker = Some(user_rx);
-        self.to_worker = Some(worker_tx);
+
+        self.worker_channels_queue.push(WorkerChannels {
+            request_chan: user_rx,
+            response_chan: worker_tx,
+        });
 
         let destination = self.entries.children[to].path.clone();
 
@@ -751,8 +760,11 @@ impl App {
         if let Some(mode) = &self.clipboard.mode {
             let (worker_tx, worker_rx) = mpsc::channel(); // main use - worker recv
             let (user_tx, user_rx) = mpsc::channel(); // main recv - worker use
-            self.from_worker = Some(user_rx);
-            self.to_worker = Some(worker_tx);
+
+            self.worker_channels_queue.push(WorkerChannels {
+                request_chan: user_rx,
+                response_chan: worker_tx,
+            });
 
             let current_path = self.current_path.clone();
             let entries = self.clipboard.entries.clone();
@@ -774,6 +786,7 @@ impl App {
         };
 
         // if there's nothing in app's clipboard, use wayland's selection (clipboard)
+        // NOTE: i will get this working soon, i promise
         use std::io::Read;
         use wl_clipboard_rs::paste::{ClipboardType, Error, MimeType, Seat, get_contents};
         let result = get_contents(ClipboardType::Regular, Seat::Unspecified, MimeType::Any);
@@ -1086,39 +1099,56 @@ impl eframe::App for App {
             self.handle_actions(&action, is_ctrled, is_shifted);
         }
 
-        if let Some(rx) = &self.from_worker
-            && let Ok(req) = rx.try_recv()
-        {
-            match req {
-                WorkerRequest::OperationType { path } => {
-                    self.new_overlay(OverlayKind::Paste, Some(&path));
-                }
-                WorkerRequest::Done { paths } => {
-                    self.fetch_entries();
-                    if !paths.is_empty() {
-                        self.highlight_path(&paths[0]);
+        let mut pending_removal_indicies = vec![];
+        let (mut pending_fetch_entries, mut pending_highlight_path, mut pending_using_index) =
+            (false, None, None);
+        for (i, worker_chans) in self.worker_channels.iter().enumerate() {
+            let from_worker = &worker_chans.request_chan;
+            if let Ok(req) = from_worker.try_recv() {
+                match req {
+                    WorkerRequest::OperationType { path } => {
+                        self.new_overlay(OverlayKind::Paste, Some(&path));
+                        pending_using_index = Some(i);
+                        break;
                     }
+                    WorkerRequest::Done { paths } => {
+                        pending_fetch_entries = true;
+                        if !paths.is_empty() {
+                            pending_highlight_path = Some(paths[0].to_owned());
+                        }
 
-                    for p in paths {
-                        for (id, e) in self.entries.children.iter().enumerate() {
-                            if p == e.path
-                                && let Some(i) = self.entries.displaying.iter().find(|i| **i == id)
-                            {
-                                self.selected.insert(*i);
+                        for p in paths {
+                            for (id, e) in self.entries.children.iter().enumerate() {
+                                if p == e.path
+                                    && let Some(i) =
+                                        self.entries.displaying.iter().find(|i| **i == id)
+                                {
+                                    self.selected.insert(*i);
+                                }
                             }
                         }
-                    }
 
-                    if let Some(mode) = &self.clipboard.mode
-                        && mode == &ClipboardMode::Cut
-                    {
-                        self.clipboard.entries.clear();
-                        self.clipboard.mode = None;
-                    }
+                        if let Some(mode) = &self.clipboard.mode
+                            && mode == &ClipboardMode::Cut
+                        {
+                            self.clipboard.entries.clear();
+                            self.clipboard.mode = None;
+                        }
 
-                    self.from_worker = None;
+                        pending_removal_indicies.push(i);
+                    }
                 }
             }
+        }
+
+        if pending_fetch_entries {
+            self.fetch_entries();
+        }
+        if let Some(path) = pending_highlight_path {
+            self.highlight_path(&path);
+        }
+        if let Some(i) = pending_using_index {
+            self.queued_chan_index = i;
         }
     }
     fn ui(&mut self, ui: &mut eframe::egui::Ui, _frame: &mut eframe::Frame) {
