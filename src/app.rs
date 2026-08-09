@@ -7,7 +7,7 @@ use crate::{
         ops::{BANNED_CHARACTERS, copy_dir, create, delete, move_dir, rename},
     },
 };
-use eframe::egui::{Context, Event, Key, Modifiers, Theme, mutex::RwLock};
+use eframe::egui::{Context, Event, Key, Modifiers, Theme, WidgetText, mutex::RwLock};
 use rayon::{
     iter::{
         IndexedParallelIterator, IntoParallelRefIterator, IntoParallelRefMutIterator,
@@ -58,6 +58,39 @@ pub enum FieldKind {
     Search,
 }
 
+#[derive(Default)]
+pub struct Panels {
+    pub clipboard: Option<bool>,
+}
+
+pub enum PanelKind {
+    Clipboard,
+}
+
+impl Panels {
+    pub fn close(&mut self, kind: PanelKind) {
+        match kind {
+            PanelKind::Clipboard => self.clipboard = None,
+        }
+    }
+    fn open(&mut self, kind: PanelKind) {
+        match kind {
+            PanelKind::Clipboard => self.clipboard = Some(true),
+        }
+    }
+    pub fn toggle(&mut self, kind: PanelKind) {
+        match kind {
+            PanelKind::Clipboard => {
+                if self.clipboard.is_none() {
+                    self.open(kind);
+                } else {
+                    self.close(kind);
+                }
+            }
+        }
+    }
+}
+
 #[derive(Default, Debug)]
 pub struct Clipboard {
     pub entries: FxHashSet<PathBuf>,
@@ -68,6 +101,21 @@ pub struct Clipboard {
 pub enum ClipboardMode {
     Copy,
     Cut,
+}
+
+impl From<ClipboardMode> for String {
+    fn from(value: ClipboardMode) -> Self {
+        match value {
+            ClipboardMode::Copy => String::from("copy"),
+            ClipboardMode::Cut => String::from("cut"),
+        }
+    }
+}
+
+impl From<ClipboardMode> for WidgetText {
+    fn from(value: ClipboardMode) -> Self {
+        Self::Text(value.into())
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -217,6 +265,7 @@ pub struct App {
     pub field: Field,
     pub config: Config,
     pub toasts: Toasts, // mhm toasts :3
+    pub panels: Panels,
     worker_channels_queue: Vec<WorkerChannels>,
     queued_chan_index: usize,
 }
@@ -1102,7 +1151,7 @@ impl eframe::App for App {
         let mut pending_removal_indicies = vec![];
         let (mut pending_fetch_entries, mut pending_highlight_path, mut pending_using_index) =
             (false, None, None);
-        for (i, worker_chans) in self.worker_channels.iter().enumerate() {
+        for (i, worker_chans) in self.worker_channels_queue.iter().enumerate() {
             let from_worker = &worker_chans.request_chan;
             if let Ok(req) = from_worker.try_recv() {
                 match req {

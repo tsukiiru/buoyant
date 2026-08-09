@@ -7,7 +7,7 @@ use eframe::egui::{
 use std::{ops::Sub, path::Path, sync::Arc, time::Instant};
 
 use crate::{
-    app::{App, ClipboardMode, FieldKind, OverlayKind, Property, ToastKind},
+    app::{App, ClipboardMode, FieldKind, OverlayKind, PanelKind, Property, ToastKind},
     file::{
         CreateType,
         icons::{IconKind, match_icon},
@@ -49,6 +49,8 @@ impl App {
             mut req_logic_field,
             mut req_unfocus_field,
         ) = (None, false, None, None, false);
+
+        let mut req_toggle_panel = None;
         //
 
         CentralPanel::default().show(main_ui, |ui| {
@@ -459,6 +461,13 @@ impl App {
                 selected_btn!(clear_s, "clear selection", req_reset_selected = true);
                 clipboard_btn!(paste, "paste", req_paste = true, paste_from_clipboard);
                 clipboard_btn!(clear_cp, "clear clipboard", req_reset_clipboard = true, clear_clipboard);
+
+                ui.separator();
+                ui.label("panels");
+
+                if ui.add(Button::new("toggle clipboard")).clicked() {
+                    req_toggle_panel = Some(PanelKind::Clipboard);
+                }
             });
 
             // drag n drop handler
@@ -564,20 +573,9 @@ impl App {
             && kind == OverlayKind::Paste
         {
             let modal_widget = Modal::new(Id::new("paste_modal"));
-
             modal_widget.show(&ctx, |ui| {
                 let keybinds = &self.config.keybinds;
-                ui.heading(format!(
-                    "you are {} these:",
-                    if let Some(mode) = &self.clipboard.mode {
-                        match mode {
-                            ClipboardMode::Copy => "copying",
-                            ClipboardMode::Cut => "cutting",
-                        }
-                    } else {
-                        "moving"
-                    }
-                ));
+                ui.heading("duplicate found for:");
                 let frame = Frame::NONE.fill(visuals.text_edit_bg_color());
                 frame.show(ui, |f| {
                     f.label(format!("{}", overlay.path.as_ref().unwrap().display()));
@@ -594,7 +592,7 @@ impl App {
                     {
                         req_overlay_choice = Some(0);
                     }
-                    ui.label("replace if file(s) with the same name already existed");
+                    ui.label("replace duplicated file");
                 });
                 ui.vertical(|ui| {
                     if ui
@@ -606,7 +604,7 @@ impl App {
                     {
                         req_overlay_choice = Some(1);
                     }
-                    ui.label("make a duplicate if file(s) with the same name already existed");
+                    ui.label("make a new file with a number behind it");
                 });
 
                 if ui.input(|i| i.key_pressed(Key::Escape)) {
@@ -715,46 +713,36 @@ impl App {
         if req_close_overlay {
             self.overlay.reset();
         }
-
         if req_paste {
             self.paste();
         }
         if req_navigate_backward {
             self.nav_back();
         }
-
         if let Some(kind) = req_new_overlay {
             self.new_overlay(kind, None);
         }
-
         if req_reset_clipboard {
             self.clipboard.reset();
         }
-
         if req_reset_selected {
             self.clear_selected();
         }
-
         if let Some(mode) = req_set_clipboard {
             self.add_to_clipboard(mode);
         }
-
         if let Some(choice) = req_overlay_choice {
             self.finalize_overlay_choice(choice);
         }
-
         if let Some(index) = req_swap_selected {
             self.swap_selected(&index);
         }
-
         if let Some(content) = req_update_overlay_buffer {
             self.overlay.buffer(content);
         }
-
         if let Some(kind) = req_create {
             self.create(kind);
         }
-
         if let Some(index) = req_modify_selected {
             let ctrl_pressed =
                 main_ui.input(|i| i.key_down(Key::ControlLeft) || i.key_down(Key::ControlRight));
@@ -763,15 +751,12 @@ impl App {
 
             self.modify_selected(index, ctrl_pressed, shift_pressed);
         }
-
         if req_rename {
             self.rename();
         }
-
         if req_navigate_forward {
             self.nav_forward();
         }
-
         if req_unfocus_field {
             self.field.unfocus();
         }
@@ -782,7 +767,6 @@ impl App {
             self.field.reset();
             self.filter_and_sort();
         }
-
         if let Some(content) = req_update_field_buffer {
             self.field.buffer(content);
         }
@@ -791,6 +775,47 @@ impl App {
         }
         if let Some(to) = req_transfer {
             self.transfer(to);
+        }
+        if let Some(kind) = req_toggle_panel {
+            self.panels.toggle(kind);
+        }
+
+        let mut pending_close_panel = None;
+        if self.panels.clipboard.is_some() {
+            let mut panel_state = true;
+
+            let clipboard = &self.clipboard;
+            let window = Window::new("clipboard")
+                .open(&mut panel_state)
+                .enabled(true)
+                .movable(true)
+                .title_bar(true)
+                .min_width(40.0)
+                .min_height(100.0);
+
+            window.show(&ctx, |win| {
+                if clipboard.entries.is_empty() {
+                    win.label("clipboard is empty!");
+                    return;
+                }
+                win.label(clipboard.mode.as_ref().unwrap().clone());
+                win.vertical(|v| {
+                    let frame = Frame::NONE.fill(visuals.text_edit_bg_color());
+                    frame.show(v, |f| {
+                        clipboard.entries.iter().for_each(|p| {
+                            f.label(p.to_str().unwrap_or_default());
+                        });
+                    });
+                });
+            });
+
+            if !panel_state {
+                pending_close_panel = Some(PanelKind::Clipboard);
+            }
+        }
+
+        if let Some(kind) = pending_close_panel {
+            self.panels.close(kind);
         }
 
         let toast_list = self.toasts.read();
