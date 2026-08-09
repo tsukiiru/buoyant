@@ -150,6 +150,9 @@ pub struct View {
     pub dark_mode: bool,
     pub view_hidden_files: bool,
     pub format_date: String,
+    pub info_toast_time: u64,
+    pub danger_toast_time: u64,
+    pub success_toast_time: u64,
 }
 
 impl Default for View {
@@ -166,6 +169,9 @@ impl Default for View {
             dark_mode: false,
             view_hidden_files: false,
             format_date: String::from("%d/%m/%Y, %I:%M:%S %p"),
+            info_toast_time: 5_000,
+            danger_toast_time: 7_000,
+            success_toast_time: 3_000,
         }
     }
 }
@@ -528,6 +534,9 @@ struct RawView {
     format_date: Option<String>,
     dark_mode: Option<bool>,
     view_hidden_files: Option<bool>,
+    info_toast_time: Option<u64>,
+    danger_toast_time: Option<u64>,
+    success_toast_time: Option<u64>,
 }
 
 fn process_raw_view(raw_config: &RawView, config: &mut View) {
@@ -558,6 +567,9 @@ fn process_raw_view(raw_config: &RawView, config: &mut View) {
     process_deref!(dark_mode);
     process_deref!(view_hidden_files);
     process_owned!(format_date);
+    process_deref!(danger_toast_time);
+    process_deref!(info_toast_time);
+    process_deref!(success_toast_time);
 }
 
 fn match_property(input: &str) -> Property {

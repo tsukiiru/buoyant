@@ -191,61 +191,6 @@ pub struct Toasts {
     pub toasts: Arc<RwLock<Vec<Toast>>>,
 }
 
-impl Toasts {
-    fn add(
-        &self,
-        title: &'static str,
-        content: Cow<'static, str>,
-        kind: ToastKind,
-        id_chan: Option<mpsc::Sender<Instant>>,
-    ) {
-        let toasts = Arc::clone(&self.toasts);
-        let duration = match kind {
-            ToastKind::Info => Some(Duration::from_secs(5)),
-            ToastKind::Success => Some(Duration::from_secs(3)),
-            ToastKind::Danger => Some(Duration::from_secs(7)),
-            ToastKind::Operation => None,
-        };
-
-        tokio::spawn(async move {
-            let id_chan = id_chan;
-            let id = {
-                let mut list = toasts.write();
-                let toast = Toast {
-                    title,
-                    content,
-                    kind,
-                    duration,
-                    ..Default::default()
-                };
-                let instant = toast.start_time;
-                list.push(toast);
-
-                list.par_sort_by(|a, b| {
-                    let (x, y) = (
-                        a.kind == ToastKind::Operation,
-                        b.kind == ToastKind::Operation,
-                    );
-                    x.cmp(&y)
-                });
-
-                instant
-            };
-
-            if let Some(duration) = duration {
-                tokio::time::sleep(duration).await;
-
-                let mut list = toasts.write();
-                list.retain(|t| t.start_time != id);
-            }
-
-            if let Some(chan) = id_chan {
-                let _ = chan.send(id);
-            }
-        });
-    }
-}
-
 #[derive(Debug)]
 pub struct Toast {
     pub title: &'static str,
@@ -410,7 +355,7 @@ impl App {
             KeybindAction::NavigateBackward => self.nav_back(),
             KeybindAction::Copy => {
                 if self.selected.is_empty() {
-                    self.toasts.add(
+                    self.new_toast(
                         "Clipboard",
                         Cow::Borrowed("nothing is selected to be copied!"),
                         ToastKind::Info,
@@ -419,7 +364,7 @@ impl App {
                     return;
                 }
 
-                self.toasts.add(
+                self.new_toast(
                     "Clipboard",
                     Cow::Owned(format!(
                         "successfully added {} items into clipboard!",
@@ -432,7 +377,7 @@ impl App {
             }
             KeybindAction::Cut => {
                 if self.selected.is_empty() {
-                    self.toasts.add(
+                    self.new_toast(
                         "Clipboard",
                         Cow::Borrowed("nothing is selected to be cut!"),
                         ToastKind::Info,
@@ -441,7 +386,7 @@ impl App {
                     return;
                 }
 
-                self.toasts.add(
+                self.new_toast(
                     "Clipboard",
                     Cow::Owned(format!(
                         "successfully added {} items into clipboard!",
@@ -458,7 +403,7 @@ impl App {
 
             KeybindAction::Delete => {
                 if self.selected.is_empty() {
-                    self.toasts.add(
+                    self.new_toast(
                         "Delete",
                         Cow::Borrowed("nothing is selected to be deleted!"),
                         ToastKind::Info,
@@ -472,7 +417,7 @@ impl App {
             KeybindAction::Rename => self.new_overlay(OverlayKind::Rename, None),
             KeybindAction::ClearClipboard => {
                 self.clipboard.reset();
-                self.toasts.add(
+                self.new_toast(
                     "Success!",
                     Cow::Borrowed("successfully cleared clipboard!"),
                     ToastKind::Success,
@@ -511,7 +456,7 @@ impl App {
         let fetch_current_path = read_dir(&self.current_path);
 
         if let Err(err) = &fetch_current_path {
-            self.toasts.add(
+            self.new_toast(
                 "Error",
                 Cow::Owned(err.to_string()),
                 ToastKind::Danger,
@@ -613,7 +558,7 @@ impl App {
         if to.is_file() {
             let res = Command::new("xdg-open").arg(to).spawn();
             if let Err(err) = res {
-                self.toasts.add(
+                self.new_toast(
                     "xdg-open",
                     Cow::Owned(err.to_string()),
                     ToastKind::Danger,
@@ -643,8 +588,7 @@ impl App {
                 .path
                 .as_ref()
         })) {
-            self.toasts
-                .add("Delete", Cow::Owned(e), ToastKind::Danger, None);
+            self.new_toast("Delete", Cow::Owned(e), ToastKind::Danger, None);
         }
         self.fetch_entries();
     }
@@ -686,7 +630,7 @@ impl App {
         let rename_res = rename(overlay.path.as_ref().unwrap(), &overlay.buffer);
 
         if let Err(err) = &rename_res {
-            self.toasts.add(
+            self.new_toast(
                 "Rename",
                 Cow::Owned(err.to_string()),
                 ToastKind::Danger,
@@ -697,6 +641,61 @@ impl App {
         self.overlay.reset();
         self.fetch_entries();
         self.highlight_path(&rename_res.unwrap());
+    }
+
+    fn new_toast(
+        &self,
+        title: &'static str,
+        content: Cow<'static, str>,
+        kind: ToastKind,
+        id_chan: Option<mpsc::Sender<Instant>>,
+    ) {
+        let toasts = Arc::clone(&self.toasts.toasts);
+        let view_conf = &self.config.view;
+
+        let duration = match kind {
+            ToastKind::Info => Some(Duration::from_millis(view_conf.info_toast_time)),
+            ToastKind::Success => Some(Duration::from_millis(view_conf.success_toast_time)),
+            ToastKind::Danger => Some(Duration::from_millis(view_conf.danger_toast_time)),
+            ToastKind::Operation => None,
+        };
+
+        tokio::spawn(async move {
+            let id_chan = id_chan;
+            let id = {
+                let mut list = toasts.write();
+                let toast = Toast {
+                    title,
+                    content,
+                    kind,
+                    duration,
+                    ..Default::default()
+                };
+                let instant = toast.start_time;
+                list.push(toast);
+
+                list.par_sort_by(|a, b| {
+                    let (x, y) = (
+                        a.kind == ToastKind::Operation,
+                        b.kind == ToastKind::Operation,
+                    );
+                    x.cmp(&y)
+                });
+
+                instant
+            };
+
+            if let Some(duration) = duration {
+                tokio::time::sleep(duration).await;
+
+                let mut list = toasts.write();
+                list.retain(|t| t.start_time != id);
+            }
+
+            if let Some(chan) = id_chan {
+                let _ = chan.send(id);
+            }
+        });
     }
 
     pub fn new_field(&mut self, kind: FieldKind) {
@@ -815,7 +814,7 @@ impl App {
                 let opts = Options::new();
                 let buf = fs::read(&path);
                 if buf.is_err() {
-                    self.toasts.add(
+                    self.new_toast(
                         "System Clipboard",
                         Cow::Owned(format!(
                             "failed to read file contents for {}",
@@ -855,7 +854,7 @@ impl App {
 
         let (id_tx, id_rx) = mpsc::channel::<Instant>();
 
-        self.toasts.add(
+        self.new_toast(
             "Moving",
             Cow::Owned(format!("Moving {} items", selected.len())),
             ToastKind::Operation,
@@ -884,7 +883,7 @@ impl App {
             let entries = self.clipboard.entries.clone();
 
             let (id_tx, id_rx) = mpsc::channel::<Instant>();
-            self.toasts.add(
+            self.new_toast(
                 "Pasting",
                 Cow::Owned(format!("Pasting {} items", entries.len())),
                 ToastKind::Operation,
