@@ -198,18 +198,22 @@ pub struct Toast {
     pub start_time: Instant,
     pub duration: Option<Duration>,
     pub percent: Option<f32>,
+    pub count: i8,
     pub kind: ToastKind,
+    pub id: Instant,
 }
 
 impl Default for Toast {
     fn default() -> Self {
         Toast {
             title: "",
+            count: 1,
             content: Cow::Borrowed(""),
             start_time: Instant::now(),
             duration: None,
             percent: None,
             kind: ToastKind::Info,
+            id: Instant::now(),
         }
     }
 }
@@ -664,32 +668,52 @@ impl App {
             let id_chan = id_chan;
             let id = {
                 let mut list = toasts.write();
-                let toast = Toast {
-                    title,
-                    content,
-                    kind,
-                    duration,
-                    ..Default::default()
-                };
-                let instant = toast.start_time;
-                list.push(toast);
+                let mut toast = list
+                    .iter_mut()
+                    .find(|t| t.title == title && t.content == content);
 
-                list.par_sort_by(|a, b| {
-                    let (x, y) = (
-                        a.kind == ToastKind::Operation,
-                        b.kind == ToastKind::Operation,
-                    );
-                    x.cmp(&y)
-                });
+                if let Some(toast) = toast.as_mut() {
+                    toast.count += 1;
+                    toast.start_time = Instant::now();
 
-                instant
+                    toast.id
+                } else {
+                    let toast = Toast {
+                        title,
+                        content,
+                        kind,
+                        duration,
+                        ..Default::default()
+                    };
+                    let id = toast.id;
+                    list.push(toast);
+
+                    list.par_sort_by(|a, b| {
+                        let (x, y) = (
+                            a.kind == ToastKind::Operation,
+                            b.kind == ToastKind::Operation,
+                        );
+                        x.cmp(&y)
+                    });
+
+                    id
+                }
             };
 
             if let Some(duration) = duration {
                 tokio::time::sleep(duration).await;
 
                 let mut list = toasts.write();
-                list.retain(|t| t.start_time != id);
+                let toast = list.iter_mut().find(|t| t.id == id);
+
+                if let Some(toast) = toast
+                    && toast.count > 1
+                {
+                    toast.count -= 1;
+                    return;
+                }
+
+                list.retain(|t| t.id != id);
             }
 
             if let Some(chan) = id_chan {

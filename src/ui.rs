@@ -844,7 +844,7 @@ impl App {
 
                     frame.show(overlay, |fr| {
                         fr.vertical(|hor| {
-                            hor.label(toast.title);
+                            hor.label(format!("{} (x{})", toast.title, toast.count));
                             hor.label(toast.content.clone());
                             if let Some(durr) = toast.duration {
                                 hor.add(
