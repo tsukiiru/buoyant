@@ -7,7 +7,7 @@ use eframe::egui::{
 use std::{ops::Sub, path::Path, sync::Arc, time::Instant};
 
 use crate::{
-    app::{App, ClipboardMode, FieldKind, OverlayKind, PanelKind, Property, ToastKind},
+    app::{App, ClipboardMode, FieldKind, OverlayKind, Property, ToastKind, WindowKind},
     file::{
         CreateType,
         icons::{IconKind, match_icon},
@@ -50,7 +50,7 @@ impl App {
             mut req_unfocus_field,
         ) = (None, false, None, None, false);
 
-        let mut req_toggle_panel = None;
+        let mut req_toggle_window = None;
         //
 
         CentralPanel::default().show(main_ui, |ui| {
@@ -463,10 +463,10 @@ impl App {
                 clipboard_btn!(clear_cp, "clear clipboard", req_reset_clipboard = true, clear_clipboard);
 
                 ui.separator();
-                ui.label("panels");
+                ui.label("windows");
 
                 if ui.add(Button::new("toggle clipboard")).clicked() {
-                    req_toggle_panel = Some(PanelKind::Clipboard);
+                    req_toggle_window = Some(WindowKind::Clipboard);
                 }
             });
 
@@ -776,17 +776,17 @@ impl App {
         if let Some(to) = req_transfer {
             self.transfer(to);
         }
-        if let Some(kind) = req_toggle_panel {
-            self.panels.toggle(kind);
+        if let Some(kind) = req_toggle_window {
+            self.windows.toggle(kind);
         }
 
-        let mut pending_close_panel = None;
-        if self.panels.clipboard.is_some() {
-            let mut panel_state = true;
+        let mut pending_close_window = None;
+        if self.windows.clipboard.is_some() {
+            let mut window_state = true;
 
             let clipboard = &self.clipboard;
             let window = Window::new("clipboard")
-                .open(&mut panel_state)
+                .open(&mut window_state)
                 .enabled(true)
                 .movable(true)
                 .title_bar(true)
@@ -809,13 +809,13 @@ impl App {
                 });
             });
 
-            if !panel_state {
-                pending_close_panel = Some(PanelKind::Clipboard);
+            if !window_state {
+                pending_close_window = Some(WindowKind::Clipboard);
             }
         }
 
-        if let Some(kind) = pending_close_panel {
-            self.panels.close(kind);
+        if let Some(kind) = pending_close_window {
+            self.windows.close(kind);
         }
 
         let toast_list = self.toasts.toasts.read();

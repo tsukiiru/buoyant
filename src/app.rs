@@ -59,28 +59,28 @@ pub enum FieldKind {
 }
 
 #[derive(Default)]
-pub struct Panels {
+pub struct Windows {
     pub clipboard: Option<bool>,
 }
 
-pub enum PanelKind {
+pub enum WindowKind {
     Clipboard,
 }
 
-impl Panels {
-    pub fn close(&mut self, kind: PanelKind) {
+impl Windows {
+    pub fn close(&mut self, kind: WindowKind) {
         match kind {
-            PanelKind::Clipboard => self.clipboard = None,
+            WindowKind::Clipboard => self.clipboard = None,
         }
     }
-    fn open(&mut self, kind: PanelKind) {
+    fn open(&mut self, kind: WindowKind) {
         match kind {
-            PanelKind::Clipboard => self.clipboard = Some(true),
+            WindowKind::Clipboard => self.clipboard = Some(true),
         }
     }
-    pub fn toggle(&mut self, kind: PanelKind) {
+    pub fn toggle(&mut self, kind: WindowKind) {
         match kind {
-            PanelKind::Clipboard => {
+            WindowKind::Clipboard => {
                 if self.clipboard.is_none() {
                     self.open(kind);
                 } else {
@@ -263,19 +263,28 @@ pub struct WorkerChannels {
     id: Instant,
 }
 
-#[derive(Default)]
-pub struct App {
-    pub ctx: Context,
+pub struct Panels {
+    pub list: Vec<Panel>,
+}
+
+pub struct Panel {
+    pub id: usize,
     pub current_path: PathBuf,
     pub scroll_signal: bool,
     pub entries: Entries,
     pub current_index: usize,
     pub selected: FxHashSet<usize>,
+}
+
+#[derive(Default)]
+pub struct App {
+    pub ctx: Context,
     pub clipboard: Clipboard,
     pub overlay: Overlay,
     pub field: Field,
     pub config: Config,
     pub toasts: Toasts, // mhm toasts :3
+    pub windows: Windows,
     pub panels: Panels,
     worker_channels_queue: Vec<WorkerChannels>,
     queued_chan_index: usize,
