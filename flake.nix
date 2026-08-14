@@ -28,7 +28,7 @@
               pkg-config
               clang
               clippy
-              rust-bin.beta.latest.default
+              rust-bin.stable.latest.complete
             ];
           in
           mkShell rec {
