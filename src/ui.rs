@@ -51,9 +51,16 @@ impl App {
         ) = (None, false, None, None, false);
 
         let mut req_toggle_window = None;
+        let mut req_clear_selected = false;
+        let mut req_disable_scroll_signal = false;
         //
 
         CentralPanel::default().show(main_ui, |ui| {
+            for row in &self.panels_manager.panels
+            {
+                for panel in row
+                {
+            
             ui.horizontal(|ui| {
                 let mut button =
                     ui.add(Button::new(RichText::new("<").size(14.0)).fill(Color32::TRANSPARENT));
@@ -63,11 +70,11 @@ impl App {
                     req_navigate_backward = true;
                 }
 
-                ui.label(format!("{}", self.current_path.display()));
+                ui.label(format!("{}", panel.current_path.display()));
             });
 
-            let mut content = self.field.buffer.clone();
-            let is_searching = if let Some(kind) = self.field.kind
+            let mut content = panel.field.buffer.clone();
+            let is_searching = if let Some(kind) = panel.field.kind
                 && kind == FieldKind::Search
             {
                 true
@@ -100,10 +107,10 @@ impl App {
             if is_searching && ui.input(|i| i.key_pressed(Key::Enter)) || input.lost_focus() {
                 req_unfocus_field = true;
             }
-            if is_searching && self.field.focused {
+            if is_searching && panel.field.focused {
                 input.request_focus();
             }
-            if is_searching && !self.field.focused {
+            if is_searching && !panel.field.focused {
                 input.surrender_focus();
             }
 
@@ -122,11 +129,11 @@ impl App {
                 });
             });
 
-            let current_index = &self.current_index;
+            let current_index = &panel.entries_manager.current_index;
             let mut from: Option<Arc<usize>> = None;
             let mut to = None;
 
-            let displaying = self.entries.displaying.clone();
+            let displaying = panel.entries_manager.displaying.clone();
 
             let bg_response = ui.interact(
                 ui.available_rect_before_wrap(),
@@ -140,7 +147,7 @@ impl App {
 
                 for (index, entry_index) in displaying.into_iter().enumerate() {
                     let is_current_index = index == *current_index;
-                    let entry_opt = self.entries.children.get(entry_index);
+                    let entry_opt = panel.entries_manager.entries.get(entry_index);
                     if entry_opt.is_none() || (!range.contains(&index) && !is_current_index) {
                         continue;
                     }
@@ -152,7 +159,7 @@ impl App {
                             .stroke(Stroke::new(1.0, Color32::TRANSPARENT))
                             .corner_radius(4.0);
 
-                        if self.selected.contains(&entry_index) {
+                        if panel.selected.contains(&entry_index) {
                             frame.fill = Color32::LIGHT_GREEN.gamma_multiply(0.3);
                         }
                         if is_current_index {
@@ -164,8 +171,8 @@ impl App {
                         if entry.is_hidden {
                             color = visuals.text_color().gamma_multiply(0.5);
                         }
-                        if self.clipboard.entries.contains(&entry.path) {
-                            icon = match self.clipboard.mode.as_ref().unwrap() {
+                        if self.clipboard_manager.entries.contains(&entry.path) {
+                            icon = match self.clipboard_manager.mode.as_ref().unwrap() {
                                 ClipboardMode::Copy => &IconKind::Copy,
                                 ClipboardMode::Cut => &IconKind::Scissors,
                             };
@@ -277,7 +284,7 @@ impl App {
                                     Image::new(match_icon(&IconKind::Files))
                                         .fit_to_exact_size(Vec2::new(14.0, 14.0)),
                                 );
-                                pop.label(format!("files [{}]", self.selected.len()));
+                                pop.label(format!("files [{}]", panel.selected.len()));
                             });
                         }
 
@@ -295,9 +302,10 @@ impl App {
                             }
                         }
 
-                        if is_current_index && self.scroll_signal {
+                        if is_current_index && panel.entries_manager.scroll_signal {
                             btn_interact.scroll_to_me(None);
-                            self.scroll_signal = false;
+                            //panel.entries_manager.scroll_signal = false;
+                            req_disable_scroll_signal = true;
                         }
 
                         btn_interact.context_menu(|ui| {
@@ -371,7 +379,8 @@ impl App {
                         && i.key_pressed(Key::ShiftRight)
                 }))
             {
-                self.clear_selected();
+                //self.clear_selected();
+                req_clear_selected = true;
             }
 
             bg_response.context_menu(|ui| {
@@ -403,7 +412,7 @@ impl App {
                 macro_rules! button {
                     ($name:ident, $text:literal, $callback:expr, $condition:expr $(, $kb:ident)?) => {
                         let mut $name = RichText::new($text);
-                        if self.selected.is_empty() {
+                        if panel.selected.is_empty() {
                             $name = $name.color(visuals.text_color().gamma_multiply(0.5));
                         }
                         let mut $name = Button::new($name)
@@ -422,7 +431,7 @@ impl App {
 
                 macro_rules! selected_btn {
                     ($name:ident, $text:literal, $callback:expr $(, $kb:ident)?) => {
-                        button!($name, $text, $callback, self.selected.is_empty()
+                        button!($name, $text, $callback, panel.selected.is_empty()
                         $(
                         , $kb
                         )?
@@ -432,7 +441,7 @@ impl App {
 
                 macro_rules! clipboard_btn {
                     ($name:ident, $text:literal, $callback:expr $(, $kb:ident)?) => {
-                        button!($name, $text, $callback, self.clipboard.entries.is_empty()
+                        button!($name, $text, $callback, self.clipboard_manager.entries.is_empty()
                         $(
                         , $kb
                         )?
@@ -476,6 +485,7 @@ impl App {
             {
                 req_transfer = Some(to);
             }
+        }}
         });
 
         // modals
@@ -518,7 +528,7 @@ impl App {
             let error = &overlay.error.clone();
 
             modal_widget.show(&ctx, |ui| {
-                ui.label(format!("creating file at {}", self.current_path.display()));
+                ui.label(format!("creating file at {}", self.panels_manager.current_panel().current_path.display()));
                 let input = ui.add(TextEdit::singleline(&mut content));
                 ui.add(Label::new(RichText::new(error).color(Color32::LIGHT_RED)));
 
@@ -548,7 +558,7 @@ impl App {
             modal_widget.show(&ctx, |ui| {
                 ui.label(format!(
                     "creating folder at {}",
-                    self.current_path.display()
+                    self.panels_manager.current_panel().current_path.display()
                 ));
                 let input = ui.add(TextEdit::singleline(&mut content));
                 ui.add(Label::new(RichText::new(error).color(Color32::LIGHT_RED)));
@@ -618,10 +628,10 @@ impl App {
         {
             let keybinds = &self.config.keybinds;
             let modal_widget = Modal::new(Id::new("delete_modal"));
-            let paths = self
-                .selected
+            let current_panel = self.panels_manager.current_panel();
+            let paths = current_panel.selected
                 .iter()
-                .map(|entry_index| self.entries.children[*entry_index].path.as_ref());
+                .map(|entry_index| current_panel.entries_manager.entries[*entry_index].path.as_ref());
 
             modal_widget.show(&ctx, |w| {
                 w.label("are you sure you wanna delete these?");
@@ -723,7 +733,7 @@ impl App {
             self.new_overlay(kind, None);
         }
         if req_reset_clipboard {
-            self.clipboard.reset();
+            self.clipboard_manager.reset();
         }
         if req_reset_selected {
             self.clear_selected();
@@ -758,17 +768,17 @@ impl App {
             self.nav_forward();
         }
         if req_unfocus_field {
-            self.field.unfocus();
+            self.unfocus_field();
         }
         if let Some(kind) = req_open_field {
-            self.new_field(kind);
+            self.new_field(&kind);
         }
         if req_close_field {
-            self.field.reset();
-            self.filter_and_sort();
-        }
+            self.close_field();
+                    }
+
         if let Some(content) = req_update_field_buffer {
-            self.field.buffer(content);
+            self.buffer_field(content);
         }
         if let Some(kind) = req_logic_field {
             self.logic_field(&kind);
@@ -777,14 +787,21 @@ impl App {
             self.transfer(to);
         }
         if let Some(kind) = req_toggle_window {
-            self.windows.toggle(kind);
+            self.windows_manager.toggle(kind);
+        }
+        if req_disable_scroll_signal {
+            self.disable_scroll_signal();
+        }
+        if req_clear_selected {
+            self.clear_selected();
         }
 
         let mut pending_close_window = None;
-        if self.windows.clipboard.is_some() {
+
+        if self.windows_manager.clipboard.is_some() {
             let mut window_state = true;
 
-            let clipboard = &self.clipboard;
+            let clipboard = &self.clipboard_manager;
             let window = Window::new("clipboard")
                 .open(&mut window_state)
                 .enabled(true)
@@ -815,10 +832,10 @@ impl App {
         }
 
         if let Some(kind) = pending_close_window {
-            self.windows.close(kind);
+            self.windows_manager.close(kind);
         }
 
-        let toast_list = self.toasts.toasts.read();
+        let toast_list = self.toasts_manager.toasts.read();
         if !toast_list.is_empty() {
             let toast_overlay = Window::new("toast")
                 .title_bar(false)

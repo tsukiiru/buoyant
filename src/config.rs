@@ -32,6 +32,12 @@ impl Default for Config {
     }
 }
 
+impl Config {
+    pub fn should_fetch(&self, property: Property) -> bool {
+        self.view.explorer.contains(&property) || self.sorting.sorting_by == property
+    }
+}
+
 #[derive(Clone, Copy, Debug)]
 pub enum KeybindAction {
     NavigateUp,
