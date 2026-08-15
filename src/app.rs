@@ -384,6 +384,12 @@ pub struct Position {
     c: usize,
 }
 
+impl Display for Position {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "({}, {})", self.r, self.c)
+    }
+}
+
 #[allow(dead_code)]
 pub enum AppendDirection {
     Up,
@@ -427,12 +433,14 @@ impl PanelsManager {
     fn new_panel(&mut self, dir: AppendDirection, path: &Path) {
         let mut new_pos = self.focused;
 
-        match dir {
-            AppendDirection::Up => new_pos.r = (new_pos.r as i16 - 1).min(0) as usize,
-            AppendDirection::Down => new_pos.r += 1,
-            AppendDirection::Left => new_pos.c = (new_pos.c as i16 - 1).min(0) as usize,
-            AppendDirection::Right => new_pos.c += 1,
-        };
+        if self.panel(self.focused).is_some() {
+            match dir {
+                AppendDirection::Up => new_pos.r = (new_pos.r as i16 - 1).min(0) as usize,
+                AppendDirection::Down => new_pos.r += 1,
+                AppendDirection::Left => new_pos.c = (new_pos.c as i16 - 1).min(0) as usize,
+                AppendDirection::Right => new_pos.c += 1,
+            };
+        }
 
         let panel = Panel::new(path);
 
@@ -488,6 +496,7 @@ impl App {
         app.panels_manager
             .new_panel(AppendDirection::Right, &env::home_dir().unwrap());
 
+        app.fetch_entries();
         app
     }
 
@@ -500,12 +509,14 @@ impl App {
 
     fn fetch_config(&mut self) {
         config::fetch(&mut self.config);
+
         self.ctx.set_theme(if self.config.view.dark_mode {
             Theme::Dark
         } else {
             Theme::Light
         });
-        self.fetch_entries();
+
+        //self.fetch_entries();
     }
 
     pub fn transfer(&mut self, to: usize) {
@@ -898,7 +909,10 @@ impl App {
             KeybindAction::CreateFolder => self.new_overlay(OverlayKind::CreateFolder, None),
             KeybindAction::Info => self.new_overlay(OverlayKind::Metadata, None),
             KeybindAction::Search => self.new_field(&FieldKind::Search),
-            KeybindAction::Refresh => self.fetch_config(),
+            KeybindAction::Refresh => {
+                self.fetch_config();
+                self.fetch_entries();
+            }
             _ => {}
         }
     }
