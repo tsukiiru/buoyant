@@ -1,0 +1,11 @@
+edition = "2024"
+condense_wildcard_suffixes = true
+fn_single_line = true
+format_macro_matchers = true
+format_macro_bodies = true
+float_literal_trailing_zero = "IfNoPostfix"
+imports_granularity = "Crate"
+reorder_impl_items = true
+group_imports = "StdExternalCrate"
+style_edition = "2024"
+tab_spaces = 2

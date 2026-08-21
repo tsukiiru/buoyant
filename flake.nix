@@ -1,25 +1,33 @@
 {
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
-    rust-overlay.url = "github:oxalica/rust-overlay";
+    fenix = {
+      url = "github:nix-community/fenix";
+      inputs.nixpkgs.follows = "nixpkgs";
+    };
   };
 
   outputs =
-    { nixpkgs, rust-overlay, ... }:
+    {
+      self,
+      nixpkgs,
+      fenix,
+      ...
+    }:
     let
       system = "x86_64-linux";
+      packages.${system}.default = fenix.packages.${system}.minimal.toolchain;
       pkgs = import nixpkgs {
         inherit system;
-        overlays = [ (import rust-overlay) ];
+        overlays = [ fenix.overlays.default ];
       };
-      rustToolchain = pkgs.rust-bin.stable.latest.default.override {
-        extensions = [
-          "rust-src"
-          "rust-analyzer"
-          "clippy"
-          "rustfmt"
-        ];
-      };
+      rustToolchain = pkgs.fenix.complete.withComponents [
+        "cargo"
+        "clippy"
+        "rustfmt"
+        "rustc"
+        "rust-src"
+      ];
     in
     {
       devShells.${system}.default =
@@ -29,6 +37,7 @@
             pkg-config
             clang
             rustToolchain
+            rust-analyzer-nightly
           ];
         in
         mkShell rec {
