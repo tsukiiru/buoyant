@@ -453,12 +453,96 @@ impl PanelsManager {
 
     if let Some(row) = self.panels.get_mut(new_pos.r) {
       row.insert(new_pos.c, panel);
-      self.width_proportion[new_pos.r].insert(new_pos.c, 1.0);
+
+      let focused_panel_width = &self.width_proportion[new_pos.r][self.focused.c];
+      let new_width = focused_panel_width / 2.0;
+
+      let row_width_proportion = self.width_proportion.get_mut(new_pos.r).unwrap();
+      row_width_proportion.insert(new_pos.c, new_width);
+      row_width_proportion[self.focused.c] = new_width;
     } else {
       // create a new row
       self.panels.insert(new_pos.r, vec![panel]);
-      self.height_proportion.insert(new_pos.r, 1.0);
+
+      let focused_row_height = &self.height_proportion[new_pos.r];
+      let new_height = focused_row_height / 2.0;
+
+      self.height_proportion.insert(new_pos.r, new_height);
+      self.height_proportion[self.focused.r] = new_height;
     }
+  }
+
+  fn adjacent_cols(&self) -> Vec<usize> {
+    let current_pos = &self.focused;
+    let mut adj_cols = Vec::with_capacity(2);
+
+    if self.panels[current_pos.r].len() > 1 {
+      // not the only one in the row
+      if current_pos.c == 0 {
+        // at the start (adj is the right one)
+        adj_cols.push(current_pos.c + 1);
+      } else if current_pos.c + 1 == self.panels[current_pos.r].len() {
+        // at the end (adj is the left one)
+        adj_cols.push(current_pos.c - 1);
+      } else {
+        // inbetween two panels
+        adj_cols.push(current_pos.c + 1);
+        adj_cols.push(current_pos.c - 1);
+      }
+    }
+
+    adj_cols
+  }
+
+  fn adjacent_rows(&self) -> Vec<usize> {
+    let current_pos = &self.focused;
+    let mut adj_rows = Vec::with_capacity(2);
+
+    if self.panels.len() > 1 {
+      if current_pos.r == 0 {
+        adj_rows.push(current_pos.r + 1);
+      } else if current_pos.r + 1 == self.panels.len() {
+        adj_rows.push(current_pos.r - 1);
+      } else {
+        adj_rows.push(current_pos.r + 1);
+        adj_rows.push(current_pos.r - 1);
+      }
+    }
+
+    adj_rows
+  }
+
+  fn close_panel(&mut self) {
+    let current_pos = &self.focused;
+    let current_width = self.width_proportion[current_pos.r][current_pos.c];
+    let current_height = self.height_proportion[current_pos.r];
+
+    let adj_cols = self.adjacent_cols();
+    let adj_rows = self.adjacent_rows();
+
+    let current_row = self.width_proportion.get_mut(current_pos.r).unwrap();
+
+    match adj_cols.len() {
+      0 => {
+        match adj_rows.len() {
+          0 => {
+            // close program smh
+          }
+          1 => *self.height_proportion.get_mut(adj_rows[0]).unwrap() = current_height * 2.0,
+          2 => adj_rows
+            .iter()
+            .for_each(|i| *self.height_proportion.get_mut(*i).unwrap() = current_height * 1.5),
+          _ => {}
+        };
+
+        self.height_proportion.remove(current_pos.r);
+      }
+      1 => *current_row.get_mut(adj_cols[0]).unwrap() = current_width * 2.0,
+      2 => adj_cols
+        .iter()
+        .for_each(|i| *current_row.get_mut(*i).unwrap() = current_width * 1.5),
+      _ => {}
+    };
   }
 }
 
