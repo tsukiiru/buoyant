@@ -1,283 +1,283 @@
 use std::{
-  fs,
-  path::{Path, PathBuf},
-  process::Command,
-  sync::mpsc,
+    fs,
+    path::{Path, PathBuf},
+    process::Command,
+    sync::mpsc,
 };
 
 use rustc_hash::FxHashSet;
 
-use crate::file::{CreateType, PasteKind, WorkerRequest, info};
+use crate::file::{CreateKind, PasteKind, WorkerRequest, info};
 
 pub const BANNED_CHARACTERS: [&str; 4] = ["\0", "\"", "/", "*"];
 
 pub fn rename(path: &Path, name: &str) -> Result<PathBuf, String> {
-  let mut new_path = path.to_path_buf();
-  new_path.set_file_name(name);
+    let mut new_path = path.to_path_buf();
+    new_path.set_file_name(name);
 
-  let command = Command::new("mv").arg(path).arg(&new_path).output();
+    let command = Command::new("mv").arg(path).arg(&new_path).output();
 
-  if let Err(err) = command {
-    return Err(err.to_string());
-  }
+    if let Err(err) = command {
+        return Err(err.to_string());
+    }
 
-  Ok(new_path)
+    Ok(new_path)
 }
 
 pub fn delete<'a, I>(paths: I) -> Result<(), String>
 where
-  I: Iterator<Item = &'a Path>,
+    I: Iterator<Item = &'a Path>,
 {
-  let mut return_error = None;
+    let mut return_error = None;
 
-  paths.for_each(|path| {
-    if !path.exists() {
-      return_error = Some(String::from("provided path doesn't exist?"));
+    paths.for_each(|path| {
+        if !path.exists() {
+            return_error = Some(String::from("provided path doesn't exist?"));
+        }
+
+        let command = Command::new("rm").arg("-rf").arg(path).output();
+
+        if let Err(e) = command {
+            return_error = Some(e.to_string());
+        }
+    });
+
+    if let Some(err) = return_error {
+        return Err(err);
     }
 
-    let command = Command::new("rm").arg("-rf").arg(path).output();
-
-    if let Err(e) = command {
-      return_error = Some(e.to_string());
-    }
-  });
-
-  if let Some(err) = return_error {
-    return Err(err);
-  }
-
-  Ok(())
+    Ok(())
 }
 
 pub fn create(
-  current_path: &Path,
-  new_path: &Path,
-  create_type: &CreateType,
+    current_path: &Path,
+    new_path: &Path,
+    create_type: &CreateKind,
 ) -> Result<PathBuf, String> {
-  let layers = new_path.components();
+    let layers = new_path.components();
 
-  if layers.clone().count() == 0 {
-    return Err(String::from("maybe dont leave the input box blank?"));
-  }
-
-  let mut clean_path = current_path.to_path_buf();
-
-  for layer in layers {
-    let name = layer.as_os_str().to_str().unwrap();
-    for c in BANNED_CHARACTERS {
-      if name.contains(c) {
-        return Err(String::from("invalid characters"));
-      }
+    if layers.clone().count() == 0 {
+        return Err(String::from("maybe dont leave the input box blank?"));
     }
-    clean_path.push(layer);
-  }
 
-  let mut path_without_last = clean_path.clone();
-  path_without_last.pop();
+    let mut clean_path = current_path.to_path_buf();
 
-  let try_create = fs::create_dir_all(path_without_last);
-  if let Err(err) = try_create {
-    return Err(err.to_string());
-  }
-
-  if *create_type == CreateType::File {
-    let command = Command::new("touch").arg(&clean_path).output();
-    if let Err(err) = command {
-      return Err(err.to_string());
+    for layer in layers {
+        let name = layer.as_os_str().to_str().unwrap();
+        for c in BANNED_CHARACTERS {
+            if name.contains(c) {
+                return Err(String::from("invalid characters"));
+            }
+        }
+        clean_path.push(layer);
     }
-  } else {
-    let try_create = fs::create_dir(&clean_path);
+
+    let mut path_without_last = clean_path.clone();
+    path_without_last.pop();
+
+    let try_create = fs::create_dir_all(path_without_last);
     if let Err(err) = try_create {
-      return Err(err.to_string());
+        return Err(err.to_string());
     }
-  }
 
-  Ok(clean_path)
+    if *create_type == CreateKind::File {
+        let command = Command::new("touch").arg(&clean_path).output();
+        if let Err(err) = command {
+            return Err(err.to_string());
+        }
+    } else {
+        let try_create = fs::create_dir(&clean_path);
+        if let Err(err) = try_create {
+            return Err(err.to_string());
+        }
+    }
+
+    Ok(clean_path)
 }
 
 fn paste<'a>(
-  dest: &Path,
-  prevs: &mut Vec<&'a str>,
-  path: &'a Path,
-  is_cut: bool, // true - cut. false - copy
-  from_worker: &mpsc::Sender<WorkerRequest>,
-  to_worker: &mpsc::Receiver<PasteKind>,
+    dest: &Path,
+    prevs: &mut Vec<&'a str>,
+    path: &'a Path,
+    is_cut: bool, // true - cut. false - copy
+    from_worker: &mpsc::Sender<WorkerRequest>,
+    to_worker: &mpsc::Receiver<PasteKind>,
 ) -> Option<PathBuf> {
-  let name = path.file_name().unwrap().to_str().unwrap();
-  let mut final_path = dest.to_path_buf();
-  prevs.iter().for_each(|prev| final_path.push(prev));
+    let name = path.file_name().unwrap().to_str().unwrap();
+    let mut final_path = dest.to_path_buf();
+    prevs.iter().for_each(|prev| final_path.push(prev));
 
-  let joined = &final_path.join(name);
-  // check if not exists in the destination
-  if !joined.exists() {
-    move_file(path, joined, is_cut);
-    return Some(joined.clone());
-  }
-
-  let _ = from_worker.send(WorkerRequest::OperationType {
-    path: joined.to_path_buf(),
-  });
-
-  let paste_kind = to_worker.recv();
-  if paste_kind.is_err() {
-    return None;
-  }
-  match paste_kind.unwrap() {
-    PasteKind::Duplicate => {
-      let result = info::file_extension(path);
-      let ext = if result.is_empty() {
-        String::new()
-      } else {
-        format!(".{}", result)
-      };
-      // since both file/folder has the same outcome for choosing duplicate
-      let new_path = increment_suffix(
-        &info::file_name_without_extension(path),
-        ext.as_str(),
-        &final_path,
-      );
-      move_file(path, &new_path, is_cut);
-      Some(new_path)
-    }
-    PasteKind::Replace => {
-      if path == joined {
+    let joined = &final_path.join(name);
+    // check if not exists in the destination
+    if !joined.exists() {
+        move_file(path, joined, is_cut);
         return Some(joined.clone());
-        // does nothing if trying to merge with the same destination as start
-      }
-
-      if !final_path.is_file() {
-        replace_file(path, joined, is_cut);
-        Some(joined.clone())
-      } else {
-        prevs.push(name);
-        paste(dest, prevs, path, is_cut, from_worker, to_worker)
-      }
     }
-  }
+
+    let _ = from_worker.send(WorkerRequest::OperationKind {
+        path: joined.to_path_buf(),
+    });
+
+    let paste_kind = to_worker.recv();
+    if paste_kind.is_err() {
+        return None;
+    }
+    match paste_kind.unwrap() {
+        PasteKind::Duplicate => {
+            let result = info::file_extension(path);
+            let ext = if result.is_empty() {
+                String::new()
+            } else {
+                format!(".{}", result)
+            };
+            // since both file/folder has the same outcome for choosing duplicate
+            let new_path = increment_suffix(
+                &info::file_name_without_extension(path),
+                ext.as_str(),
+                &final_path,
+            );
+            move_file(path, &new_path, is_cut);
+            Some(new_path)
+        }
+        PasteKind::Replace => {
+            if path == joined {
+                return Some(joined.clone());
+                // does nothing if trying to merge with the same destination as start
+            }
+
+            if !final_path.is_file() {
+                replace_file(path, joined, is_cut);
+                Some(joined.clone())
+            } else {
+                prevs.push(name);
+                paste(dest, prevs, path, is_cut, from_worker, to_worker)
+            }
+        }
+    }
 }
 
 pub fn move_dir(
-  old_files: FxHashSet<PathBuf>,
-  dest: PathBuf,
-  from_worker: &mpsc::Sender<WorkerRequest>,
-  to_worker: &mpsc::Receiver<PasteKind>,
+    old_files: FxHashSet<PathBuf>,
+    dest: PathBuf,
+    from_worker: &mpsc::Sender<WorkerRequest>,
+    to_worker: &mpsc::Receiver<PasteKind>,
 ) {
-  if !dest.exists() || !dest.is_dir() {
-    let _ = from_worker.send(WorkerRequest::Done { paths: Vec::new() });
-    return;
-  }
-
-  let mut resulte = Vec::with_capacity(old_files.len());
-
-  let total = old_files.len();
-  let mut remaining = total;
-
-  for path in old_files {
-    let _ = from_worker.send(WorkerRequest::Update {
-      percent: (remaining / total) as f32,
-    });
-
-    let mut clean_path = path.clone();
-    clean_path.pop();
-
-    if clean_path != dest
-      && let Some(p) = paste(
-        &dest,
-        &mut Vec::with_capacity(5),
-        &path,
-        true,
-        from_worker,
-        to_worker,
-      )
-    {
-      resulte.push(p);
-      continue;
+    if !dest.exists() || !dest.is_dir() {
+        let _ = from_worker.send(WorkerRequest::Done { paths: Vec::new() });
+        return;
     }
 
-    remaining -= 1;
-  }
+    let mut resulte = Vec::with_capacity(old_files.len());
 
-  let _ = from_worker.send(WorkerRequest::Done { paths: resulte });
+    let total = old_files.len();
+    let mut remaining = total;
+
+    for path in old_files {
+        let _ = from_worker.send(WorkerRequest::Update {
+            percent: (remaining / total) as f32,
+        });
+
+        let mut clean_path = path.clone();
+        clean_path.pop();
+
+        if clean_path != dest
+            && let Some(p) = paste(
+                &dest,
+                &mut Vec::with_capacity(5),
+                &path,
+                true,
+                from_worker,
+                to_worker,
+            )
+        {
+            resulte.push(p);
+            continue;
+        }
+
+        remaining -= 1;
+    }
+
+    let _ = from_worker.send(WorkerRequest::Done { paths: resulte });
 }
 
 pub fn copy_dir(
-  old_files: FxHashSet<PathBuf>,
-  dest: PathBuf,
-  from_worker: &mpsc::Sender<WorkerRequest>,
-  to_worker: &mpsc::Receiver<PasteKind>,
+    old_files: FxHashSet<PathBuf>,
+    dest: PathBuf,
+    from_worker: &mpsc::Sender<WorkerRequest>,
+    to_worker: &mpsc::Receiver<PasteKind>,
 ) {
-  if !dest.exists() || !dest.is_dir() {
-    let _ = from_worker.send(WorkerRequest::Done { paths: Vec::new() });
-    return;
-  }
-
-  let mut resulte = Vec::with_capacity(old_files.len());
-
-  for path in old_files {
-    if let Some(p) = paste(
-      &dest,
-      &mut Vec::with_capacity(5),
-      &path,
-      false,
-      from_worker,
-      to_worker,
-    ) {
-      resulte.push(p);
-      continue;
+    if !dest.exists() || !dest.is_dir() {
+        let _ = from_worker.send(WorkerRequest::Done { paths: Vec::new() });
+        return;
     }
-  }
 
-  let _ = from_worker.send(WorkerRequest::Done { paths: resulte });
+    let mut resulte = Vec::with_capacity(old_files.len());
+
+    for path in old_files {
+        if let Some(p) = paste(
+            &dest,
+            &mut Vec::with_capacity(5),
+            &path,
+            false,
+            from_worker,
+            to_worker,
+        ) {
+            resulte.push(p);
+            continue;
+        }
+    }
+
+    let _ = from_worker.send(WorkerRequest::Done { paths: resulte });
 }
 
 fn move_file(old_path: &Path, new_path: &Path, is_cut: bool) {
-  let command = if is_cut {
-    Command::new("mv").arg(old_path).arg(new_path).output()
-  } else {
-    Command::new("cp")
-      .arg(old_path)
-      .arg(new_path)
-      .arg("-r")
-      .output()
-  };
+    let command = if is_cut {
+        Command::new("mv").arg(old_path).arg(new_path).output()
+    } else {
+        Command::new("cp")
+            .arg(old_path)
+            .arg(new_path)
+            .arg("-r")
+            .output()
+    };
 
-  if let Err(e) = command {
-    println!("{}", e);
-  }
+    if let Err(e) = command {
+        println!("{}", e);
+    }
 }
 
 fn replace_file(old_path: &Path, new_path: &Path, is_cut: bool) {
-  let program = if is_cut { "mv" } else { "cp" };
+    let program = if is_cut { "mv" } else { "cp" };
 
-  Command::new("rm")
-    .arg("-rf")
-    .arg(new_path)
-    .output()
-    .unwrap();
-  // remove before copying / moving
+    Command::new("rm")
+        .arg("-rf")
+        .arg(new_path)
+        .output()
+        .unwrap();
+    // remove before copying / moving
 
-  let cmd = Command::new(program).arg(old_path).arg(new_path).output();
+    let cmd = Command::new(program).arg(old_path).arg(new_path).output();
 
-  if let Err(e) = cmd {
-    println!("{}", e);
-  }
+    if let Err(e) = cmd {
+        println!("{}", e);
+    }
 }
 
 // for checking if theres existing files at destination,
 // if there is, increment the ending by one, [FILE_NAME] (number)
 fn increment_suffix(file_name: &str, file_extension: &str, destination: &Path) -> PathBuf {
-  for k in 0usize.. {
-    let name = if k == 0 {
-      format!("{}{}", file_name, file_extension)
-    } else {
-      format!("{} ({}){}", file_name, k, file_extension)
-    };
+    for k in 0usize.. {
+        let name = if k == 0 {
+            format!("{}{}", file_name, file_extension)
+        } else {
+            format!("{} ({}){}", file_name, k, file_extension)
+        };
 
-    let path = destination.join(&name);
-    if !path.exists() {
-      return path;
+        let path = destination.join(&name);
+        if !path.exists() {
+            return path;
+        }
     }
-  }
 
-  unreachable!("infinite iterator exhausted")
+    unreachable!("infinite iterator exhausted")
 }
