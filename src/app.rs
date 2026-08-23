@@ -1,6 +1,6 @@
 use std::{
     borrow::Cow,
-    env,
+    env::{self, home_dir},
     fmt::Display,
     fs,
     path::{Path, PathBuf},
@@ -48,7 +48,7 @@ pub enum OverlayKind {
     Metadata,
 }
 
-#[derive(Default)]
+#[derive(Debug, Default)]
 pub struct Field {
     pub buffer: String,
     pub kind: Option<FieldKind>,
@@ -392,12 +392,13 @@ impl Display for Position {
     }
 }
 
-#[allow(dead_code)]
+#[derive(PartialEq)]
 pub enum AppendDirection {
     Up,
     Down,
     Left,
     Right,
+    None,
 }
 
 pub struct PanelsManager {
@@ -412,9 +413,9 @@ impl Default for PanelsManager {
     fn default() -> Self {
         PanelsManager {
             focused: Position::default(),
-            panels: Vec::with_capacity(1),
-            width_proportion: vec![vec![1.0]],
-            height_proportion: vec![1.0],
+            panels: Vec::new(),
+            width_proportion: Vec::new(),
+            height_proportion: Vec::new(),
         }
     }
 }
@@ -445,16 +446,25 @@ impl PanelsManager {
 
         if self.panel(self.focused).is_some() {
             match dir {
-                AppendDirection::Up => new_pos.r = (new_pos.r as i16 - 1).min(0) as usize,
+                AppendDirection::Up => new_pos.r = (new_pos.r as i16 - 1).max(0) as usize,
                 AppendDirection::Down => new_pos.r += 1,
-                AppendDirection::Left => new_pos.c = (new_pos.c as i16 - 1).min(0) as usize,
+                AppendDirection::Left => new_pos.c = (new_pos.c as i16 - 1).max(0) as usize,
                 AppendDirection::Right => new_pos.c += 1,
+                AppendDirection::None => {}
             };
         }
 
+        let path = if !path.exists() {
+            &home_dir().unwrap()
+        } else {
+            path
+        };
+
         let panel = Panel::new(path);
 
-        if let Some(row) = self.panels.get_mut(new_pos.r) {
+        if let Some(row) = self.panels.get_mut(new_pos.r)
+            && (dir == AppendDirection::Left || dir == AppendDirection::Right)
+        {
             row.insert(new_pos.c, panel);
 
             let focused_panel_width = &self.width_proportion[new_pos.r][self.focused.c];
@@ -464,15 +474,23 @@ impl PanelsManager {
             row_width_proportion.insert(new_pos.c, new_width);
             row_width_proportion[self.focused.c] = new_width;
         } else {
+            new_pos.c = 0;
             // create a new row
             self.panels.insert(new_pos.r, vec![panel]);
 
-            let focused_row_height = &self.height_proportion[new_pos.r];
-            let new_height = focused_row_height / 2.0;
+            let new_height = self
+                .height_proportion
+                .get(new_pos.r)
+                .map(|h| h / 2.0)
+                .unwrap_or(1.0);
 
             self.height_proportion.insert(new_pos.r, new_height);
             self.height_proportion[self.focused.r] = new_height;
+
+            self.width_proportion.insert(new_pos.r, vec![1.0]);
         }
+
+        self.focused = new_pos;
     }
 
     fn adjacent_cols(&self) -> Vec<usize> {
@@ -551,6 +569,7 @@ impl PanelsManager {
     }
 }
 
+#[derive(Debug)]
 pub struct Panel {
     pub current_path: PathBuf,
     pub entries_manager: EntriesManager,
@@ -672,7 +691,7 @@ impl App {
         };
         app.fetch_config();
         app.panels_manager
-            .new_panel(AppendDirection::Right, &env::home_dir().unwrap());
+            .new_panel(AppendDirection::None, &env::home_dir().unwrap());
 
         app.fetch_entries();
         app
@@ -858,6 +877,7 @@ impl App {
                 .collect()
         };
 
+        self.config.view.view_hidden_files = !self.config.view.view_hidden_files;
         self.filter_and_sort();
 
         {
@@ -1087,6 +1107,16 @@ impl App {
             KeybindAction::Search => self.new_field(&FieldKind::Search),
             KeybindAction::Refresh => {
                 self.fetch_config();
+                self.fetch_entries();
+            }
+            KeybindAction::SplitVertical => {
+                self.panels_manager
+                    .new_panel(AppendDirection::Right, &PathBuf::new());
+                self.fetch_entries();
+            }
+            KeybindAction::SplitHorizontal => {
+                self.panels_manager
+                    .new_panel(AppendDirection::Up, &PathBuf::new());
                 self.fetch_entries();
             }
             _ => {}

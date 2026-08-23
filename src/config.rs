@@ -23,7 +23,7 @@ impl Default for Config {
     fn default() -> Self {
         Config {
             keybinds: Keybinds::default(),
-            keybinds_list: Vec::with_capacity(27),
+            keybinds_list: Vec::with_capacity(29),
             // NOTE: update allocation size matching the number of keybinds
             sorting: Sorting::default(),
             view: View::default(),
@@ -58,6 +58,8 @@ pub enum KeybindAction {
     Info,
     Search,
     Choice(usize),
+    SplitVertical,
+    SplitHorizontal,
 }
 
 macro_rules! create_keybinds {
@@ -105,6 +107,7 @@ pub const CTRL: Modifiers = Modifiers::CTRL;
 const SHIFT: Modifiers = Modifiers::SHIFT;
 const ALT: Modifiers = Modifiers::ALT;
 const CTRL_SHIFT: Modifiers = CTRL.plus(SHIFT);
+const CTRL_ALT: Modifiers = CTRL.plus(ALT);
 
 impl Default for Keybinds {
     fn default() -> Self {
@@ -486,6 +489,15 @@ fn listing_keybinds(keybinds: &Keybinds, list: &mut Vec<Keybind>) {
     list.push((KeybindAction::Choice(7), keybinds.choice_7));
     list.push((KeybindAction::Choice(8), keybinds.choice_8));
     list.push((KeybindAction::Choice(9), keybinds.choice_9));
+
+    list.push((
+        KeybindAction::SplitVertical,
+        KeyboardShortcut::new(CTRL_ALT, Key::V),
+    ));
+    list.push((
+        KeybindAction::SplitHorizontal,
+        KeyboardShortcut::new(CTRL_ALT, Key::H),
+    ));
 
     list.par_sort_by(|a, b| {
         let (x, y) = (count_mod(&a.1.modifiers), count_mod(&b.1.modifiers));
