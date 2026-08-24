@@ -6,7 +6,8 @@ use chrono::{DateTime, Datelike, Utc};
 use eframe::egui::{
     Align, Align2, AtomLayout, Button, CentralPanel, Color32, CornerRadius, Frame, Grid, Id, Image,
     Key, Label, LayerId, Layout, Margin, Modal, Order, Popup, PopupAnchor, ProgressBar, RectAlign,
-    RichText, ScrollArea, Sense, Stroke, TextEdit, TextWrapMode, UiBuilder, Vec2, Window,
+    RichText, ScrollArea, Sense, Stroke, StrokeKind, TextEdit, TextWrapMode, UiBuilder, Vec2,
+    Window,
 };
 use egui_extras::{Size, StripBuilder};
 
@@ -45,6 +46,8 @@ impl App {
                         builder.horizontal(|mut strip| {
                             for (ci, panel) in row.iter().enumerate() {
                                 strip.cell(|ui| {
+                                    let panel_rect = ui.available_rect_before_wrap();
+
                                     // address bar
                                     ui.horizontal(|ui| {
                                         let mut button = ui.add(
@@ -489,7 +492,6 @@ impl App {
                                         m.separator();
                                         m.label("clipboard");
 
-                                        /*
                                         macro_rules! button {
                                             ($name:ident, $text:literal, $callback:expr, $condition:expr $(, $kb:ident)?) => {
                                                 let mut $name = RichText::new($text);
@@ -577,7 +579,6 @@ impl App {
                                                 .push(Message::ClipboardReset),
                                             clear_clipboard
                                         );
-                                        */
 
                                         m.separator();
                                         m.label("windows");
@@ -587,6 +588,11 @@ impl App {
                                                 .push(Message::WindowToggle(WindowKind::Clipboard));
                                         }
                                     });
+
+
+                                    if self.panels_manager.focused.r != ri || self.panels_manager.focused.c != ci {
+                                        ui.painter().rect_filled(panel_rect, CornerRadius::same(0), visuals.panel_fill.gamma_multiply(0.7));
+                                    }
                                 });
                             }
                         });

@@ -382,8 +382,8 @@ pub struct ChannelsManager {
 
 #[derive(Default, Clone, Copy)]
 pub struct Position {
-    r: usize,
-    c: usize,
+    pub r: usize,
+    pub c: usize,
 }
 
 impl Display for Position {
