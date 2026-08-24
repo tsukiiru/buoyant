@@ -6,7 +6,7 @@ use chrono::{DateTime, Datelike, Utc};
 use eframe::egui::{
     Align, Align2, AtomLayout, Button, CentralPanel, Color32, CornerRadius, Frame, Grid, Id, Image,
     Key, Label, LayerId, Layout, Margin, Modal, Order, Popup, PopupAnchor, ProgressBar, RectAlign,
-    RichText, ScrollArea, Sense, Stroke, TextEdit, TextWrapMode, Vec2, Window,
+    RichText, ScrollArea, Sense, Stroke, TextEdit, TextWrapMode, UiBuilder, Vec2, Window,
 };
 use egui_extras::{Size, StripBuilder};
 
@@ -47,16 +47,13 @@ impl App {
                                 strip.cell(|ui| {
                                     // address bar
                                     ui.horizontal(|ui| {
-                                        let button = ui.push_id(Id::new(("back", ri, ci)), |m| {
-                                            let mut button = m.add(
-                                                Button::new(RichText::new("<").size(14.0))
-                                                    .fill(Color32::TRANSPARENT),
-                                            );
-                                            button.set_intrinsic_size(Vec2::new(400.0, 20.0));
-                                            button
-                                        });
+                                        let mut button = ui.add(
+                                            Button::new(RichText::new("<").size(14.0))
+                                                .fill(Color32::TRANSPARENT),
+                                        );
+                                        button.set_intrinsic_size(Vec2::new(400.0, 20.0));
 
-                                        if button.inner.clicked() {
+                                        if button.clicked() {
                                             messages.push(Message::NavigateBackward);
                                         }
 
@@ -131,14 +128,18 @@ impl App {
 
                                     let displaying = panel.entries_manager.displaying.clone();
 
+                                    let bg_rect = ui.allocate_space(ui.available_size()).1;
                                     let bg_response = ui.interact(
-                                        ui.available_rect_before_wrap(),
+                                        bg_rect,
                                         Id::new(("explorer-area", ri, ci)),
                                         Sense::click(),
                                     );
 
+                                    let mut child_ui =
+                                        ui.new_child(UiBuilder::new().max_rect(bg_rect));
+
                                     ScrollArea::vertical().show_rows(
-                                        ui,
+                                        &mut child_ui,
                                         32.0,
                                         displaying.len(),
                                         |sa, range| {
@@ -355,104 +356,59 @@ impl App {
 
                                                     btn_interact.context_menu(|m| {
                                                         m.label(entry.name.clone());
-                                                        if m.push_id(
-                                                            Id::new(("btnrename", ri, ci)),
-                                                            |m| {
-                                                                m.add(
-                                                                    Button::new("rename")
-                                                                        .shortcut_text(
-                                                                            ctx.format_shortcut(
-                                                                                &keybinds
-                                                                                    .rename_file,
-                                                                            ),
-                                                                        ),
-                                                                )
-                                                            },
+                                                        if m.add(
+                                                            Button::new("rename").shortcut_text(
+                                                                ctx.format_shortcut(
+                                                                    &keybinds.rename_file,
+                                                                ),
+                                                            ),
                                                         )
-                                                        .inner
                                                         .clicked()
                                                         {
                                                             messages.push(Message::Overlay(
                                                                 OverlayKind::Rename,
                                                             ));
                                                         }
-                                                        if m.push_id(
-                                                            Id::new(("btndelete", ri, ci)),
-                                                            |m| {
-                                                                m.add(
-                                                                    Button::new("delete")
-                                                                        .shortcut_text(
-                                                                        ctx.format_shortcut(
-                                                                            &keybinds
-                                                                                .delete_selections,
-                                                                        ),
-                                                                    ),
-                                                                )
-                                                            },
+                                                        if m.add(
+                                                            Button::new("delete").shortcut_text(
+                                                                ctx.format_shortcut(
+                                                                    &keybinds.delete_selections,
+                                                                ),
+                                                            ),
                                                         )
-                                                        .inner
                                                         .clicked()
                                                         {
                                                             messages.push(Message::Overlay(
                                                                 OverlayKind::Delete,
                                                             ));
                                                         }
-                                                        if m.push_id(
-                                                            Id::new(("btncut", ri, ci)),
-                                                            |m| {
-                                                                m.add(
-                                                                    Button::new("cut")
-                                                                        .shortcut_text(
-                                                                        ctx.format_shortcut(
-                                                                            &keybinds
-                                                                                .cut_to_clipboard,
-                                                                        ),
-                                                                    ),
-                                                                )
-                                                            },
-                                                        )
-                                                        .inner
+                                                        if m.add(Button::new("cut").shortcut_text(
+                                                            ctx.format_shortcut(
+                                                                &keybinds.cut_to_clipboard,
+                                                            ),
+                                                        ))
                                                         .clicked()
                                                         {
                                                             messages.push(Message::ClipboardMode(
                                                                 ClipboardMode::Cut,
                                                             ));
                                                         }
-                                                        if m.push_id(
-                                                            Id::new(("btncopy", ri, ci)),
-                                                            |m| {
-                                                                m.add(
-                                                                    Button::new("copy")
-                                                                        .shortcut_text(
-                                                                        ctx.format_shortcut(
-                                                                            &keybinds
-                                                                                .copy_to_clipboard,
-                                                                        ),
-                                                                    ),
-                                                                )
-                                                            },
-                                                        )
-                                                        .inner
+                                                        if m.add(Button::new("copy").shortcut_text(
+                                                            ctx.format_shortcut(
+                                                                &keybinds.copy_to_clipboard,
+                                                            ),
+                                                        ))
                                                         .clicked()
                                                         {
                                                             messages.push(Message::ClipboardMode(
                                                                 ClipboardMode::Copy,
                                                             ));
                                                         }
-                                                        if m.push_id(
-                                                            Id::new(("btninfo", ri, ci)),
-                                                            |m| {
-                                                                m.add(
-                                                                    Button::new("info")
-                                                                        .shortcut_text(
-                                                                            ctx.format_shortcut(
-                                                                                &keybinds.view_info,
-                                                                            ),
-                                                                        ),
-                                                                )
-                                                            },
-                                                        )
-                                                        .inner
+                                                        if m.add(Button::new("info").shortcut_text(
+                                                            ctx.format_shortcut(
+                                                                &keybinds.view_info,
+                                                            ),
+                                                        ))
                                                         .clicked()
                                                         {
                                                             messages.push(Message::Overlay(
@@ -487,174 +443,6 @@ impl App {
                                                             .push(Message::SelectionSwap(index));
                                                     }
                                                 });
-
-                                                if bg_response.clicked()
-                                                    && !(sa.input(|i| {
-                                                        i.key_pressed(Key::ControlLeft)
-                                                            && i.key_pressed(Key::ControlRight)
-                                                            && i.key_pressed(Key::ShiftLeft)
-                                                            && i.key_pressed(Key::ShiftRight)
-                                                    }))
-                                                {
-                                                    messages.push(Message::SelectionClear);
-                                                }
-
-                                                bg_response.context_menu(|m| {
-                                                    let keybinds = &self.config.keybinds;
-                                                    //m.add(Label::new("create"));
-
-                                                    if m.push_id(
-                                                        Id::new(("create file", ri, ci)),
-                                                        |m| {
-                                                            m.add(
-                                                                Button::new("create file")
-                                                                    .shortcut_text(
-                                                                        ctx.format_shortcut(
-                                                                            &keybinds
-                                                                                .create_file_path,
-                                                                        ),
-                                                                    ),
-                                                            )
-                                                        },
-                                                    )
-                                                    .inner
-                                                    .clicked()
-                                                    {
-                                                        messages.push(Message::Overlay(
-                                                            OverlayKind::CreateFile,
-                                                        ));
-                                                    }
-                                                    if m.push_id(
-                                                        Id::new(("create folder", ri, ci)),
-                                                        |m| {
-                                                            m.add(
-                                                                Button::new("create folder")
-                                                                    .shortcut_text(
-                                                                        ctx.format_shortcut(
-                                                                            &keybinds
-                                                                                .create_folder_path,
-                                                                        ),
-                                                                    ),
-                                                            )
-                                                        },
-                                                    )
-                                                    .inner
-                                                    .clicked()
-                                                    {
-                                                        messages.push(Message::Overlay(
-                                                            OverlayKind::CreateFolder,
-                                                        ));
-                                                    }
-
-                                                    //m.separator();
-                                                    //m.add(Label::new("clipboard"));
-
-
-                                                    macro_rules! button {
-                                                        ($name:ident, $text:literal, $callback:expr, $condition:expr $(, $kb:ident)?) => {
-                                                            let mut $name = RichText::new($text);
-                                                            if panel.selected.is_empty() {
-                                                                $name = $name.color(visuals.text_color().gamma_multiply(0.5));
-                                                            }
-                                                            let mut $name = Button::new($name)
-                                                                .stroke(Stroke::NONE);
-                                                            $(
-                                                            $name = $name.shortcut_text(ctx.format_shortcut(&keybinds.$kb));
-                                                            )?
-                                                            if $condition {
-                                                                $name = $name.sense(Sense::empty());
-                                                            }
-                                                            if m.push_id(Id::new(($text, ri, ci)), |m| m.add($name)).inner.clicked() {
-                                                                $callback;
-                                                            }
-                                                        };
-                                                    }
-
-                                                    macro_rules! selected_btn {
-                                                        ($name:ident, $text:literal, $callback:expr $(, $kb:ident)?) => {
-                                                            button!($name, $text, $callback, panel.selected.is_empty()
-                                                            $(
-                                                            , $kb
-                                                            )?
-                                                            );
-                                                        }
-                                                    }
-
-                                                    macro_rules! clipboard_btn {
-                                                        ($name:ident, $text:literal, $callback:expr $(, $kb:ident)?) => {
-                                                            button!($name, $text, $callback, self.clipboard_manager.entries.is_empty()
-                                                            $(
-                                                            , $kb
-                                                            )?
-                                                            );
-                                                        }
-                                                    }
-
-                                                    selected_btn!(
-                                                        del,
-                                                        "delete",
-                                                        messages.push(Message::Overlay(
-                                                            OverlayKind::Delete
-                                                        )),
-                                                        delete_selections
-                                                    );
-                                                    selected_btn!(
-                                                        cut,
-                                                        "cut",
-                                                        messages.push(
-                                                            Message::ClipboardMode(
-                                                                ClipboardMode::Cut
-                                                            )
-                                                        ),
-                                                        cut_to_clipboard
-                                                    );
-                                                    selected_btn!(
-                                                        copy,
-                                                        "copy",
-                                                        messages.push(
-                                                            Message::ClipboardMode(
-                                                                ClipboardMode::Copy
-                                                            )
-                                                        ),
-                                                        copy_to_clipboard
-                                                    );
-                                                    selected_btn!(
-                                                        clear_s,
-                                                        "clear selection",
-                                                        messages
-                                                            .push(Message::SelectionClear)
-                                                    );
-                                                    clipboard_btn!(
-                                                        paste,
-                                                        "paste",
-                                                        messages.push(Message::Paste),
-                                                        paste_from_clipboard
-                                                    );
-                                                    clipboard_btn!(
-                                                        clear_cp,
-                                                        "clear clipboard",
-                                                        messages
-                                                            .push(Message::ClipboardReset),
-                                                        clear_clipboard
-                                                    );
-
-
-
-                                                    //m.separator();
-                                                    //m.add(Label::new("windows"));
-
-                                                    if m.push_id(
-                                                        Id::new(("toggle clipboard", ci, ri)),
-                                                        |m| m.add(Button::new("toggle clipboard")),
-                                                    )
-                                                    .inner
-                                                    .clicked()
-                                                    {
-                                                        messages.push(Message::WindowToggle(
-                                                            WindowKind::Clipboard,
-                                                        ));
-                                                    }
-                                                });
                                             }
                                         },
                                     );
@@ -665,6 +453,140 @@ impl App {
                                     {
                                         messages.push(Message::Transfer(to));
                                     }
+
+                                    if bg_response.clicked()
+                                        && !(ui.input(|i| {
+                                            i.key_pressed(Key::ControlLeft)
+                                                && i.key_pressed(Key::ControlRight)
+                                                && i.key_pressed(Key::ShiftLeft)
+                                                && i.key_pressed(Key::ShiftRight)
+                                        }))
+                                    {
+                                        messages.push(Message::SelectionClear);
+                                    }
+
+                                    bg_response.context_menu(|m| {
+                                        let keybinds = &self.config.keybinds;
+                                        m.label("create");
+
+                                        if m.add(Button::new("create file").shortcut_text(
+                                            ctx.format_shortcut(&keybinds.create_file_path),
+                                        ))
+                                        .clicked()
+                                        {
+                                            messages
+                                                .push(Message::Overlay(OverlayKind::CreateFile));
+                                        }
+                                        if m.add(Button::new("create folder").shortcut_text(
+                                            ctx.format_shortcut(&keybinds.create_folder_path),
+                                        ))
+                                        .clicked()
+                                        {
+                                            messages
+                                                .push(Message::Overlay(OverlayKind::CreateFolder));
+                                        }
+
+                                        m.separator();
+                                        m.label("clipboard");
+
+                                        /*
+                                        macro_rules! button {
+                                            ($name:ident, $text:literal, $callback:expr, $condition:expr $(, $kb:ident)?) => {
+                                                let mut $name = RichText::new($text);
+                                                if panel.selected.is_empty() {
+                                                    $name = $name.color(visuals.text_color().gamma_multiply(0.5));
+                                                }
+                                                let mut $name = Button::new($name)
+                                                    .stroke(Stroke::NONE);
+                                                $(
+                                                $name = $name.shortcut_text(ctx.format_shortcut(&keybinds.$kb));
+                                                )?
+                                                if $condition {
+                                                    $name = $name.sense(Sense::empty());
+                                                }
+                                                if m.add($name).clicked() {
+                                                    $callback;
+                                                }
+                                            };
+                                        }
+
+                                        macro_rules! selected_btn {
+                                            ($name:ident, $text:literal, $callback:expr $(, $kb:ident)?) => {
+                                                button!($name, $text, $callback, panel.selected.is_empty()
+                                                $(
+                                                , $kb
+                                                )?
+                                                );
+                                            }
+                                        }
+
+                                        macro_rules! clipboard_btn {
+                                            ($name:ident, $text:literal, $callback:expr $(, $kb:ident)?) => {
+                                                button!($name, $text, $callback, self.clipboard_manager.entries.is_empty()
+                                                $(
+                                                , $kb
+                                                )?
+                                                );
+                                            }
+                                        }
+
+                                        selected_btn!(
+                                            del,
+                                            "delete",
+                                            messages.push(Message::Overlay(
+                                                OverlayKind::Delete
+                                            )),
+                                            delete_selections
+                                        );
+                                        selected_btn!(
+                                            cut,
+                                            "cut",
+                                            messages.push(
+                                                Message::ClipboardMode(
+                                                    ClipboardMode::Cut
+                                                )
+                                            ),
+                                            cut_to_clipboard
+                                        );
+                                        selected_btn!(
+                                            copy,
+                                            "copy",
+                                            messages.push(
+                                                Message::ClipboardMode(
+                                                    ClipboardMode::Copy
+                                                )
+                                            ),
+                                            copy_to_clipboard
+                                        );
+                                        selected_btn!(
+                                            clear_s,
+                                            "clear selection",
+                                            messages
+                                                .push(Message::SelectionClear)
+                                        );
+                                        clipboard_btn!(
+                                            paste,
+                                            "paste",
+                                            messages.push(Message::Paste),
+                                            paste_from_clipboard
+                                        );
+                                        clipboard_btn!(
+                                            clear_cp,
+                                            "clear clipboard",
+                                            messages
+                                                .push(Message::ClipboardReset),
+                                            clear_clipboard
+                                        );
+                                        */
+
+                                        m.separator();
+                                        m.label("windows");
+
+                                        if m.add(Button::new("toggle clipboard")).clicked() {
+                                            messages
+                                                .push(Message::WindowToggle(WindowKind::Clipboard));
+                                        }
+                                    });
                                 });
                             }
                         });
