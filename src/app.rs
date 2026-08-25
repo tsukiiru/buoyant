@@ -524,6 +524,7 @@ impl PanelsManager {
     }
 
     fn close_panel(&mut self) {
+        println!("close panel at position {}!", self.focused);
         let current_pos = &self.focused;
         let current_width = self.width_proportion[current_pos.r][current_pos.c];
         let current_height = self.height_proportion[current_pos.r];
@@ -587,6 +588,8 @@ pub enum Message {
     SelectionSwap(usize),
     SelectionModify(usize, bool, bool),
     SelectionClear,
+    HighlightPath(PathBuf),
+    FetchEntries,
 
     // navigation
     NavigateForward,
@@ -620,6 +623,8 @@ pub enum Message {
 
     // other
     ScrollSignalDisable,
+    HandleActions(KeybindAction, bool, bool),
+    QueuedChannelIndex(usize),
 }
 
 #[derive(Default)]
@@ -645,6 +650,8 @@ impl App {
                 self.modify_selected(i, ctrl_pressed, shift_pressed)
             }
             Message::SelectionClear => self.clear_selected(),
+            Message::HighlightPath(path) => self.highlight_path(&path),
+            Message::FetchEntries => self.fetch_entries(),
 
             Message::NavigateForward => self.nav_forward(),
             Message::NavigateBackward => self.nav_back(),
@@ -671,6 +678,10 @@ impl App {
             Message::ClosePanel => self.panels_manager.close_panel(),
 
             Message::ScrollSignalDisable => self.disable_scroll_signal(),
+            Message::HandleActions(action, is_shifted, is_ctrled) => {
+                self.handle_actions(&action, is_ctrled, is_shifted)
+            }
+            Message::QueuedChannelIndex(i) => self.channels_manager.queued_chan_index = i,
         });
     }
 
@@ -910,8 +921,11 @@ impl App {
             .iter()
             .enumerate()
             .for_each(|(index, entry_index)| {
-                if let Some(entry) = current_panel.entries_manager.entries.get(*entry_index)
-                    && entry.path == path
+                if current_panel
+                    .entries_manager
+                    .entries
+                    .get(*entry_index)
+                    .is_some_and(|entry| entry.path == path)
                 {
                     current_panel.entries_manager.current_index = index;
                     current_panel.entries_manager.scroll_signal = true;
@@ -929,8 +943,10 @@ impl App {
         let mut filter = "";
         let view_hidden = self.config.view.view_hidden_files;
 
-        if let Some(kind) = &current_panel.field.kind
-            && *kind == FieldKind::Search
+        if current_panel
+            .field
+            .kind
+            .is_some_and(|kind| kind == FieldKind::Search)
         {
             filter = current_panel.field.buffer.trim();
         }
@@ -1556,13 +1572,14 @@ impl ClipboardManager {
 
 impl eframe::App for App {
     fn logic(&mut self, ctx: &eframe::egui::Context, _frame: &mut eframe::Frame) {
-        let mut action_to_handle: Option<KeybindAction> = None;
+        let mut messages: Vec<Message> = Vec::new();
+
         let (mut is_ctrled, mut is_shifted) = (false, false);
         ctx.clone().input_mut(|i| {
             is_ctrled = i.modifiers.ctrl;
             is_shifted = i.modifiers.shift;
 
-            let mut pressed_modifiers = Modifiers::NONE.plus(i.modifiers);
+            let mut pressed_modifiers = i.modifiers;
             let mut pressed_key = None;
 
             for event in &i.events {
@@ -1579,36 +1596,27 @@ impl eframe::App for App {
             }
 
             for (action, shortcut) in &self.config.keybinds_list {
-                if i.modifiers
+                if !i
+                    .modifiers
                     .matches_logically(pressed_modifiers.plus(shortcut.modifiers))
+                    || !(pressed_key.is_some_and(|key| key == shortcut.logical_key)
+                        || i.key_pressed(shortcut.logical_key))
                 {
-                    if let Some(key) = pressed_key
-                        && shortcut.logical_key == key
-                    {
-                        action_to_handle = Some(*action);
-                        return;
-                    } else if i.key_pressed(shortcut.logical_key) {
-                        action_to_handle = Some(*action);
-                        return;
-                    }
+                    continue;
                 }
+
+                messages.push(Message::HandleActions(*action, is_ctrled, is_shifted));
+                return;
             }
         });
 
-        if let Some(action) = action_to_handle {
-            self.handle_actions(&action, is_ctrled, is_shifted);
-        }
-
-        let mut pending_removal_indicies = vec![];
-        let (mut pending_fetch_entries, mut pending_highlight_path, mut pending_using_index) =
-            (false, None, None);
         for (i, worker_chans) in self.channels_manager.channels_queue.iter().enumerate() {
             let from_worker = &worker_chans.request_chan;
             if let Ok(req) = from_worker.try_recv() {
                 match req {
                     WorkerRequest::OperationKind { path } => {
                         self.new_overlay(OverlayKind::Paste, Some(&path));
-                        pending_using_index = Some(i);
+                        messages.push(Message::QueuedChannelIndex(i));
                         break;
                     }
                     WorkerRequest::Update { percent } => {
@@ -1622,9 +1630,9 @@ impl eframe::App for App {
                         toast.percent = Some(percent);
                     }
                     WorkerRequest::Done { paths } => {
-                        pending_fetch_entries = true;
+                        messages.push(Message::FetchEntries);
                         if !paths.is_empty() {
-                            pending_highlight_path = Some(paths[0].to_owned());
+                            messages.push(Message::HighlightPath(paths[0].to_path_buf()));
                         }
 
                         for p in paths {
@@ -1644,30 +1652,23 @@ impl eframe::App for App {
                             }
                         }
 
-                        if let Some(mode) = &self.clipboard_manager.mode
-                            && mode == &ClipboardMode::Cut
+                        if self
+                            .clipboard_manager
+                            .mode
+                            .as_ref()
+                            .is_some_and(|mode| mode == &ClipboardMode::Cut)
                         {
                             self.clipboard_manager.reset();
                         }
 
                         let mut toasts = self.toasts_manager.toasts.write();
                         toasts.retain(|t| t.id != worker_chans.id);
-
-                        pending_removal_indicies.push(i);
                     }
                 }
             }
         }
 
-        if pending_fetch_entries {
-            self.fetch_entries();
-        }
-        if let Some(path) = pending_highlight_path {
-            self.highlight_path(&path);
-        }
-        if let Some(i) = pending_using_index {
-            self.channels_manager.queued_chan_index = i;
-        }
+        self.process_messages(messages);
     }
 
     fn ui(&mut self, ui: &mut eframe::egui::Ui, _frame: &mut eframe::Frame) { self.ui(ui); }

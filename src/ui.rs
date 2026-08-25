@@ -64,13 +64,7 @@ impl App {
 
                                     // search bar
                                     let mut content = panel.field.buffer.clone();
-                                    let is_searching = if let Some(kind) = panel.field.kind
-                                        && kind == FieldKind::Search
-                                    {
-                                        true
-                                    } else {
-                                        false
-                                    };
+                                    let is_searching = panel.field.kind.is_some_and(|kind| kind == FieldKind::Search);
 
                                     let input = ui.add(
                                         TextEdit::singleline(&mut content)
@@ -603,9 +597,8 @@ impl App {
         // modals
         let overlay = &self.overlay;
         let overlay_kind = overlay.kind;
-        if let Some(kind) = overlay_kind
-            && kind == OverlayKind::Rename
-        {
+
+        if overlay_kind.is_some_and(|kind| kind == OverlayKind::Rename) {
             let modal_widget = Modal::new(Id::new("rename_modal"));
             let mut content = overlay.buffer.clone();
             let error = &overlay.error.clone();
@@ -631,9 +624,7 @@ impl App {
             });
         }
 
-        if let Some(kind) = overlay_kind
-            && kind == OverlayKind::CreateFile
-        {
+        if overlay_kind.is_some_and(|kind| kind == OverlayKind::CreateFile) {
             let modal_widget = Modal::new(Id::new("create_file_modal"));
             let mut content = overlay.buffer.clone();
             let error = &overlay.error.clone();
@@ -662,9 +653,7 @@ impl App {
             });
         }
 
-        if let Some(kind) = overlay_kind
-            && kind == OverlayKind::CreateFolder
-        {
+        if overlay_kind.is_some_and(|kind| kind == OverlayKind::CreateFolder) {
             let modal_widget = Modal::new(Id::new("create_folder_modal"));
             let mut content = overlay.buffer.clone();
             let error = &overlay.error.clone();
@@ -693,9 +682,7 @@ impl App {
             });
         }
 
-        if let Some(kind) = overlay_kind
-            && kind == OverlayKind::Paste
-        {
+        if overlay_kind.is_some_and(|kind| kind == OverlayKind::Paste) {
             let modal_widget = Modal::new(Id::new("paste_modal"));
             modal_widget.show(&ctx, |ui| {
                 let keybinds = &self.config.keybinds;
@@ -737,9 +724,7 @@ impl App {
             });
         };
 
-        if let Some(kind) = overlay_kind
-            && kind == OverlayKind::Delete
-        {
+        if overlay_kind.is_some_and(|kind| kind == OverlayKind::Delete) {
             let keybinds = &self.config.keybinds;
             let modal_widget = Modal::new(Id::new("delete_modal"));
             let current_panel = self.panels_manager.current_panel();
@@ -785,9 +770,7 @@ impl App {
             });
         }
 
-        if let Some(kind) = overlay_kind
-            && kind == OverlayKind::Metadata
-        {
+        if overlay_kind.is_some_and(|kind| kind == OverlayKind::Metadata) {
             let modal_widget = Modal::new(Id::new("metadata_modal"));
             let entry = self.overlay.entry.as_ref().unwrap();
 
