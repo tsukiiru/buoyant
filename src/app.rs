@@ -1627,17 +1627,14 @@ impl eframe::App for App {
             }
 
             for (action, shortcut) in &self.config.keybinds_list {
-                if !i
-                    .modifiers
+                if i.modifiers
                     .matches_logically(pressed_modifiers.plus(shortcut.modifiers))
-                    || !(pressed_key.is_some_and(|key| key == shortcut.logical_key)
-                        || i.key_pressed(shortcut.logical_key))
+                    && pressed_key.is_some_and(|key| key == shortcut.logical_key)
+                    || i.key_pressed(shortcut.logical_key)
                 {
-                    continue;
+                    messages.push(Message::HandleActions(*action, is_ctrled, is_shifted));
+                    return;
                 }
-
-                messages.push(Message::HandleActions(*action, is_ctrled, is_shifted));
-                return;
             }
         });
 

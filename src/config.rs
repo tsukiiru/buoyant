@@ -23,7 +23,7 @@ impl Default for Config {
     fn default() -> Self {
         Config {
             keybinds: Keybinds::default(),
-            keybinds_list: Vec::with_capacity(30),
+            keybinds_list: Vec::with_capacity(31),
             // NOTE: update allocation size matching the number of keybinds
             sorting: Sorting::default(),
             view: View::default(),
