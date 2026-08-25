@@ -23,7 +23,7 @@ impl Default for Config {
     fn default() -> Self {
         Config {
             keybinds: Keybinds::default(),
-            keybinds_list: Vec::with_capacity(29),
+            keybinds_list: Vec::with_capacity(30),
             // NOTE: update allocation size matching the number of keybinds
             sorting: Sorting::default(),
             view: View::default(),
@@ -60,6 +60,7 @@ pub enum KeybindAction {
     Choice(usize),
     SplitVertical,
     SplitHorizontal,
+    ClosePanel,
 }
 
 macro_rules! create_keybinds {
@@ -100,6 +101,9 @@ create_keybinds!(
     choice_7,
     choice_8,
     choice_9,
+    split_vertical,
+    split_horizontal,
+    close_panel,
 );
 
 const NONE: Modifiers = Modifiers::NONE;
@@ -139,6 +143,9 @@ impl Default for Keybinds {
             choice_7: bind(NONE, Key::Num7),
             choice_8: bind(NONE, Key::Num8),
             choice_9: bind(NONE, Key::Num9),
+            split_vertical: bind(CTRL_ALT, Key::V),
+            split_horizontal: bind(CTRL_ALT, Key::H),
+            close_panel: bind(CTRL_ALT, Key::Q),
         }
     }
 }
@@ -278,6 +285,9 @@ create_raw_keybinds!(
     choice_7,
     choice_8,
     choice_9,
+    split_vertical,
+    split_horizontal,
+    close_panel,
 );
 
 fn process_raw_keybinds(raw_config: &RawKeybinds, config: &mut Keybinds) {
@@ -318,6 +328,9 @@ fn process_raw_keybinds(raw_config: &RawKeybinds, config: &mut Keybinds) {
     process_field!(choice_7);
     process_field!(choice_8);
     process_field!(choice_9);
+    process_field!(split_vertical);
+    process_field!(split_horizontal);
+    process_field!(close_panel);
 }
 
 fn match_key(raw_key: &str) -> Option<KeyboardShortcut> {
@@ -489,15 +502,9 @@ fn listing_keybinds(keybinds: &Keybinds, list: &mut Vec<Keybind>) {
     list.push((KeybindAction::Choice(7), keybinds.choice_7));
     list.push((KeybindAction::Choice(8), keybinds.choice_8));
     list.push((KeybindAction::Choice(9), keybinds.choice_9));
-
-    list.push((
-        KeybindAction::SplitVertical,
-        KeyboardShortcut::new(CTRL_ALT, Key::V),
-    ));
-    list.push((
-        KeybindAction::SplitHorizontal,
-        KeyboardShortcut::new(CTRL_ALT, Key::H),
-    ));
+    list.push((KeybindAction::SplitVertical, keybinds.split_vertical));
+    list.push((KeybindAction::SplitHorizontal, keybinds.split_horizontal));
+    list.push((KeybindAction::ClosePanel, keybinds.close_panel));
 
     list.par_sort_by(|a, b| {
         let (x, y) = (count_mod(&a.1.modifiers), count_mod(&b.1.modifiers));

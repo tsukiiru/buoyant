@@ -401,23 +401,13 @@ pub enum AppendDirection {
     None,
 }
 
+#[derive(Default)]
 pub struct PanelsManager {
     pub focused: Position,
     pub panels: Vec<Vec<Panel>>,
     // matrix representing the panels' positions
     pub width_proportion: Vec<Vec<f32>>,
     pub height_proportion: Vec<f32>,
-}
-
-impl Default for PanelsManager {
-    fn default() -> Self {
-        PanelsManager {
-            focused: Position::default(),
-            panels: Vec::new(),
-            width_proportion: Vec::new(),
-            height_proportion: Vec::new(),
-        }
-    }
 }
 
 impl PanelsManager {
@@ -626,6 +616,7 @@ pub enum Message {
     WindowClose(WindowKind),
 
     // panels
+    ClosePanel,
 
     // other
     ScrollSignalDisable,
@@ -676,6 +667,8 @@ impl App {
 
             Message::WindowToggle(kind) => self.windows_manager.toggle(kind),
             Message::WindowClose(kind) => self.windows_manager.close(kind),
+
+            Message::ClosePanel => self.panels_manager.close_panel(),
 
             Message::ScrollSignalDisable => self.disable_scroll_signal(),
         });
@@ -1119,7 +1112,9 @@ impl App {
                     .new_panel(AppendDirection::Up, &PathBuf::new());
                 self.fetch_entries();
             }
-            _ => {}
+            KeybindAction::ClosePanel => self.panels_manager.close_panel(),
+            KeybindAction::ToggleVisual => {}
+            KeybindAction::Choice(..) => {}
         }
     }
 

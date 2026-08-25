@@ -6,8 +6,7 @@ use chrono::{DateTime, Datelike, Utc};
 use eframe::egui::{
     Align, Align2, AtomLayout, Button, CentralPanel, Color32, CornerRadius, Frame, Grid, Id, Image,
     Key, Label, LayerId, Layout, Margin, Modal, Order, Popup, PopupAnchor, ProgressBar, RectAlign,
-    RichText, ScrollArea, Sense, Stroke, StrokeKind, TextEdit, TextWrapMode, UiBuilder, Vec2,
-    Window,
+    RichText, ScrollArea, Sense, Stroke, TextEdit, TextWrapMode, UiBuilder, Vec2, Window,
 };
 use egui_extras::{Size, StripBuilder};
 
