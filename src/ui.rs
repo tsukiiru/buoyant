@@ -34,9 +34,7 @@ impl App {
 
             builder.vertical(|mut strip| {
                 for (ri, row) in self.panels_manager.panels.iter().enumerate() {
-                    strip.strip(|builder| {
-                        let mut builder = builder;
-
+                    strip.strip(|mut builder| {
                         for (ci, _) in row.iter().enumerate() {
                             builder = builder
                                 .size(Size::relative(self.panels_manager.width_proportion[ri][ci]));

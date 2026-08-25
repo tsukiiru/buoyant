@@ -9,7 +9,7 @@ use std::{
     time::{Duration, Instant},
 };
 
-use eframe::egui::{Context, Event, Key, Modifiers, Theme, WidgetText, mutex::RwLock};
+use eframe::egui::{Context, Event, Key, Theme, WidgetText, mutex::RwLock};
 use rayon::{
     iter::{
         IndexedParallelIterator, IntoParallelRefIterator, IntoParallelRefMutIterator,
@@ -525,37 +525,68 @@ impl PanelsManager {
 
     fn close_panel(&mut self) {
         println!("close panel at position {}!", self.focused);
-        let current_pos = &self.focused;
+
+        let current_pos = self.focused;
         let current_width = self.width_proportion[current_pos.r][current_pos.c];
         let current_height = self.height_proportion[current_pos.r];
 
         let adj_cols = self.adjacent_cols();
         let adj_rows = self.adjacent_rows();
 
-        let current_row = self.width_proportion.get_mut(current_pos.r).unwrap();
+        let current_row_width = self.width_proportion.get_mut(current_pos.r).unwrap();
 
         match adj_cols.len() {
+            // last one in the row
             0 => {
                 match adj_rows.len() {
+                    // last row in the program
                     0 => {
                         // close program smh
                     }
                     1 => {
-                        *self.height_proportion.get_mut(adj_rows[0]).unwrap() = current_height * 2.0
+                        *self.height_proportion.get_mut(adj_rows[0]).unwrap() =
+                            current_height * 2.0;
+                        self.focused = Position {
+                            r: adj_rows[0],
+                            c: 0,
+                        };
                     }
                     2 => adj_rows.iter().for_each(|i| {
-                        *self.height_proportion.get_mut(*i).unwrap() = current_height * 1.5
+                        *self.height_proportion.get_mut(*i).unwrap() = current_height * 1.5;
+                        self.focused = Position {
+                            r: adj_rows[0],
+                            c: 0,
+                        };
                     }),
-                    _ => {}
+                    _ => println!("what...?"),
                 };
 
                 self.height_proportion.remove(current_pos.r);
+                self.panels.remove(current_pos.r);
             }
-            1 => *current_row.get_mut(adj_cols[0]).unwrap() = current_width * 2.0,
-            2 => adj_cols
-                .iter()
-                .for_each(|i| *current_row.get_mut(*i).unwrap() = current_width * 1.5),
-            _ => {}
+            1 => {
+                *current_row_width.get_mut(adj_cols[0]).unwrap() = current_width * 2.0;
+                self.focused = Position {
+                    r: current_pos.r,
+                    c: adj_cols[0],
+                };
+
+                current_row_width.remove(current_pos.c);
+                self.panels[current_pos.r].remove(current_pos.c);
+            }
+            2 => {
+                adj_cols
+                    .iter()
+                    .for_each(|i| *current_row_width.get_mut(*i).unwrap() = current_width * 1.5);
+                self.focused = Position {
+                    r: current_pos.r,
+                    c: adj_cols[0],
+                };
+
+                current_row_width.remove(current_pos.c);
+                self.panels[current_pos.r].remove(current_pos.c);
+            }
+            _ => println!("what ?"),
         };
     }
 }
