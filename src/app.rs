@@ -560,65 +560,54 @@ impl PanelsManager {
 
     fn close_panel(&mut self) -> bool {
         let current_pos = self.position(self.focused);
-        let current_width = self.width_proportion[current_pos.r][current_pos.c];
-        let current_height = self.height_proportion[current_pos.r];
 
         let adj_cols = self.adjacent_cols();
         let adj_rows = self.adjacent_rows();
 
-        let current_row_width = self.width_proportion.get_mut(current_pos.r).unwrap();
+        if self.panels.len() == 1 && self.panels[current_pos.r].len() == 1 {
+            // last one in the program (last in row, last row)
+            return true;
+        }
 
-        match adj_cols.len() {
+        if self.panels[current_pos.r].len() == 1 {
             // last one in the row
-            0 => {
-                match adj_rows.len() {
-                    // last row in the program
-                    0 => {
-                        return true;
-                    }
-                    1 => {
-                        *self.height_proportion.get_mut(adj_rows[0]).unwrap() = current_height * 2.0
-                    }
-                    2 => adj_rows.iter().for_each(|i| {
-                        *self.height_proportion.get_mut(*i).unwrap() = current_height * 1.5;
-                    }),
-                    _ => println!("what...?"),
-                };
+            self.height_proportion.remove(current_pos.r);
+            self.width_proportion.remove(current_pos.c);
 
-                self.height_proportion.remove(current_pos.r);
-                self.width_proportion.remove(current_pos.r);
+            let mut remaining_height = 0.0;
+            self.height_proportion
+                .iter()
+                .for_each(|h| remaining_height += h);
 
-                self.focused = self.id(Position {
-                    r: adj_rows[0],
-                    c: 0,
-                });
-                self.panels.remove(current_pos.r);
-            }
-            1 => {
-                *current_row_width.get_mut(adj_cols[0]).unwrap() = current_width * 2.0;
-                current_row_width.remove(current_pos.c);
+            let mul = 1.0 / remaining_height;
+            self.height_proportion.iter_mut().for_each(|h| *h *= mul);
 
-                self.focused = self.id(Position {
-                    r: current_pos.r,
-                    c: adj_cols[0],
-                });
-                self.panels[current_pos.r].remove(current_pos.c);
-            }
-            2 => {
-                adj_cols
-                    .iter()
-                    .for_each(|i| *current_row_width.get_mut(*i).unwrap() = current_width * 1.5);
+            self.focused = self.id(Position {
+                r: adj_rows[0],
+                c: 0,
+            });
+            self.panels.remove(current_pos.r);
 
-                current_row_width.remove(current_pos.c);
+            return false;
+        }
 
-                self.focused = self.id(Position {
-                    r: current_pos.r,
-                    c: adj_cols[0],
-                });
-                self.panels[current_pos.r].remove(current_pos.c);
-            }
-            _ => println!("what ?"),
-        };
+        self.width_proportion[current_pos.r].remove(current_pos.c);
+
+        let mut remaining_width = 0.0;
+        self.width_proportion[current_pos.r]
+            .iter()
+            .for_each(|w| remaining_width += w);
+
+        let mul = 1.0 / remaining_width;
+        self.width_proportion[current_pos.r]
+            .iter_mut()
+            .for_each(|w| *w *= mul);
+
+        self.focused = self.id(Position {
+            r: current_pos.r,
+            c: adj_cols[0],
+        });
+        self.panels[current_pos.r].remove(current_pos.c);
 
         false
     }
@@ -660,6 +649,8 @@ impl PanelsManager {
 
         self.focused = self.id(new_pos);
     }
+
+    fn focus_panel(&mut self, id: u16) { self.focused = id; }
 }
 
 #[derive(Debug)]
@@ -742,6 +733,7 @@ pub enum Message {
     Panel(Direction, PathBuf),
     ClosePanel,
     PanelNavigate(Direction),
+    PanelFocus(u16),
 
     // toasts
     Toast(
@@ -836,6 +828,7 @@ impl App {
                 }
             }
             Message::PanelNavigate(dir) => self.panels_manager.navigate_panel(dir),
+            Message::PanelFocus(id) => self.panels_manager.focus_panel(id),
 
             Message::Toast(title, content, kind, id_chan) => {
                 self.new_toast(title, content, kind, id_chan)

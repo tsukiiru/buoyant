@@ -45,10 +45,11 @@ impl App {
                                 let current_pos =
                                     self.panels_manager.position(self.panels_manager.focused);
                                 let panel_focused = current_pos.r == ri && current_pos.c == ci;
-                                strip.cell(|ui| {
-                                    ui.add_enabled_ui(panel_focused, |ui| {
-                                        let panel_rect = ui.available_rect_before_wrap();
 
+                                strip.cell(|ui| {
+                                    let panel_rect = ui.available_rect_before_wrap();
+
+                                    ui.add_enabled_ui(panel_focused, |ui| {
                                         // address bar
                                         ui.horizontal(|ui| {
                                             let mut button = ui.add(
@@ -318,6 +319,7 @@ impl App {
                                                             .dnd_set_drag_payload(entry_index);
 
                                                         if btn_interact.drag_started() {
+
                                                             messages.push(Message::SelectionSwap(
                                                                 index,
                                                             ));
@@ -470,7 +472,6 @@ impl App {
                                                                 i.key_down(Key::ShiftLeft)
                                                                     || i.key_down(Key::ShiftRight)
                                                             });
-
                                                             messages.push(Message::SelectionModify(
                                                                 index,
                                                                 ctrl_pressed,
@@ -642,6 +643,12 @@ impl App {
                                             );
                                         }
                                     });
+
+                                    if !panel_focused &&
+                                     ui.interact(panel_rect, Id::new(("focus-detect-area",ri, ci)), Sense::click()).clicked() {
+                                        messages.push(Message::PanelFocus(panel.id));
+                                    }
+
                                 });
                             }
                         });
