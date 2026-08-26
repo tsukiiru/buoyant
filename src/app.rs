@@ -9,7 +9,7 @@ use std::{
     time::{Duration, Instant},
 };
 
-use eframe::egui::{Context, Event, Key, Theme, WidgetText, mutex::RwLock};
+use eframe::egui::{Context, Event, Key, Theme, ViewportCommand, WidgetText, mutex::RwLock};
 use rayon::{
     iter::{
         IndexedParallelIterator, IntoParallelRefIterator, IntoParallelRefMutIterator,
@@ -404,7 +404,8 @@ pub enum AppendDirection {
 
 #[derive(Default)]
 pub struct PanelsManager {
-    pub focused: Position,
+    pub id_count: u16,
+    pub focused: u16,
     pub panels: Vec<Vec<Panel>>,
     // matrix representing the panels' positions
     pub width_proportion: Vec<Vec<f32>>,
@@ -416,7 +417,34 @@ impl PanelsManager {
 
     pub fn current_panel_mut(&mut self) -> &mut Panel { self.panel_mut(self.focused).unwrap() }
 
-    fn panel(&self, pos: Position) -> Option<&Panel> {
+    pub fn position(&self, id: u16) -> Position {
+        for (ri, row) in self.panels.iter().enumerate() {
+            for (ci, panel) in row.iter().enumerate() {
+                if panel.id == id {
+                    return Position { r: ri, c: ci };
+                }
+            }
+        }
+
+        println!("WARN: cannot find position via id {}!!!!", id);
+        Position::default()
+        // this is very unlikely
+    }
+
+    pub fn id(&self, pos: Position) -> u16 {
+        if let Some(row) = self.panels.get(pos.r)
+            && let Some(panel) = row.get(pos.c)
+        {
+            return panel.id;
+        }
+
+        println!("WARN: cannot find id via position {}!!", pos);
+        0
+        // again, this is very unlikely
+    }
+
+    fn panel(&self, id: u16) -> Option<&Panel> {
+        let pos = self.position(id);
         if let Some(row) = self.panels.get(pos.r) {
             return row.get(pos.c);
         }
@@ -424,7 +452,8 @@ impl PanelsManager {
         None
     }
 
-    fn panel_mut(&mut self, pos: Position) -> Option<&mut Panel> {
+    fn panel_mut(&mut self, id: u16) -> Option<&mut Panel> {
+        let pos = self.position(id);
         if let Some(row) = self.panels.get_mut(pos.r) {
             return row.get_mut(pos.c);
         }
@@ -433,36 +462,49 @@ impl PanelsManager {
     }
 
     fn new_panel(&mut self, dir: AppendDirection, path: &Path) {
-        let mut new_pos = self.focused;
-
-        if self.panel(self.focused).is_some() {
-            match dir {
-                AppendDirection::Up => new_pos.r = (new_pos.r as i16 - 1).max(0) as usize,
-                AppendDirection::Down => new_pos.r += 1,
-                AppendDirection::Left => new_pos.c = (new_pos.c as i16 - 1).max(0) as usize,
-                AppendDirection::Right => new_pos.c += 1,
-                AppendDirection::None => {}
-            };
-        }
-
         let path = if !path.exists() {
             &home_dir().unwrap()
         } else {
             path
         };
 
-        let panel = Panel::new(path);
+        let new_id = self.id_count;
+        let panel = Panel::new(path, new_id);
+        let current_panel = self.focused;
+
+        self.focused = new_id;
+        self.id_count += 1;
+
+        if dir == AppendDirection::None {
+            // for initializing, nothing else
+            self.panels.insert(0, vec![panel]);
+            self.height_proportion.insert(0, 1.0);
+            self.width_proportion.insert(0, vec![1.0]);
+
+            return;
+        }
+
+        let mut new_pos = self.position(current_panel);
+        let current_pos = self.position(current_panel);
+
+        match dir {
+            AppendDirection::Up => new_pos.r = (new_pos.r as i16 - 1).max(0) as usize,
+            AppendDirection::Down => new_pos.r += 1,
+            AppendDirection::Left => new_pos.c = (new_pos.c as i16 - 1).max(0) as usize,
+            AppendDirection::Right => new_pos.c += 1,
+            AppendDirection::None => {}
+        };
 
         match dir {
             AppendDirection::Left | AppendDirection::Right => {
-                self.panels[self.focused.r].insert(new_pos.c, panel);
+                self.panels[current_pos.r].insert(new_pos.c, panel);
 
-                let focused_panel_width = &self.width_proportion[new_pos.r][self.focused.c];
+                let focused_panel_width = &self.width_proportion[new_pos.r][current_pos.c];
                 let new_width = focused_panel_width / 2.0;
 
                 let row_width_proportion = self.width_proportion.get_mut(new_pos.r).unwrap();
                 row_width_proportion.insert(new_pos.c, new_width);
-                row_width_proportion[self.focused.c] = new_width;
+                row_width_proportion[current_pos.c] = new_width;
             }
             AppendDirection::Up | AppendDirection::Down => {
                 new_pos.c = 0;
@@ -475,24 +517,17 @@ impl PanelsManager {
                     .map(|h| h / 2.0)
                     .unwrap();
 
-                self.height_proportion[self.focused.r] = new_height;
+                self.height_proportion[current_pos.r] = new_height;
                 self.height_proportion.insert(new_pos.r, new_height);
 
                 self.width_proportion.insert(new_pos.r, vec![1.0]);
             }
-            AppendDirection::None => {
-                // for initializing, nothing else
-                self.panels.insert(new_pos.r, vec![panel]);
-                self.height_proportion.insert(new_pos.r, 1.0);
-                self.width_proportion.insert(new_pos.r, vec![1.0]);
-            }
+            AppendDirection::None => {}
         };
-
-        self.focused = new_pos;
     }
 
     fn adjacent_cols(&self) -> Vec<usize> {
-        let current_pos = &self.focused;
+        let current_pos = self.position(self.focused);
         let mut adj_cols = Vec::with_capacity(2);
 
         if self.panels[current_pos.r].len() > 1 {
@@ -505,8 +540,8 @@ impl PanelsManager {
                 adj_cols.push(current_pos.c - 1);
             } else {
                 // inbetween two panels
-                adj_cols.push(current_pos.c + 1);
                 adj_cols.push(current_pos.c - 1);
+                adj_cols.push(current_pos.c + 1);
             }
         }
 
@@ -514,7 +549,7 @@ impl PanelsManager {
     }
 
     fn adjacent_rows(&self) -> Vec<usize> {
-        let current_pos = &self.focused;
+        let current_pos = self.position(self.focused);
         let mut adj_rows = Vec::with_capacity(2);
 
         if self.panels.len() > 1 {
@@ -523,8 +558,8 @@ impl PanelsManager {
             } else if current_pos.r + 1 == self.panels.len() {
                 adj_rows.push(current_pos.r - 1);
             } else {
-                adj_rows.push(current_pos.r + 1);
                 adj_rows.push(current_pos.r - 1);
+                adj_rows.push(current_pos.r + 1);
             }
         }
 
@@ -532,9 +567,7 @@ impl PanelsManager {
     }
 
     fn close_panel(&mut self) -> bool {
-        println!("close panel at position {}!", self.focused);
-
-        let current_pos = self.focused;
+        let current_pos = self.position(self.focused);
         let current_width = self.width_proportion[current_pos.r][current_pos.c];
         let current_height = self.height_proportion[current_pos.r];
 
@@ -562,22 +595,22 @@ impl PanelsManager {
 
                 self.height_proportion.remove(current_pos.r);
                 self.width_proportion.remove(current_pos.r);
-                self.panels.remove(current_pos.r);
-                self.focused = Position {
+
+                self.focused = self.id(Position {
                     r: adj_rows[0],
                     c: 0,
-                };
+                });
+                self.panels.remove(current_pos.r);
             }
             1 => {
                 *current_row_width.get_mut(adj_cols[0]).unwrap() = current_width * 2.0;
                 current_row_width.remove(current_pos.c);
 
-                self.panels[current_pos.r].remove(current_pos.c);
-
-                self.focused = Position {
+                self.focused = self.id(Position {
                     r: current_pos.r,
                     c: adj_cols[0],
-                };
+                });
+                self.panels[current_pos.r].remove(current_pos.c);
             }
             2 => {
                 adj_cols
@@ -585,26 +618,15 @@ impl PanelsManager {
                     .for_each(|i| *current_row_width.get_mut(*i).unwrap() = current_width * 1.5);
 
                 current_row_width.remove(current_pos.c);
-                self.panels[current_pos.r].remove(current_pos.c);
 
-                self.focused = Position {
+                self.focused = self.id(Position {
                     r: current_pos.r,
                     c: adj_cols[0],
-                };
+                });
+                self.panels[current_pos.r].remove(current_pos.c);
             }
             _ => println!("what ?"),
         };
-
-        println!(
-            "got width proportion: {:#?} \nheight proportion: {:#?}",
-            self.width_proportion, self.height_proportion
-        );
-
-        println!("new panels list look like this:");
-        self.panels.iter().enumerate().for_each(|(i, r)| {
-            println!("---\nrow number {}", i);
-            r.iter().for_each(|panel| println!("{}", panel));
-        });
 
         false
     }
@@ -612,6 +634,7 @@ impl PanelsManager {
 
 #[derive(Debug)]
 pub struct Panel {
+    pub id: u16,
     pub current_path: PathBuf,
     pub entries_manager: EntriesManager,
     pub selected: FxHashSet<usize>,
@@ -633,8 +656,9 @@ impl Display for Panel {
 }
 
 impl Panel {
-    fn new(path: &Path) -> Self {
+    fn new(path: &Path, id: u16) -> Self {
         Panel {
+            id,
             current_path: path.to_path_buf(),
             entries_manager: EntriesManager::default(),
             selected: FxHashSet::default(),
@@ -716,6 +740,24 @@ pub struct App {
 }
 
 impl App {
+    pub fn new(cc: &eframe::CreationContext<'_>) -> Self {
+        let ctx = cc.egui_ctx.clone();
+        egui_extras::install_image_loaders(&ctx);
+
+        ctx.options_mut(|opts| opts.quit_shortcuts = Vec::new());
+
+        let mut app = App {
+            ctx,
+            ..Default::default()
+        };
+        app.fetch_config();
+        app.panels_manager
+            .new_panel(AppendDirection::None, &env::home_dir().unwrap());
+
+        app.fetch_entries();
+        app
+    }
+
     pub fn process_messages(&mut self, messages: Vec<Message>) {
         messages.into_iter().for_each(|msg| match msg {
             Message::ClipboardMode(mode) => self.add_to_clipboard(mode),
@@ -759,7 +801,7 @@ impl App {
             Message::ClosePanel => {
                 let close_program = self.panels_manager.close_panel();
                 if close_program {
-                    //close
+                    self.ctx.send_viewport_cmd(ViewportCommand::Close);
                 }
             }
 
@@ -774,24 +816,6 @@ impl App {
             Message::QueuedChannelIndex(i) => self.channels_manager.queued_chan_index = i,
             Message::ToggleHiddenView => self.toggle_view_hidden(),
         });
-    }
-
-    pub fn new(cc: &eframe::CreationContext<'_>) -> Self {
-        let ctx = cc.egui_ctx.clone();
-        egui_extras::install_image_loaders(&ctx);
-
-        ctx.options_mut(|opts| opts.quit_shortcuts = Vec::new());
-
-        let mut app = App {
-            ctx,
-            ..Default::default()
-        };
-        app.fetch_config();
-        app.panels_manager
-            .new_panel(AppendDirection::None, &env::home_dir().unwrap());
-
-        app.fetch_entries();
-        app
     }
 
     pub fn disable_scroll_signal(&mut self) {
