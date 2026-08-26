@@ -337,7 +337,7 @@ pub enum ToastKind {
     Operation,
 }
 
-enum NavigateDirection {
+pub enum NavigateDirection {
     Up,
     Down,
 }
@@ -392,6 +392,7 @@ impl Display for Position {
     }
 }
 
+#[allow(dead_code)]
 #[derive(PartialEq)]
 pub enum AppendDirection {
     Up,
@@ -452,33 +453,40 @@ impl PanelsManager {
 
         let panel = Panel::new(path);
 
-        if let Some(row) = self.panels.get_mut(new_pos.r)
-            && (dir == AppendDirection::Left || dir == AppendDirection::Right)
-        {
-            row.insert(new_pos.c, panel);
+        match dir {
+            AppendDirection::Left | AppendDirection::Right => {
+                self.panels[self.focused.r].insert(new_pos.c, panel);
 
-            let focused_panel_width = &self.width_proportion[new_pos.r][self.focused.c];
-            let new_width = focused_panel_width / 2.0;
+                let focused_panel_width = &self.width_proportion[new_pos.r][self.focused.c];
+                let new_width = focused_panel_width / 2.0;
 
-            let row_width_proportion = self.width_proportion.get_mut(new_pos.r).unwrap();
-            row_width_proportion.insert(new_pos.c, new_width);
-            row_width_proportion[self.focused.c] = new_width;
-        } else {
-            new_pos.c = 0;
-            // create a new row
-            self.panels.insert(new_pos.r, vec![panel]);
+                let row_width_proportion = self.width_proportion.get_mut(new_pos.r).unwrap();
+                row_width_proportion.insert(new_pos.c, new_width);
+                row_width_proportion[self.focused.c] = new_width;
+            }
+            AppendDirection::Up | AppendDirection::Down => {
+                new_pos.c = 0;
+                // create a new row
+                self.panels.insert(new_pos.r, vec![panel]);
 
-            let new_height = self
-                .height_proportion
-                .get(new_pos.r)
-                .map(|h| h / 2.0)
-                .unwrap_or(1.0);
+                let new_height = self
+                    .height_proportion
+                    .get(new_pos.r)
+                    .map(|h| h / 2.0)
+                    .unwrap();
 
-            self.height_proportion.insert(new_pos.r, new_height);
-            self.height_proportion[self.focused.r] = new_height;
+                self.height_proportion[self.focused.r] = new_height;
+                self.height_proportion.insert(new_pos.r, new_height);
 
-            self.width_proportion.insert(new_pos.r, vec![1.0]);
-        }
+                self.width_proportion.insert(new_pos.r, vec![1.0]);
+            }
+            AppendDirection::None => {
+                // for initializing, nothing else
+                self.panels.insert(new_pos.r, vec![panel]);
+                self.height_proportion.insert(new_pos.r, 1.0);
+                self.width_proportion.insert(new_pos.r, vec![1.0]);
+            }
+        };
 
         self.focused = new_pos;
     }
@@ -523,7 +531,7 @@ impl PanelsManager {
         adj_rows
     }
 
-    fn close_panel(&mut self) {
+    fn close_panel(&mut self) -> bool {
         println!("close panel at position {}!", self.focused);
 
         let current_pos = self.focused;
@@ -541,53 +549,64 @@ impl PanelsManager {
                 match adj_rows.len() {
                     // last row in the program
                     0 => {
-                        // close program smh
+                        return true;
                     }
                     1 => {
-                        *self.height_proportion.get_mut(adj_rows[0]).unwrap() =
-                            current_height * 2.0;
-                        self.focused = Position {
-                            r: adj_rows[0],
-                            c: 0,
-                        };
+                        *self.height_proportion.get_mut(adj_rows[0]).unwrap() = current_height * 2.0
                     }
                     2 => adj_rows.iter().for_each(|i| {
                         *self.height_proportion.get_mut(*i).unwrap() = current_height * 1.5;
-                        self.focused = Position {
-                            r: adj_rows[0],
-                            c: 0,
-                        };
                     }),
                     _ => println!("what...?"),
                 };
 
                 self.height_proportion.remove(current_pos.r);
+                self.width_proportion.remove(current_pos.r);
                 self.panels.remove(current_pos.r);
+                self.focused = Position {
+                    r: adj_rows[0],
+                    c: 0,
+                };
             }
             1 => {
                 *current_row_width.get_mut(adj_cols[0]).unwrap() = current_width * 2.0;
+                current_row_width.remove(current_pos.c);
+
+                self.panels[current_pos.r].remove(current_pos.c);
+
                 self.focused = Position {
                     r: current_pos.r,
                     c: adj_cols[0],
                 };
-
-                current_row_width.remove(current_pos.c);
-                self.panels[current_pos.r].remove(current_pos.c);
             }
             2 => {
                 adj_cols
                     .iter()
                     .for_each(|i| *current_row_width.get_mut(*i).unwrap() = current_width * 1.5);
+
+                current_row_width.remove(current_pos.c);
+                self.panels[current_pos.r].remove(current_pos.c);
+
                 self.focused = Position {
                     r: current_pos.r,
                     c: adj_cols[0],
                 };
-
-                current_row_width.remove(current_pos.c);
-                self.panels[current_pos.r].remove(current_pos.c);
             }
             _ => println!("what ?"),
         };
+
+        println!(
+            "got width proportion: {:#?} \nheight proportion: {:#?}",
+            self.width_proportion, self.height_proportion
+        );
+
+        println!("new panels list look like this:");
+        self.panels.iter().enumerate().for_each(|(i, r)| {
+            println!("---\nrow number {}", i);
+            r.iter().for_each(|panel| println!("{}", panel));
+        });
+
+        false
     }
 }
 
@@ -597,6 +616,20 @@ pub struct Panel {
     pub entries_manager: EntriesManager,
     pub selected: FxHashSet<usize>,
     pub field: Field,
+}
+
+impl Display for Panel {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "path: {},\nentries: {}\ndisplaying: {}\nselected: {}\nfield: {:#?}",
+            self.current_path.display(),
+            self.entries_manager.entries.len(),
+            self.entries_manager.displaying.len(),
+            self.selected.len(),
+            self.field.kind
+        )
+    }
 }
 
 impl Panel {
@@ -620,9 +653,11 @@ pub enum Message {
     SelectionModify(usize, bool, bool),
     SelectionClear,
     HighlightPath(PathBuf),
+    FetchConfig,
     FetchEntries,
 
     // navigation
+    NavigateIndex(NavigateDirection, bool, bool),
     NavigateForward,
     NavigateBackward,
 
@@ -650,12 +685,22 @@ pub enum Message {
     WindowClose(WindowKind),
 
     // panels
+    Panel(AppendDirection, PathBuf),
     ClosePanel,
+
+    // toasts
+    Toast(
+        &'static str,
+        Cow<'static, str>,
+        ToastKind,
+        Option<mpsc::Sender<Instant>>,
+    ),
 
     // other
     ScrollSignalDisable,
     HandleActions(KeybindAction, bool, bool),
     QueuedChannelIndex(usize),
+    ToggleHiddenView,
 }
 
 #[derive(Default)]
@@ -682,8 +727,12 @@ impl App {
             }
             Message::SelectionClear => self.clear_selected(),
             Message::HighlightPath(path) => self.highlight_path(&path),
+            Message::FetchConfig => self.fetch_config(),
             Message::FetchEntries => self.fetch_entries(),
 
+            Message::NavigateIndex(dir, is_ctrled, is_shifted) => {
+                self.navigate_index(&dir, is_ctrled, is_shifted)
+            }
             Message::NavigateForward => self.nav_forward(),
             Message::NavigateBackward => self.nav_back(),
 
@@ -706,19 +755,32 @@ impl App {
             Message::WindowToggle(kind) => self.windows_manager.toggle(kind),
             Message::WindowClose(kind) => self.windows_manager.close(kind),
 
-            Message::ClosePanel => self.panels_manager.close_panel(),
+            Message::Panel(dir, path) => self.panels_manager.new_panel(dir, &path),
+            Message::ClosePanel => {
+                let close_program = self.panels_manager.close_panel();
+                if close_program {
+                    //close
+                }
+            }
+
+            Message::Toast(title, content, kind, id_chan) => {
+                self.new_toast(title, content, kind, id_chan)
+            }
 
             Message::ScrollSignalDisable => self.disable_scroll_signal(),
             Message::HandleActions(action, is_shifted, is_ctrled) => {
                 self.handle_actions(&action, is_ctrled, is_shifted)
             }
             Message::QueuedChannelIndex(i) => self.channels_manager.queued_chan_index = i,
+            Message::ToggleHiddenView => self.toggle_view_hidden(),
         });
     }
 
     pub fn new(cc: &eframe::CreationContext<'_>) -> Self {
         let ctx = cc.egui_ctx.clone();
         egui_extras::install_image_loaders(&ctx);
+
+        ctx.options_mut(|opts| opts.quit_shortcuts = Vec::new());
 
         let mut app = App {
             ctx,
@@ -747,8 +809,6 @@ impl App {
         } else {
             Theme::Light
         });
-
-        //self.fetch_entries();
     }
 
     pub fn transfer(&mut self, to: usize) {
@@ -1060,109 +1120,114 @@ impl App {
             // block input
         }
 
+        let mut messages = Vec::new();
         match action {
             KeybindAction::NavigateUp => {
-                self.navigate_index(&NavigateDirection::Up, is_ctrled, is_shifted)
+                messages.push(Message::NavigateIndex(
+                    NavigateDirection::Up,
+                    is_ctrled,
+                    is_shifted,
+                ));
             }
             KeybindAction::NavigateDown => {
-                self.navigate_index(&NavigateDirection::Down, is_ctrled, is_shifted);
+                messages.push(Message::NavigateIndex(
+                    NavigateDirection::Down,
+                    is_ctrled,
+                    is_shifted,
+                ));
             }
-            KeybindAction::NavigateForward => self.nav_forward(),
-            KeybindAction::NavigateBackward => self.nav_back(),
+            KeybindAction::NavigateForward => messages.push(Message::NavigateForward),
+            KeybindAction::NavigateBackward => messages.push(Message::NavigateBackward),
             KeybindAction::Copy => {
                 if current_panel.selected.is_empty() {
-                    self.new_toast(
+                    messages.push(Message::Toast(
                         "Clipboard",
                         Cow::Borrowed("nothing is selected to be copied!"),
                         ToastKind::Info,
                         None,
-                    );
-                    return;
+                    ));
+                } else {
+                    messages.push(Message::Toast(
+                        "Clipboard",
+                        Cow::Owned(format!(
+                            "successfully added {} items into clipboard!",
+                            current_panel.selected.len(),
+                        )),
+                        ToastKind::Success,
+                        None,
+                    ));
+                    messages.push(Message::ClipboardMode(ClipboardMode::Copy));
                 }
-
-                self.new_toast(
-                    "Clipboard",
-                    Cow::Owned(format!(
-                        "successfully added {} items into clipboard!",
-                        current_panel.selected.len(),
-                    )),
-                    ToastKind::Success,
-                    None,
-                );
-                self.add_to_clipboard(ClipboardMode::Copy);
             }
             KeybindAction::Cut => {
                 if current_panel.selected.is_empty() {
-                    self.new_toast(
+                    messages.push(Message::Toast(
                         "Clipboard",
                         Cow::Borrowed("nothing is selected to be cut!"),
                         ToastKind::Info,
                         None,
-                    );
-                    return;
+                    ));
+                } else {
+                    messages.push(Message::Toast(
+                        "Clipboard",
+                        Cow::Owned(format!(
+                            "successfully added {} items into clipboard!",
+                            current_panel.selected.len()
+                        )),
+                        ToastKind::Success,
+                        None,
+                    ));
+                    messages.push(Message::ClipboardMode(ClipboardMode::Cut));
                 }
-
-                self.new_toast(
-                    "Clipboard",
-                    Cow::Owned(format!(
-                        "successfully added {} items into clipboard!",
-                        current_panel.selected.len()
-                    )),
-                    ToastKind::Success,
-                    None,
-                );
-                self.add_to_clipboard(ClipboardMode::Cut);
             }
-            KeybindAction::Paste => {
-                self.paste();
-            }
-
+            KeybindAction::Paste => messages.push(Message::Paste),
             KeybindAction::Delete => {
                 if current_panel.selected.is_empty() {
-                    self.new_toast(
+                    messages.push(Message::Toast(
                         "Delete",
                         Cow::Borrowed("nothing is selected to be deleted!"),
                         ToastKind::Info,
                         None,
-                    );
-                    return;
+                    ));
+                } else {
+                    messages.push(Message::Overlay(OverlayKind::Delete));
                 }
-
-                self.new_overlay(OverlayKind::Delete, None);
             }
-            KeybindAction::Rename => self.new_overlay(OverlayKind::Rename, None),
+            KeybindAction::Rename => messages.push(Message::Overlay(OverlayKind::Rename)),
             KeybindAction::ClearClipboard => {
-                self.clipboard_manager.reset();
-                self.new_toast(
+                messages.push(Message::ClipboardReset);
+                messages.push(Message::Toast(
                     "Success!",
                     Cow::Borrowed("successfully cleared clipboard!"),
                     ToastKind::Success,
                     None,
-                );
+                ));
             }
-            KeybindAction::ToggleHidden => self.toggle_view_hidden(),
-            KeybindAction::CreateFile => self.new_overlay(OverlayKind::CreateFile, None),
-            KeybindAction::CreateFolder => self.new_overlay(OverlayKind::CreateFolder, None),
-            KeybindAction::Info => self.new_overlay(OverlayKind::Metadata, None),
-            KeybindAction::Search => self.new_field(&FieldKind::Search),
+            KeybindAction::ToggleHidden => messages.push(Message::ToggleHiddenView),
+            KeybindAction::CreateFile => messages.push(Message::Overlay(OverlayKind::CreateFile)),
+            KeybindAction::CreateFolder => {
+                messages.push(Message::Overlay(OverlayKind::CreateFolder))
+            }
+            KeybindAction::Info => messages.push(Message::Overlay(OverlayKind::Metadata)),
+            KeybindAction::Search => messages.push(Message::Field(FieldKind::Search)),
             KeybindAction::Refresh => {
-                self.fetch_config();
-                self.fetch_entries();
+                messages.push(Message::FetchConfig);
+                messages.push(Message::FetchEntries);
             }
             KeybindAction::SplitVertical => {
-                self.panels_manager
-                    .new_panel(AppendDirection::Right, &PathBuf::new());
-                self.fetch_entries();
+                messages.push(Message::Panel(AppendDirection::Right, PathBuf::new()));
+                messages.push(Message::FetchEntries);
             }
             KeybindAction::SplitHorizontal => {
-                self.panels_manager
-                    .new_panel(AppendDirection::Up, &PathBuf::new());
-                self.fetch_entries();
+                messages.push(Message::Panel(AppendDirection::Up, PathBuf::new()));
+                messages.push(Message::FetchEntries);
             }
-            KeybindAction::ClosePanel => self.panels_manager.close_panel(),
+            KeybindAction::ClosePanel => messages.push(Message::ClosePanel),
             KeybindAction::ToggleVisual => {}
             KeybindAction::Choice(..) => {}
-        }
+        };
+
+        self.process_messages(messages);
     }
 
     pub fn create(&mut self, mode: CreateKind) {
@@ -1498,6 +1563,10 @@ impl App {
         let current_panel = self.panels_manager.current_panel_mut();
         let mut current_index: usize = current_panel.entries_manager.current_index;
 
+        if current_panel.entries_manager.entries.is_empty() {
+            return;
+        }
+
         match direction {
             NavigateDirection::Down => {
                 if current_index < current_panel.entries_manager.displaying.len() - 1 {
@@ -1628,9 +1697,9 @@ impl eframe::App for App {
 
             for (action, shortcut) in &self.config.keybinds_list {
                 if i.modifiers
-                    .matches_logically(pressed_modifiers.plus(shortcut.modifiers))
-                    && pressed_key.is_some_and(|key| key == shortcut.logical_key)
-                    || i.key_pressed(shortcut.logical_key)
+                    .matches_exact(pressed_modifiers.plus(shortcut.modifiers))
+                    && (pressed_key.is_some_and(|key| key == shortcut.logical_key)
+                        || i.key_pressed(shortcut.logical_key))
                 {
                     messages.push(Message::HandleActions(*action, is_ctrled, is_shifted));
                     return;
