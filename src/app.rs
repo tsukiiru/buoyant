@@ -337,11 +337,6 @@ pub enum ToastKind {
     Operation,
 }
 
-pub enum NavigateDirection {
-    Up,
-    Down,
-}
-
 #[derive(PartialEq, Default)]
 pub enum Property {
     #[default]
@@ -393,13 +388,12 @@ impl Display for Position {
 }
 
 #[allow(dead_code)]
-#[derive(PartialEq)]
-pub enum AppendDirection {
+#[derive(Debug, PartialEq, Clone, Copy)]
+pub enum Direction {
     Up,
     Down,
     Left,
     Right,
-    None,
 }
 
 #[derive(Default)]
@@ -461,7 +455,7 @@ impl PanelsManager {
         None
     }
 
-    fn new_panel(&mut self, dir: AppendDirection, path: &Path) {
+    fn new_panel(&mut self, dir: Option<Direction>, path: &Path) {
         let path = if !path.exists() {
             &home_dir().unwrap()
         } else {
@@ -475,7 +469,7 @@ impl PanelsManager {
         self.focused = new_id;
         self.id_count += 1;
 
-        if dir == AppendDirection::None {
+        if dir.is_none() {
             // for initializing, nothing else
             self.panels.insert(0, vec![panel]);
             self.height_proportion.insert(0, 1.0);
@@ -487,16 +481,15 @@ impl PanelsManager {
         let mut new_pos = self.position(current_panel);
         let current_pos = self.position(current_panel);
 
-        match dir {
-            AppendDirection::Up => new_pos.r = (new_pos.r as i16 - 1).max(0) as usize,
-            AppendDirection::Down => new_pos.r += 1,
-            AppendDirection::Left => new_pos.c = (new_pos.c as i16 - 1).max(0) as usize,
-            AppendDirection::Right => new_pos.c += 1,
-            AppendDirection::None => {}
+        match dir.as_ref().unwrap() {
+            Direction::Up => new_pos.r = (new_pos.r as i16 - 1).max(0) as usize,
+            Direction::Down => new_pos.r += 1,
+            Direction::Left => new_pos.c = (new_pos.c as i16 - 1).max(0) as usize,
+            Direction::Right => new_pos.c += 1,
         };
 
-        match dir {
-            AppendDirection::Left | AppendDirection::Right => {
+        match dir.unwrap() {
+            Direction::Left | Direction::Right => {
                 self.panels[current_pos.r].insert(new_pos.c, panel);
 
                 let focused_panel_width = &self.width_proportion[new_pos.r][current_pos.c];
@@ -506,7 +499,7 @@ impl PanelsManager {
                 row_width_proportion.insert(new_pos.c, new_width);
                 row_width_proportion[current_pos.c] = new_width;
             }
-            AppendDirection::Up | AppendDirection::Down => {
+            Direction::Up | Direction::Down => {
                 new_pos.c = 0;
                 // create a new row
                 self.panels.insert(new_pos.r, vec![panel]);
@@ -522,7 +515,6 @@ impl PanelsManager {
 
                 self.width_proportion.insert(new_pos.r, vec![1.0]);
             }
-            AppendDirection::None => {}
         };
     }
 
@@ -630,6 +622,44 @@ impl PanelsManager {
 
         false
     }
+
+    fn navigate_panel(&mut self, dir: Direction) {
+        let current_pos = self.position(self.focused);
+        let current_row = self.panels.get(current_pos.r).unwrap();
+
+        let mut new_pos = current_pos;
+
+        match dir {
+            Direction::Left => {
+                if current_row.len() < 2 || current_pos.c == 0 {
+                    return;
+                }
+                new_pos.c -= 1;
+            }
+            Direction::Right => {
+                if current_row.len() < 2 || current_pos.c == current_row.len() - 1 {
+                    return;
+                }
+                new_pos.c += 1;
+            }
+            Direction::Down => {
+                if self.panels.len() < 2 || current_pos.r == self.panels.len() - 1 {
+                    return;
+                }
+                new_pos.r += 1;
+                new_pos.c = 0;
+            }
+            Direction::Up => {
+                if self.panels.len() < 2 || current_pos.r == 0 {
+                    return;
+                }
+                new_pos.r -= 1;
+                new_pos.c = 0;
+            }
+        }
+
+        self.focused = self.id(new_pos);
+    }
 }
 
 #[derive(Debug)]
@@ -681,7 +711,7 @@ pub enum Message {
     FetchEntries,
 
     // navigation
-    NavigateIndex(NavigateDirection, bool, bool),
+    NavigateIndex(Direction, bool, bool),
     NavigateForward,
     NavigateBackward,
 
@@ -709,8 +739,9 @@ pub enum Message {
     WindowClose(WindowKind),
 
     // panels
-    Panel(AppendDirection, PathBuf),
+    Panel(Direction, PathBuf),
     ClosePanel,
+    PanelNavigate(Direction),
 
     // toasts
     Toast(
@@ -752,7 +783,7 @@ impl App {
         };
         app.fetch_config();
         app.panels_manager
-            .new_panel(AppendDirection::None, &env::home_dir().unwrap());
+            .new_panel(None, &env::home_dir().unwrap());
 
         app.fetch_entries();
         app
@@ -797,13 +828,14 @@ impl App {
             Message::WindowToggle(kind) => self.windows_manager.toggle(kind),
             Message::WindowClose(kind) => self.windows_manager.close(kind),
 
-            Message::Panel(dir, path) => self.panels_manager.new_panel(dir, &path),
+            Message::Panel(dir, path) => self.panels_manager.new_panel(Some(dir), &path),
             Message::ClosePanel => {
                 let close_program = self.panels_manager.close_panel();
                 if close_program {
                     self.ctx.send_viewport_cmd(ViewportCommand::Close);
                 }
             }
+            Message::PanelNavigate(dir) => self.panels_manager.navigate_panel(dir),
 
             Message::Toast(title, content, kind, id_chan) => {
                 self.new_toast(title, content, kind, id_chan)
@@ -1146,22 +1178,18 @@ impl App {
 
         let mut messages = Vec::new();
         match action {
-            KeybindAction::NavigateUp => {
-                messages.push(Message::NavigateIndex(
-                    NavigateDirection::Up,
+            KeybindAction::WindowNavigate(dir) => match dir {
+                Direction::Up => {
+                    messages.push(Message::NavigateIndex(Direction::Up, is_ctrled, is_shifted))
+                }
+                Direction::Down => messages.push(Message::NavigateIndex(
+                    Direction::Down,
                     is_ctrled,
                     is_shifted,
-                ));
-            }
-            KeybindAction::NavigateDown => {
-                messages.push(Message::NavigateIndex(
-                    NavigateDirection::Down,
-                    is_ctrled,
-                    is_shifted,
-                ));
-            }
-            KeybindAction::NavigateForward => messages.push(Message::NavigateForward),
-            KeybindAction::NavigateBackward => messages.push(Message::NavigateBackward),
+                )),
+                Direction::Right => messages.push(Message::NavigateForward),
+                Direction::Left => messages.push(Message::NavigateBackward),
+            },
             KeybindAction::Copy => {
                 if current_panel.selected.is_empty() {
                     messages.push(Message::Toast(
@@ -1239,14 +1267,15 @@ impl App {
                 messages.push(Message::FetchEntries);
             }
             KeybindAction::SplitVertical => {
-                messages.push(Message::Panel(AppendDirection::Right, PathBuf::new()));
+                messages.push(Message::Panel(Direction::Right, PathBuf::new()));
                 messages.push(Message::FetchEntries);
             }
             KeybindAction::SplitHorizontal => {
-                messages.push(Message::Panel(AppendDirection::Up, PathBuf::new()));
+                messages.push(Message::Panel(Direction::Up, PathBuf::new()));
                 messages.push(Message::FetchEntries);
             }
             KeybindAction::ClosePanel => messages.push(Message::ClosePanel),
+            KeybindAction::PanelNavigate(dir) => messages.push(Message::PanelNavigate(*dir)),
             KeybindAction::ToggleVisual => {}
             KeybindAction::Choice(..) => {}
         };
@@ -1583,7 +1612,7 @@ impl App {
         };
     }
 
-    fn navigate_index(&mut self, direction: &NavigateDirection, is_ctrled: bool, is_shifted: bool) {
+    fn navigate_index(&mut self, direction: &Direction, is_ctrled: bool, is_shifted: bool) {
         let current_panel = self.panels_manager.current_panel_mut();
         let mut current_index: usize = current_panel.entries_manager.current_index;
 
@@ -1592,16 +1621,16 @@ impl App {
         }
 
         match direction {
-            NavigateDirection::Down => {
-                if current_index < current_panel.entries_manager.displaying.len() - 1 {
-                    current_index += 1;
-                }
+            Direction::Down
+                if current_index < current_panel.entries_manager.displaying.len() - 1 =>
+            {
+                current_index += 1;
             }
-            NavigateDirection::Up => {
-                if !(current_index == 0) {
-                    current_index -= 1;
-                }
+            Direction::Up if !(current_index == 0) => {
+                current_index -= 1;
             }
+
+            _ => {}
         }
 
         current_panel.entries_manager.scroll_signal = true;

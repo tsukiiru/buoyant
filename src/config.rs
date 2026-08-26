@@ -7,7 +7,7 @@ use rayon::{
 };
 use serde::Deserialize;
 
-use crate::app::Property;
+use crate::app::{Direction, Property};
 
 pub type Keybind = (KeybindAction, KeyboardShortcut);
 
@@ -23,7 +23,7 @@ impl Default for Config {
     fn default() -> Self {
         Config {
             keybinds: Keybinds::default(),
-            keybinds_list: Vec::with_capacity(31),
+            keybinds_list: Vec::with_capacity(34),
             // NOTE: update allocation size matching the number of keybinds
             sorting: Sorting::default(),
             view: View::default(),
@@ -40,10 +40,7 @@ impl Config {
 
 #[derive(Clone, Copy, Debug)]
 pub enum KeybindAction {
-    NavigateUp,
-    NavigateDown,
-    NavigateForward,
-    NavigateBackward,
+    WindowNavigate(Direction),
     Copy,
     Cut,
     Paste,
@@ -61,6 +58,7 @@ pub enum KeybindAction {
     SplitVertical,
     SplitHorizontal,
     ClosePanel,
+    PanelNavigate(Direction),
 }
 
 macro_rules! create_keybinds {
@@ -104,6 +102,10 @@ create_keybinds!(
     split_vertical,
     split_horizontal,
     close_panel,
+    panel_navigate_up,
+    panel_navigate_down,
+    panel_navigate_left,
+    panel_navigate_right,
 );
 
 const NONE: Modifiers = Modifiers::NONE;
@@ -146,6 +148,10 @@ impl Default for Keybinds {
             split_vertical: bind(CTRL_ALT, Key::V),
             split_horizontal: bind(CTRL_ALT, Key::H),
             close_panel: bind(CTRL_ALT, Key::Q),
+            panel_navigate_up: bind(CTRL_ALT, Key::ArrowUp),
+            panel_navigate_down: bind(CTRL_ALT, Key::ArrowDown),
+            panel_navigate_left: bind(CTRL_ALT, Key::ArrowLeft),
+            panel_navigate_right: bind(CTRL_ALT, Key::ArrowRight),
         }
     }
 }
@@ -288,6 +294,10 @@ create_raw_keybinds!(
     split_vertical,
     split_horizontal,
     close_panel,
+    panel_navigate_up,
+    panel_navigate_down,
+    panel_navigate_left,
+    panel_navigate_right,
 );
 
 fn process_raw_keybinds(raw_config: &RawKeybinds, config: &mut Keybinds) {
@@ -331,6 +341,10 @@ fn process_raw_keybinds(raw_config: &RawKeybinds, config: &mut Keybinds) {
     process_field!(split_vertical);
     process_field!(split_horizontal);
     process_field!(close_panel);
+    process_field!(panel_navigate_right);
+    process_field!(panel_navigate_left);
+    process_field!(panel_navigate_down);
+    process_field!(panel_navigate_up);
 }
 
 fn match_key(raw_key: &str) -> Option<KeyboardShortcut> {
@@ -471,10 +485,22 @@ fn match_key(raw_key: &str) -> Option<KeyboardShortcut> {
 fn listing_keybinds(keybinds: &Keybinds, list: &mut Vec<Keybind>) {
     list.clear();
 
-    list.push((KeybindAction::NavigateUp, keybinds.navigate_up));
-    list.push((KeybindAction::NavigateDown, keybinds.navigate_down));
-    list.push((KeybindAction::NavigateForward, keybinds.navigate_forward));
-    list.push((KeybindAction::NavigateBackward, keybinds.navigate_backward));
+    list.push((
+        KeybindAction::WindowNavigate(Direction::Up),
+        keybinds.navigate_up,
+    ));
+    list.push((
+        KeybindAction::WindowNavigate(Direction::Down),
+        keybinds.navigate_down,
+    ));
+    list.push((
+        KeybindAction::WindowNavigate(Direction::Right),
+        keybinds.navigate_forward,
+    ));
+    list.push((
+        KeybindAction::WindowNavigate(Direction::Left),
+        keybinds.navigate_backward,
+    ));
 
     list.push((KeybindAction::Copy, keybinds.copy_to_clipboard));
     list.push((KeybindAction::Cut, keybinds.cut_to_clipboard));
@@ -505,6 +531,22 @@ fn listing_keybinds(keybinds: &Keybinds, list: &mut Vec<Keybind>) {
     list.push((KeybindAction::SplitVertical, keybinds.split_vertical));
     list.push((KeybindAction::SplitHorizontal, keybinds.split_horizontal));
     list.push((KeybindAction::ClosePanel, keybinds.close_panel));
+    list.push((
+        KeybindAction::PanelNavigate(Direction::Up),
+        keybinds.panel_navigate_up,
+    ));
+    list.push((
+        KeybindAction::PanelNavigate(Direction::Down),
+        keybinds.panel_navigate_down,
+    ));
+    list.push((
+        KeybindAction::PanelNavigate(Direction::Left),
+        keybinds.panel_navigate_left,
+    ));
+    list.push((
+        KeybindAction::PanelNavigate(Direction::Right),
+        keybinds.panel_navigate_right,
+    ));
 
     list.par_sort_by(|a, b| {
         let (x, y) = (count_mod(&a.1.modifiers), count_mod(&b.1.modifiers));
