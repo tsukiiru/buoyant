@@ -386,7 +386,7 @@ impl App {
 
             m.separator();
             m.label("clipboard");
-            /*
+
             macro_rules! button {
                 ($name:ident, $text:literal, $callback:expr, $condition:expr $(, $kb:ident)?) => {
                     let mut $name = RichText::new($text);
@@ -430,36 +430,25 @@ impl App {
             selected_btn!(
                 del,
                 "delete",
-                messages.push(Message::Overlay(
-                    OverlayKind::Delete
-                )),
+                messages.push(Message::Overlay(OverlayKind::Delete)),
                 delete_selections
             );
             selected_btn!(
                 cut,
                 "cut",
-                messages.push(
-                    Message::ClipboardMode(
-                        ClipboardMode::Cut
-                    )
-                ),
+                messages.push(Message::ClipboardMode(ClipboardMode::Cut)),
                 cut_to_clipboard
             );
             selected_btn!(
                 copy,
                 "copy",
-                messages.push(
-                    Message::ClipboardMode(
-                        ClipboardMode::Copy
-                    )
-                ),
+                messages.push(Message::ClipboardMode(ClipboardMode::Copy)),
                 copy_to_clipboard
             );
             selected_btn!(
                 clear_s,
                 "clear selection",
-                messages
-                    .push(Message::SelectionClear)
+                messages.push(Message::SelectionClear)
             );
             clipboard_btn!(
                 paste,
@@ -470,11 +459,10 @@ impl App {
             clipboard_btn!(
                 clear_cp,
                 "clear clipboard",
-                messages
-                    .push(Message::ClipboardReset),
+                messages.push(Message::ClipboardReset),
                 clear_clipboard
             );
-            */
+
             m.separator();
             m.label("windows");
 
