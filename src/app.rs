@@ -194,7 +194,7 @@ impl Default for EntriesManager {
 
 impl EntriesManager {
     fn entry(&self, index: &usize) -> Option<&Entry> {
-        self.entries.get(*self.displaying.get(*index).unwrap())
+        self.entries.get(*self.displaying.get(*index)?)
     }
 
     fn push(&mut self, temp_entry: &TempEntry, index: usize) {
@@ -375,7 +375,7 @@ pub struct ChannelsManager {
     queued_chan_index: usize,
 }
 
-#[derive(Default, Clone, Copy)]
+#[derive(Default, Clone, Copy, PartialEq)]
 pub struct Position {
     pub r: usize,
     pub c: usize,
@@ -439,20 +439,12 @@ impl PanelsManager {
 
     fn panel(&self, id: u16) -> Option<&Panel> {
         let pos = self.position(id);
-        if let Some(row) = self.panels.get(pos.r) {
-            return row.get(pos.c);
-        }
-
-        None
+        self.panels.get(pos.r)?.get(pos.c)
     }
 
     fn panel_mut(&mut self, id: u16) -> Option<&mut Panel> {
         let pos = self.position(id);
-        if let Some(row) = self.panels.get_mut(pos.r) {
-            return row.get_mut(pos.c);
-        }
-
-        None
+        self.panels.get_mut(pos.r)?.get_mut(pos.c)
     }
 
     fn new_panel(&mut self, dir: Option<Direction>, path: &Path) {
@@ -1743,7 +1735,7 @@ impl eframe::App for App {
 
             for (action, shortcut) in &self.config.keybinds_list {
                 if i.modifiers
-                    .matches_exact(pressed_modifiers.plus(shortcut.modifiers))
+                    .matches_logically(pressed_modifiers.plus(shortcut.modifiers))
                     && (pressed_key.is_some_and(|key| key == shortcut.logical_key)
                         || i.key_pressed(shortcut.logical_key))
                 {

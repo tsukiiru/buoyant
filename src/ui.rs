@@ -4,14 +4,18 @@ use std::{ops::Sub, path::Path, sync::Arc, time::Instant};
 
 use chrono::{DateTime, Datelike, Utc};
 use eframe::egui::{
-    Align, Align2, AtomLayout, Button, CentralPanel, Color32, CornerRadius, Frame, Grid, Id, Image,
-    Key, Label, LayerId, Layout, Margin, Modal, Order, Popup, PopupAnchor, ProgressBar, RectAlign,
-    RichText, ScrollArea, Sense, Stroke, TextEdit, TextWrapMode, UiBuilder, Vec2, Window,
+    Align, Align2, AtomLayout, Button, CentralPanel, Color32, Context, CornerRadius, Frame, Grid,
+    Id, Image, Key, Label, LayerId, Layout, Margin, Modal, Order, Popup, PopupAnchor, ProgressBar,
+    Rect, RectAlign, RichText, ScrollArea, Sense, Stroke, TextEdit, TextWrapMode, UiBuilder, Vec2,
+    Window,
 };
 use egui_extras::{Size, StripBuilder};
 
 use crate::{
-    app::{App, ClipboardMode, FieldKind, Message, OverlayKind, Property, ToastKind, WindowKind},
+    app::{
+        App, ClipboardMode, FieldKind, Message, OverlayKind, Panel, Position, Property, ToastKind,
+        WindowKind,
+    },
     file::{
         CreateKind,
         icons::{IconKind, match_icon},
@@ -19,654 +23,478 @@ use crate::{
 };
 
 impl App {
-    pub fn ui(&mut self, main_ui: &mut eframe::egui::Ui) {
-        let ctx = self.ctx.clone();
-        let visuals = ctx.theme().default_visuals();
+    fn address_bar(&self, ui: &mut eframe::egui::Ui, messages: &mut Vec<Message>, panel: &Panel) {
+        ui.horizontal(|ui| {
+            let mut button =
+                ui.add(Button::new(RichText::new("<").size(14.0)).fill(Color32::TRANSPARENT));
+            button.set_intrinsic_size(Vec2::new(400.0, 20.0));
 
-        let mut messages: Vec<Message> = Vec::with_capacity(2);
-
-        CentralPanel::default().show(main_ui, |ui| {
-            let mut builder = StripBuilder::new(ui);
-
-            for (ri, _) in self.panels_manager.panels.iter().enumerate() {
-                builder = builder.size(Size::relative(self.panels_manager.height_proportion[ri]));
+            if button.clicked() {
+                messages.push(Message::NavigateBackward);
             }
 
-            builder.vertical(|mut strip| {
-                for (ri, row) in self.panels_manager.panels.iter().enumerate() {
-                    strip.strip(|mut builder| {
-                        for (ci, _) in row.iter().enumerate() {
-                            builder = builder
-                                .size(Size::relative(self.panels_manager.width_proportion[ri][ci]));
-                        }
+            ui.label(format!("{}", panel.current_path.display()));
+        });
+    }
 
-                        builder.horizontal(|mut strip| {
-                            for (ci, panel) in row.iter().enumerate() {
-                                let current_pos =
-                                    self.panels_manager.position(self.panels_manager.focused);
-                                let panel_focused = current_pos.r == ri && current_pos.c == ci;
+    fn search_bar(
+        &self,
+        ui: &mut eframe::egui::Ui,
+        messages: &mut Vec<Message>,
+        panel: &Panel,
+        ctx: &Context,
+    ) {
+        let mut content = panel.field.buffer.clone();
+        let is_searching = panel
+            .field
+            .kind
+            .is_some_and(|kind| kind == FieldKind::Search);
 
-                                strip.cell(|ui| {
-                                    let panel_rect = ui.available_rect_before_wrap();
+        let input = ui.add(
+            TextEdit::singleline(&mut content)
+                .background_color(Color32::TRANSPARENT)
+                .hint_text(format!(
+                    "({}) input search entry :3",
+                    ctx.format_shortcut(&self.config.keybinds.search)
+                ))
+                .frame(Frame::NONE)
+                .desired_width(f32::INFINITY),
+        );
 
-                                    ui.add_enabled_ui(panel_focused, |ui| {
-                                        // address bar
-                                        ui.horizontal(|ui| {
-                                            let mut button = ui.add(
-                                                Button::new(RichText::new("<").size(14.0))
-                                                    .fill(Color32::TRANSPARENT),
-                                            );
-                                            button.set_intrinsic_size(Vec2::new(400.0, 20.0));
+        if input.gained_focus() && !is_searching {
+            messages.push(Message::Field(FieldKind::Search));
+        }
+        if is_searching && input.changed() {
+            messages.push(Message::FieldBuffer(content));
+            messages.push(Message::FieldLogic(FieldKind::Search));
+        }
+        if is_searching && ui.input(|i| i.key_pressed(Key::Escape)) {
+            messages.push(Message::FieldClose);
+            input.surrender_focus();
+        }
+        if is_searching && ui.input(|i| i.key_pressed(Key::Enter)) || input.lost_focus() {
+            messages.push(Message::FieldUnfocus);
+        }
+        if is_searching && panel.field.focused {
+            input.request_focus();
+        }
+        if is_searching && !panel.field.focused {
+            input.surrender_focus();
+        }
+    }
 
-                                            if button.clicked() {
-                                                messages.push(Message::NavigateBackward);
-                                            }
+    fn explorer_area(
+        &self,
+        ui: &mut eframe::egui::Ui,
+        panel_rect: &Rect,
+        panel: &Panel,
+        ctx: &Context,
+        messages: &mut Vec<Message>,
+        pos: &Position,
+    ) {
+        let visuals = ctx.theme().default_visuals();
+        let ri = pos.r;
+        let ci = pos.c;
 
-                                            ui.label(format!("{}", panel.current_path.display()));
-                                        });
+        let calc_width = (panel_rect.width() - 30.0) / self.config.view.explorer.len() as f32;
+        ui.horizontal(|ui| {
+            let view = &self.config.view.explorer;
+            ui.allocate_space(Vec2::new(2.0 + 16.0, 0.0));
 
-                                        // search bar
-                                        let mut content = panel.field.buffer.clone();
-                                        let is_searching = panel
-                                            .field
-                                            .kind
-                                            .is_some_and(|kind| kind == FieldKind::Search);
+            let mut grid = Grid::new(("explorer-title-grid", ri, ci));
+            grid = grid.min_col_width(calc_width);
 
-                                        let input = ui.add(
-                                            TextEdit::singleline(&mut content)
-                                                .background_color(Color32::TRANSPARENT)
-                                                .hint_text(format!(
-                                                    "({}) input search entry :3",
-                                                    ctx.format_shortcut(
-                                                        &self.config.keybinds.search
-                                                    )
-                                                ))
-                                                .frame(Frame::NONE)
-                                                .desired_width(f32::INFINITY),
-                                        );
-
-                                        if input.gained_focus() && !is_searching {
-                                            messages.push(Message::Field(FieldKind::Search));
-                                        }
-                                        if is_searching && input.changed() {
-                                            messages.push(Message::FieldBuffer(content));
-                                            messages.push(Message::FieldLogic(FieldKind::Search));
-                                        }
-                                        if is_searching && ui.input(|i| i.key_pressed(Key::Escape))
-                                        {
-                                            messages.push(Message::FieldClose);
-                                            input.surrender_focus();
-                                        }
-                                        if is_searching && ui.input(|i| i.key_pressed(Key::Enter))
-                                            || input.lost_focus()
-                                        {
-                                            messages.push(Message::FieldUnfocus);
-                                        }
-                                        if is_searching && panel.field.focused {
-                                            input.request_focus();
-                                        }
-                                        if is_searching && !panel.field.focused {
-                                            input.surrender_focus();
-                                        }
-
-                                        let calc_width = (panel_rect.width() - 30.0)
-                                            / self.config.view.explorer.len() as f32;
-
-                                        ui.separator();
-                                        ui.horizontal(|ui| {
-                                            let view = &self.config.view.explorer;
-                                            ui.allocate_space(Vec2::new(2.0 + 16.0, 0.0));
-
-                                            let mut grid =
-                                                Grid::new(("explorer-title-grid", ri, ci));
-                                            grid = grid.min_col_width(calc_width);
-
-                                            grid.show(ui, |ui| {
-                                                view.iter().for_each(|p| {
-                                                    ui.add(
-                                                        Label::new(p.to_string())
-                                                            .halign(Align::Min),
-                                                    );
-                                                });
-                                            });
-                                        });
-
-                                        // explorer area
-                                        let current_index = &panel.entries_manager.current_index;
-                                        let mut from: Option<Arc<usize>> = None;
-                                        let mut to = None;
-
-                                        let displaying = panel.entries_manager.displaying.clone();
-
-                                        let bg_rect = ui.allocate_space(ui.available_size()).1;
-                                        let bg_response = ui.interact(
-                                            bg_rect,
-                                            Id::new(("explorer-area", ri, ci)),
-                                            Sense::click(),
-                                        );
-
-                                        let mut child_ui =
-                                            ui.new_child(UiBuilder::new().max_rect(bg_rect));
-
-                                        ScrollArea::vertical().show_rows(
-                                            &mut child_ui,
-                                            32.0,
-                                            displaying.len(),
-                                            |sa, range| {
-                                                let keybinds = &self.config.keybinds;
-                                                let view = &self.config.view.explorer;
-
-                                                for (index, entry_index) in
-                                                    displaying.into_iter().enumerate()
-                                                {
-                                                    let is_current_index = index == *current_index;
-                                                    let entry_opt = panel
-                                                        .entries_manager
-                                                        .entries
-                                                        .get(entry_index);
-                                                    if entry_opt.is_none()
-                                                        || (!range.contains(&index)
-                                                            && !is_current_index)
-                                                    {
-                                                        continue;
-                                                    }
-
-                                                    let entry = entry_opt.unwrap();
-
-                                                    sa.horizontal(|h| {
-                                                        let mut frame = Frame::NONE
-                                                            .stroke(Stroke::new(
-                                                                1.0,
-                                                                Color32::TRANSPARENT,
-                                                            ))
-                                                            .corner_radius(4.0);
-
-                                                        if panel.selected.contains(&entry_index) {
-                                                            frame.fill = Color32::LIGHT_GREEN
-                                                                .gamma_multiply(0.3);
-                                                        }
-
-                                                        if is_current_index {
-                                                            frame.stroke.color = visuals
-                                                                .text_color()
-                                                                .gamma_multiply(0.3);
-                                                        }
-
-                                                        let mut color = visuals.text_color();
-                                                        let mut icon = &entry.file_icon;
-
-                                                        if entry.is_hidden {
-                                                            color = visuals
-                                                                .text_color()
-                                                                .gamma_multiply(0.5);
-                                                        }
-                                                        if self
-                                                            .clipboard_manager
-                                                            .entries
-                                                            .contains(&entry.path)
-                                                        {
-                                                            icon = match self
-                                                                .clipboard_manager
-                                                                .mode
-                                                                .as_ref()
-                                                                .unwrap()
-                                                            {
-                                                                ClipboardMode::Copy => {
-                                                                    &IconKind::Copy
-                                                                }
-                                                                ClipboardMode::Cut => {
-                                                                    &IconKind::Scissors
-                                                                }
-                                                            };
-                                                            color =
-                                                                Color32::BLUE.gamma_multiply(0.3);
-                                                        }
-
-                                                        let fr = frame
-                                                            .show(h, |f| {
-                                                                let another_frame = Frame::NONE
-                                                                    .inner_margin(
-                                                                        Margin::symmetric(2, 8),
-                                                                    );
-                                                                another_frame.show(f, |a| {
-                                                                    a.add(
-                                                                        Image::new(match_icon(
-                                                                            icon,
-                                                                        ))
-                                                                        .fit_to_exact_size(
-                                                                            Vec2::new(14.0, 14.0),
-                                                                        ),
-                                                                    );
-                                                                });
-
-                                                                let mut grid =
-                                                                    Grid::new(Id::new((
-                                                                        "explorer-grid",
-                                                                        ri,
-                                                                        ci,
-                                                                        &index,
-                                                                    )));
-
-                                                                grid =
-                                                                    grid.min_col_width(calc_width);
-                                                                grid.show(f, |g| {
-                                                                    view.iter().for_each(
-                                                                        |p| match p {
-                                                                            Property::Name => {
-                                                                                g.add(
-                                        AtomLayout::new(&entry.name)
-                                          .wrap_mode(TextWrapMode::Truncate)
-                                          .max_width(calc_width)
-                                          .fallback_text_color(color),
-                                      );
-                                                                            }
-                                                                            Property::Accessed => {
-                                                                                g.add(
-                                        AtomLayout::new(format_date(entry.accessed))
-                                          .max_width(calc_width)
-                                          .wrap_mode(TextWrapMode::Truncate)
-                                          .fallback_text_color(color),
-                                      );
-                                                                            }
-                                                                            Property::Created => {
-                                                                                g.add(
-                                        AtomLayout::new(format_date(entry.created))
-                                          .max_width(calc_width)
-                                          .wrap_mode(TextWrapMode::Truncate)
-                                          .fallback_text_color(color),
-                                      );
-                                                                            }
-                                                                            Property::Size => {
-                                                                                g.add(
-                                        AtomLayout::new(if let Some(size) = &entry.folder_size {
-                                          format!("{} items", size)
-                                        } else {
-                                          bytes_to_string(entry.file_size.unwrap_or_default())
-                                        })
-                                        .max_width(calc_width)
-                                        .wrap_mode(TextWrapMode::Truncate)
-                                        .fallback_text_color(color),
-                                      );
-                                                                            }
-                                                                            Property::Type => {
-                                                                                g.add(
-                                        AtomLayout::new(entry.file_type)
-                                          .max_width(calc_width)
-                                          .wrap_mode(TextWrapMode::Truncate)
-                                          .fallback_text_color(color),
-                                      );
-                                                                            }
-                                                                            Property::Path => {
-                                                                                g.add(
-                                        AtomLayout::new(format!("{}", entry.path.display()))
-                                          .max_width(calc_width)
-                                          .wrap_mode(TextWrapMode::Truncate)
-                                          .fallback_text_color(color),
-                                      );
-                                                                            }
-                                                                        },
-                                                                    );
-                                                                });
-                                                            })
-                                                            .response;
-
-                                                        let btn_interact = h.interact(
-                                                            fr.rect,
-                                                            Id::new(("button", ri, ci, &index)),
-                                                            Sense::click_and_drag(),
-                                                        );
-                                                        btn_interact
-                                                            .dnd_set_drag_payload(entry_index);
-
-                                                        if btn_interact.drag_started() {
-
-                                                            messages.push(Message::SelectionSwap(
-                                                                index,
-                                                            ));
-                                                        }
-
-                                                        if btn_interact.dragged() {
-                                                            let popup = Popup::new(
-                                                                Id::new((
-                                                                    "drag_pop", ri, ci, &index,
-                                                                )),
-                                                                ctx.clone(),
-                                                                PopupAnchor::Pointer,
-                                                                LayerId::new(
-                                                                    Order::Tooltip,
-                                                                    Id::new((
-                                                                        "drag", ri, ci, &index,
-                                                                    )),
-                                                                ),
-                                                            )
-                                                            .align(RectAlign::TOP_START)
-                                                            .layout(Layout::left_to_right(
-                                                                Align::TOP,
-                                                            ));
-                                                            popup.show(|pop| {
-                                                                pop.add(
-                                                                    Image::new(match_icon(
-                                                                        &IconKind::Files,
-                                                                    ))
-                                                                    .fit_to_exact_size(Vec2::new(
-                                                                        14.0, 14.0,
-                                                                    )),
-                                                                );
-                                                                pop.label(format!(
-                                                                    "files [{}]",
-                                                                    panel.selected.len()
-                                                                ));
-                                                            });
-                                                        }
-
-                                                        if let Some(hovered_payload) =
-                                                            fr.dnd_hover_payload::<usize>()
-                                                        {
-                                                            if *hovered_payload != entry_index {
-                                                                h.painter().rect_filled(
-                                                                    fr.rect,
-                                                                    CornerRadius::from(4.0),
-                                                                    visuals
-                                                                        .text_color()
-                                                                        .gamma_multiply(0.1),
-                                                                );
-                                                            }
-                                                            if let Some(dragged_payload) =
-                                                                fr.dnd_release_payload()
-                                                            {
-                                                                from = Some(dragged_payload);
-                                                                to = Some(entry_index)
-                                                            }
-                                                        }
-
-                                                        if is_current_index
-                                                            && panel.entries_manager.scroll_signal
-                                                        {
-                                                            btn_interact.scroll_to_me(None);
-                                                            messages
-                                                                .push(Message::ScrollSignalDisable);
-                                                        }
-
-                                                        btn_interact.context_menu(|m| {
-                                                            m.label(entry.name.clone());
-                                                            if m.add(
-                                                                Button::new("rename")
-                                                                    .shortcut_text(
-                                                                        ctx.format_shortcut(
-                                                                            &keybinds.rename_file,
-                                                                        ),
-                                                                    ),
-                                                            )
-                                                            .clicked()
-                                                            {
-                                                                messages.push(Message::Overlay(
-                                                                    OverlayKind::Rename,
-                                                                ));
-                                                            }
-                                                            if m.add(
-                                                                Button::new("delete")
-                                                                    .shortcut_text(
-                                                                        ctx.format_shortcut(
-                                                                            &keybinds
-                                                                                .delete_selections,
-                                                                        ),
-                                                                    ),
-                                                            )
-                                                            .clicked()
-                                                            {
-                                                                messages.push(Message::Overlay(
-                                                                    OverlayKind::Delete,
-                                                                ));
-                                                            }
-                                                            if m.add(
-                                                                Button::new("cut").shortcut_text(
-                                                                    ctx.format_shortcut(
-                                                                        &keybinds.cut_to_clipboard,
-                                                                    ),
-                                                                ),
-                                                            )
-                                                            .clicked()
-                                                            {
-                                                                messages.push(
-                                                                    Message::ClipboardMode(
-                                                                        ClipboardMode::Cut,
-                                                                    ),
-                                                                );
-                                                            }
-                                                            if m.add(
-                                                                Button::new("copy").shortcut_text(
-                                                                    ctx.format_shortcut(
-                                                                        &keybinds.copy_to_clipboard,
-                                                                    ),
-                                                                ),
-                                                            )
-                                                            .clicked()
-                                                            {
-                                                                messages.push(
-                                                                    Message::ClipboardMode(
-                                                                        ClipboardMode::Copy,
-                                                                    ),
-                                                                );
-                                                            }
-                                                            if m.add(
-                                                                Button::new("info").shortcut_text(
-                                                                    ctx.format_shortcut(
-                                                                        &keybinds.view_info,
-                                                                    ),
-                                                                ),
-                                                            )
-                                                            .clicked()
-                                                            {
-                                                                messages.push(Message::Overlay(
-                                                                    OverlayKind::Metadata,
-                                                                ));
-                                                            }
-                                                        });
-
-                                                        if btn_interact.clicked() {
-                                                            let ctrl_pressed = h.input(|i| {
-                                                                i.key_down(Key::ControlLeft)
-                                                                    || i.key_down(Key::ControlRight)
-                                                            });
-                                                            let shift_pressed = h.input(|i| {
-                                                                i.key_down(Key::ShiftLeft)
-                                                                    || i.key_down(Key::ShiftRight)
-                                                            });
-                                                            messages.push(Message::SelectionModify(
-                                                                index,
-                                                                ctrl_pressed,
-                                                                shift_pressed,
-                                                            ))
-                                                        }
-
-                                                        if btn_interact.double_clicked() {
-                                                            messages.push(Message::NavigateForward);
-                                                        }
-
-                                                        if btn_interact.secondary_clicked() {
-                                                            messages.push(Message::SelectionSwap(
-                                                                index,
-                                                            ));
-                                                        }
-                                                    });
-                                                }
-                                            },
-                                        );
-
-                                        // drag n drop handler
-                                        if let (Some(from), Some(to)) = (from, to)
-                                            && *from != to
-                                        {
-                                            messages.push(Message::Transfer(to));
-                                        }
-
-                                        if bg_response.clicked()
-                                            && !(ui.input(|i| {
-                                                i.key_pressed(Key::ControlLeft)
-                                                    && i.key_pressed(Key::ControlRight)
-                                                    && i.key_pressed(Key::ShiftLeft)
-                                                    && i.key_pressed(Key::ShiftRight)
-                                            }))
-                                        {
-                                            messages.push(Message::SelectionClear);
-                                        }
-
-                                        bg_response.context_menu(|m| {
-                                            let keybinds = &self.config.keybinds;
-                                            m.label("create");
-
-                                            if m.add(Button::new("create file").shortcut_text(
-                                                ctx.format_shortcut(&keybinds.create_file_path),
-                                            ))
-                                            .clicked()
-                                            {
-                                                messages.push(Message::Overlay(
-                                                    OverlayKind::CreateFile,
-                                                ));
-                                            }
-                                            if m.add(Button::new("create folder").shortcut_text(
-                                                ctx.format_shortcut(&keybinds.create_folder_path),
-                                            ))
-                                            .clicked()
-                                            {
-                                                messages.push(Message::Overlay(
-                                                    OverlayKind::CreateFolder,
-                                                ));
-                                            }
-
-                                            m.separator();
-                                            m.label("clipboard");
-
-                                            macro_rules! button {
-                                                ($name:ident, $text:literal, $callback:expr, $condition:expr $(, $kb:ident)?) => {
-                                                    let mut $name = RichText::new($text);
-                                                    if panel.selected.is_empty() {
-                                                        $name = $name.color(visuals.text_color().gamma_multiply(0.5));
-                                                    }
-                                                    let mut $name = Button::new($name)
-                                                        .stroke(Stroke::NONE);
-                                                    $(
-                                                    $name = $name.shortcut_text(ctx.format_shortcut(&keybinds.$kb));
-                                                    )?
-                                                    if $condition {
-                                                        $name = $name.sense(Sense::empty());
-                                                    }
-                                                    if m.add($name).clicked() {
-                                                        $callback;
-                                                    }
-                                                };
-                                            }
-
-                                            macro_rules! selected_btn {
-                                                ($name:ident, $text:literal, $callback:expr $(, $kb:ident)?) => {
-                                                    button!($name, $text, $callback, panel.selected.is_empty()
-                                                    $(
-                                                    , $kb
-                                                    )?
-                                                    );
-                                                }
-                                            }
-
-                                            macro_rules! clipboard_btn {
-                                                ($name:ident, $text:literal, $callback:expr $(, $kb:ident)?) => {
-                                                    button!($name, $text, $callback, self.clipboard_manager.entries.is_empty()
-                                                    $(
-                                                    , $kb
-                                                    )?
-                                                    );
-                                                }
-                                            }
-
-                                            selected_btn!(
-                                                del,
-                                                "delete",
-                                                messages.push(Message::Overlay(
-                                                    OverlayKind::Delete
-                                                )),
-                                                delete_selections
-                                            );
-                                            selected_btn!(
-                                                cut,
-                                                "cut",
-                                                messages.push(
-                                                    Message::ClipboardMode(
-                                                        ClipboardMode::Cut
-                                                    )
-                                                ),
-                                                cut_to_clipboard
-                                            );
-                                            selected_btn!(
-                                                copy,
-                                                "copy",
-                                                messages.push(
-                                                    Message::ClipboardMode(
-                                                        ClipboardMode::Copy
-                                                    )
-                                                ),
-                                                copy_to_clipboard
-                                            );
-                                            selected_btn!(
-                                                clear_s,
-                                                "clear selection",
-                                                messages
-                                                    .push(Message::SelectionClear)
-                                            );
-                                            clipboard_btn!(
-                                                paste,
-                                                "paste",
-                                                messages.push(Message::Paste),
-                                                paste_from_clipboard
-                                            );
-                                            clipboard_btn!(
-                                                clear_cp,
-                                                "clear clipboard",
-                                                messages
-                                                    .push(Message::ClipboardReset),
-                                                clear_clipboard
-                                            );
-
-                                            m.separator();
-                                            m.label("windows");
-
-                                            if m.add(Button::new("toggle clipboard")).clicked() {
-                                                messages.push(Message::WindowToggle(
-                                                    WindowKind::Clipboard,
-                                                ));
-                                            }
-                                        });
-
-                                        if !panel_focused {
-                                            ui.painter().rect_filled(
-                                                panel_rect,
-                                                CornerRadius::same(0),
-                                                visuals.panel_fill.gamma_multiply(0.7),
-                                            );
-                                        }
-                                    });
-
-                                    if !panel_focused &&
-                                     ui.interact(panel_rect, Id::new(("focus-detect-area",ri, ci)), Sense::click()).clicked() {
-                                        messages.push(Message::PanelFocus(panel.id));
-                                    }
-
-                                });
-                            }
-                        });
-                    });
-                }
+            grid.show(ui, |ui| {
+                view.iter().for_each(|p| {
+                    ui.add(Label::new(p.to_string()).halign(Align::Min));
+                });
             });
         });
 
-        // modals
+        // explorer area
+        let current_index = &panel.entries_manager.current_index;
+        let mut from: Option<Arc<usize>> = None;
+        let mut to = None;
+
+        let displaying = panel.entries_manager.displaying.clone();
+
+        let bg_rect = ui.allocate_space(ui.available_size()).1;
+        let bg_response = ui.interact(bg_rect, Id::new(("explorer-area", ri, ci)), Sense::click());
+
+        let mut child_ui = ui.new_child(UiBuilder::new().max_rect(bg_rect));
+
+        ScrollArea::vertical().show_rows(&mut child_ui, 32.0, displaying.len(), |sa, range| {
+            let keybinds = &self.config.keybinds;
+            let view = &self.config.view.explorer;
+
+            for (index, entry_index) in displaying.into_iter().enumerate() {
+                let is_current_index = index == *current_index;
+                let entry_opt = panel.entries_manager.entries.get(entry_index);
+                if entry_opt.is_none() || (!range.contains(&index) && !is_current_index) {
+                    continue;
+                }
+
+                let entry = entry_opt.unwrap();
+
+                sa.horizontal(|h| {
+                    let mut frame = Frame::NONE
+                        .stroke(Stroke::new(1.0, Color32::TRANSPARENT))
+                        .corner_radius(4.0);
+
+                    if panel.selected.contains(&entry_index) {
+                        frame.fill = Color32::LIGHT_GREEN.gamma_multiply(0.3);
+                    }
+
+                    if is_current_index {
+                        frame.stroke.color = visuals.text_color().gamma_multiply(0.3);
+                    }
+
+                    let mut color = visuals.text_color();
+                    let mut icon = &entry.file_icon;
+
+                    if entry.is_hidden {
+                        color = visuals.text_color().gamma_multiply(0.5);
+                    }
+                    if self.clipboard_manager.entries.contains(&entry.path) {
+                        icon = match self.clipboard_manager.mode.as_ref().unwrap() {
+                            ClipboardMode::Copy => &IconKind::Copy,
+                            ClipboardMode::Cut => &IconKind::Scissors,
+                        };
+                        color = Color32::BLUE.gamma_multiply(0.3);
+                    }
+
+                    let fr = frame
+                        .show(h, |f| {
+                            let another_frame = Frame::NONE.inner_margin(Margin::symmetric(2, 8));
+                            another_frame.show(f, |a| {
+                                a.add(self.resolve_icon(icon, Vec2::new(14.0, 14.0)));
+                            });
+
+                            let mut grid = Grid::new(Id::new(("explorer-grid", ri, ci, &index)));
+
+                            grid = grid.min_col_width(calc_width);
+                            grid.show(f, |g| {
+                                view.iter().for_each(|p| match p {
+                                    Property::Name => {
+                                        g.add(
+                                            AtomLayout::new(&entry.name)
+                                                .wrap_mode(TextWrapMode::Truncate)
+                                                .max_width(calc_width)
+                                                .fallback_text_color(color),
+                                        );
+                                    }
+                                    Property::Accessed => {
+                                        g.add(
+                                            AtomLayout::new(format_date(entry.accessed))
+                                                .max_width(calc_width)
+                                                .wrap_mode(TextWrapMode::Truncate)
+                                                .fallback_text_color(color),
+                                        );
+                                    }
+                                    Property::Created => {
+                                        g.add(
+                                            AtomLayout::new(format_date(entry.created))
+                                                .max_width(calc_width)
+                                                .wrap_mode(TextWrapMode::Truncate)
+                                                .fallback_text_color(color),
+                                        );
+                                    }
+                                    Property::Size => {
+                                        g.add(
+                                            AtomLayout::new(
+                                                if let Some(size) = &entry.folder_size {
+                                                    format!("{} items", size)
+                                                } else {
+                                                    bytes_to_string(
+                                                        entry.file_size.unwrap_or_default(),
+                                                    )
+                                                },
+                                            )
+                                            .max_width(calc_width)
+                                            .wrap_mode(TextWrapMode::Truncate)
+                                            .fallback_text_color(color),
+                                        );
+                                    }
+                                    Property::Type => {
+                                        g.add(
+                                            AtomLayout::new(entry.file_type)
+                                                .max_width(calc_width)
+                                                .wrap_mode(TextWrapMode::Truncate)
+                                                .fallback_text_color(color),
+                                        );
+                                    }
+                                    Property::Path => {
+                                        g.add(
+                                            AtomLayout::new(format!("{}", entry.path.display()))
+                                                .max_width(calc_width)
+                                                .wrap_mode(TextWrapMode::Truncate)
+                                                .fallback_text_color(color),
+                                        );
+                                    }
+                                });
+                            });
+                        })
+                        .response;
+
+                    let btn_interact = h.interact(
+                        fr.rect,
+                        Id::new(("button", ri, ci, &index)),
+                        Sense::click_and_drag(),
+                    );
+                    btn_interact.dnd_set_drag_payload(entry_index);
+
+                    if btn_interact.drag_started() {
+                        messages.push(Message::SelectionSwap(index));
+                    }
+
+                    if btn_interact.dragged() {
+                        let popup = Popup::new(
+                            Id::new(("drag_pop", ri, ci, &index)),
+                            ctx.clone(),
+                            PopupAnchor::Pointer,
+                            LayerId::new(Order::Tooltip, Id::new(("drag", ri, ci, &index))),
+                        )
+                        .align(RectAlign::TOP_START)
+                        .layout(Layout::left_to_right(Align::TOP));
+                        popup.show(|pop| {
+                            pop.add(self.resolve_icon(&IconKind::Files, Vec2::new(14.0, 14.0)));
+                            pop.label(format!("files [{}]", panel.selected.len()));
+                        });
+                    }
+
+                    if let Some(hovered_payload) = fr.dnd_hover_payload::<usize>() {
+                        if *hovered_payload != entry_index {
+                            h.painter().rect_filled(
+                                fr.rect,
+                                CornerRadius::from(4.0),
+                                visuals.text_color().gamma_multiply(0.1),
+                            );
+                        }
+                        if let Some(dragged_payload) = fr.dnd_release_payload() {
+                            from = Some(dragged_payload);
+                            to = Some(entry_index)
+                        }
+                    }
+
+                    if is_current_index && panel.entries_manager.scroll_signal {
+                        btn_interact.scroll_to_me(None);
+                        messages.push(Message::ScrollSignalDisable);
+                    }
+
+                    btn_interact.context_menu(|m| {
+                        m.label(entry.name.clone());
+                        if m.add(
+                            Button::new("rename")
+                                .shortcut_text(ctx.format_shortcut(&keybinds.rename_file)),
+                        )
+                        .clicked()
+                        {
+                            messages.push(Message::Overlay(OverlayKind::Rename));
+                        }
+                        if m.add(
+                            Button::new("delete")
+                                .shortcut_text(ctx.format_shortcut(&keybinds.delete_selections)),
+                        )
+                        .clicked()
+                        {
+                            messages.push(Message::Overlay(OverlayKind::Delete));
+                        }
+                        if m.add(
+                            Button::new("cut")
+                                .shortcut_text(ctx.format_shortcut(&keybinds.cut_to_clipboard)),
+                        )
+                        .clicked()
+                        {
+                            messages.push(Message::ClipboardMode(ClipboardMode::Cut));
+                        }
+                        if m.add(
+                            Button::new("copy")
+                                .shortcut_text(ctx.format_shortcut(&keybinds.copy_to_clipboard)),
+                        )
+                        .clicked()
+                        {
+                            messages.push(Message::ClipboardMode(ClipboardMode::Copy));
+                        }
+                        if m.add(
+                            Button::new("info")
+                                .shortcut_text(ctx.format_shortcut(&keybinds.view_info)),
+                        )
+                        .clicked()
+                        {
+                            messages.push(Message::Overlay(OverlayKind::Metadata));
+                        }
+                    });
+
+                    if btn_interact.clicked() {
+                        let ctrl_pressed = h.input(|i| {
+                            i.key_down(Key::ControlLeft) || i.key_down(Key::ControlRight)
+                        });
+                        let shift_pressed =
+                            h.input(|i| i.key_down(Key::ShiftLeft) || i.key_down(Key::ShiftRight));
+                        messages.push(Message::SelectionModify(index, ctrl_pressed, shift_pressed))
+                    }
+
+                    if btn_interact.double_clicked() {
+                        messages.push(Message::NavigateForward);
+                    }
+
+                    if btn_interact.secondary_clicked() {
+                        messages.push(Message::SelectionSwap(index));
+                    }
+                });
+            }
+        });
+
+        // drag n drop handler
+        if let (Some(from), Some(to)) = (from, to)
+            && *from != to
+        {
+            messages.push(Message::Transfer(to));
+        }
+
+        if bg_response.clicked()
+            && !(ui.input(|i| {
+                i.key_pressed(Key::ControlLeft)
+                    && i.key_pressed(Key::ControlRight)
+                    && i.key_pressed(Key::ShiftLeft)
+                    && i.key_pressed(Key::ShiftRight)
+            }))
+        {
+            messages.push(Message::SelectionClear);
+        }
+
+        bg_response.context_menu(|m| {
+            let keybinds = &self.config.keybinds;
+            m.label("create");
+
+            if m.add(
+                Button::new("create file")
+                    .shortcut_text(ctx.format_shortcut(&keybinds.create_file_path)),
+            )
+            .clicked()
+            {
+                messages.push(Message::Overlay(OverlayKind::CreateFile));
+            }
+            if m.add(
+                Button::new("create folder")
+                    .shortcut_text(ctx.format_shortcut(&keybinds.create_folder_path)),
+            )
+            .clicked()
+            {
+                messages.push(Message::Overlay(OverlayKind::CreateFolder));
+            }
+
+            m.separator();
+            m.label("clipboard");
+            /*
+            macro_rules! button {
+                ($name:ident, $text:literal, $callback:expr, $condition:expr $(, $kb:ident)?) => {
+                    let mut $name = RichText::new($text);
+                    if panel.selected.is_empty() {
+                        $name = $name.color(visuals.text_color().gamma_multiply(0.5));
+                    }
+                    let mut $name = Button::new($name)
+                        .stroke(Stroke::NONE);
+                    $(
+                    $name = $name.shortcut_text(ctx.format_shortcut(&keybinds.$kb));
+                    )?
+                    if $condition {
+                        $name = $name.sense(Sense::empty());
+                    }
+                    if m.add($name).clicked() {
+                        $callback;
+                    }
+                };
+            }
+
+            macro_rules! selected_btn {
+                ($name:ident, $text:literal, $callback:expr $(, $kb:ident)?) => {
+                    button!($name, $text, $callback, panel.selected.is_empty()
+                    $(
+                    , $kb
+                    )?
+                    );
+                }
+            }
+
+            macro_rules! clipboard_btn {
+                ($name:ident, $text:literal, $callback:expr $(, $kb:ident)?) => {
+                    button!($name, $text, $callback, self.clipboard_manager.entries.is_empty()
+                    $(
+                    , $kb
+                    )?
+                    );
+                }
+            }
+
+            selected_btn!(
+                del,
+                "delete",
+                messages.push(Message::Overlay(
+                    OverlayKind::Delete
+                )),
+                delete_selections
+            );
+            selected_btn!(
+                cut,
+                "cut",
+                messages.push(
+                    Message::ClipboardMode(
+                        ClipboardMode::Cut
+                    )
+                ),
+                cut_to_clipboard
+            );
+            selected_btn!(
+                copy,
+                "copy",
+                messages.push(
+                    Message::ClipboardMode(
+                        ClipboardMode::Copy
+                    )
+                ),
+                copy_to_clipboard
+            );
+            selected_btn!(
+                clear_s,
+                "clear selection",
+                messages
+                    .push(Message::SelectionClear)
+            );
+            clipboard_btn!(
+                paste,
+                "paste",
+                messages.push(Message::Paste),
+                paste_from_clipboard
+            );
+            clipboard_btn!(
+                clear_cp,
+                "clear clipboard",
+                messages
+                    .push(Message::ClipboardReset),
+                clear_clipboard
+            );
+            */
+            m.separator();
+            m.label("windows");
+
+            if m.add(Button::new("toggle clipboard")).clicked() {
+                messages.push(Message::WindowToggle(WindowKind::Clipboard));
+            }
+        });
+    }
+
+    fn overlays(&self, ctx: &Context, messages: &mut Vec<Message>) {
         let overlay = &self.overlay;
         let overlay_kind = overlay.kind;
+        let visuals = ctx.theme().default_visuals();
 
         if overlay_kind.is_some_and(|kind| kind == OverlayKind::Rename) {
             let modal_widget = Modal::new(Id::new("rename_modal"));
             let mut content = overlay.buffer.clone();
             let error = &overlay.error.clone();
 
-            modal_widget.show(&ctx, |ui| {
+            modal_widget.show(ctx, |ui| {
                 ui.heading("renaming");
                 let input = ui.add(TextEdit::singleline(&mut content));
                 ui.add(Label::new(RichText::new(error).color(Color32::LIGHT_RED)));
@@ -692,7 +520,7 @@ impl App {
             let mut content = overlay.buffer.clone();
             let error = &overlay.error.clone();
 
-            modal_widget.show(&ctx, |ui| {
+            modal_widget.show(ctx, |ui| {
                 ui.label(format!(
                     "creating file at {}",
                     self.panels_manager.current_panel().current_path.display()
@@ -721,7 +549,7 @@ impl App {
             let mut content = overlay.buffer.clone();
             let error = &overlay.error.clone();
 
-            modal_widget.show(&ctx, |ui| {
+            modal_widget.show(ctx, |ui| {
                 ui.label(format!(
                     "creating folder at {}",
                     self.panels_manager.current_panel().current_path.display()
@@ -747,7 +575,7 @@ impl App {
 
         if overlay_kind.is_some_and(|kind| kind == OverlayKind::Paste) {
             let modal_widget = Modal::new(Id::new("paste_modal"));
-            modal_widget.show(&ctx, |ui| {
+            modal_widget.show(ctx, |ui| {
                 let keybinds = &self.config.keybinds;
                 ui.heading("duplicate found for:");
                 let frame = Frame::NONE.fill(visuals.text_edit_bg_color());
@@ -797,7 +625,7 @@ impl App {
                     .as_ref()
             });
 
-            modal_widget.show(&ctx, |w| {
+            modal_widget.show(ctx, |w| {
                 w.label("are you sure you wanna delete these?");
 
                 Frame::new()
@@ -837,7 +665,7 @@ impl App {
             let modal_widget = Modal::new(Id::new("metadata_modal"));
             let entry = self.overlay.entry.as_ref().unwrap();
 
-            modal_widget.show(&ctx, |m| {
+            modal_widget.show(ctx, |m| {
                 m.label(format!("showing metadata for {}", entry.name));
                 m.separator();
 
@@ -881,6 +709,10 @@ impl App {
                 }
             });
         }
+    }
+
+    fn windows(&self, ctx: &Context, messages: &mut Vec<Message>) {
+        let visuals = ctx.theme().default_visuals();
 
         if self.windows_manager.clipboard.is_some() {
             let mut window_state = true;
@@ -894,7 +726,7 @@ impl App {
                 .min_width(40.0)
                 .min_height(100.0);
 
-            window.show(&ctx, |win| {
+            window.show(ctx, |win| {
                 if clipboard.entries.is_empty() {
                     win.label("clipboard is empty!");
                     return;
@@ -914,10 +746,12 @@ impl App {
                 messages.push(Message::WindowClose(WindowKind::Clipboard));
             }
         }
+    }
 
-        self.process_messages(messages);
-
+    fn toasts(&self, main_ui: &mut eframe::egui::Ui, ctx: &Context) {
+        let visuals = ctx.theme().default_visuals();
         let toast_list = self.toasts_manager.toasts.read();
+
         if !toast_list.is_empty() {
             let toast_overlay = Window::new("toast")
                 .title_bar(false)
@@ -970,6 +804,97 @@ impl App {
                 }
             });
         }
+    }
+
+    fn resolve_icon<'i>(&self, kind: &'i IconKind, size: Vec2) -> Image<'i> {
+        let mut image = Image::new(match_icon(kind));
+        image = image.fit_to_exact_size(size);
+
+        if !self.config.view.dark_mode {
+            image = image.tint(Color32::from_rgb(0, 0, 0));
+        }
+
+        image
+    }
+
+    pub fn ui(&mut self, main_ui: &mut eframe::egui::Ui) {
+        let ctx = self.ctx.clone();
+        let visuals = ctx.theme().default_visuals();
+
+        let mut messages: Vec<Message> = Vec::with_capacity(2);
+
+        CentralPanel::default().show(main_ui, |ui| {
+            let mut builder = StripBuilder::new(ui);
+
+            for (ri, _) in self.panels_manager.panels.iter().enumerate() {
+                builder = builder.size(Size::relative(self.panels_manager.height_proportion[ri]));
+            }
+
+            builder.vertical(|mut strip| {
+                for (ri, row) in self.panels_manager.panels.iter().enumerate() {
+                    strip.strip(|mut builder| {
+                        for (ci, _) in row.iter().enumerate() {
+                            builder = builder
+                                .size(Size::relative(self.panels_manager.width_proportion[ri][ci]));
+                        }
+
+                        builder.horizontal(|mut strip| {
+                            for (ci, panel) in row.iter().enumerate() {
+                                let current_pos =
+                                    self.panels_manager.position(self.panels_manager.focused);
+                                let panel_pos = Position { r: ri, c: ci };
+                                let panel_focused = panel_pos == current_pos;
+
+                                strip.cell(|ui| {
+                                    let panel_rect = ui.available_rect_before_wrap();
+
+                                    ui.add_enabled_ui(panel_focused, |ui| {
+                                        self.address_bar(ui, &mut messages, panel);
+                                        self.search_bar(ui, &mut messages, panel, &ctx);
+
+                                        ui.separator();
+
+                                        self.explorer_area(
+                                            ui,
+                                            &panel_rect,
+                                            panel,
+                                            &ctx,
+                                            &mut messages,
+                                            &panel_pos,
+                                        );
+
+                                        if !panel_focused {
+                                            ui.painter().rect_filled(
+                                                panel_rect,
+                                                CornerRadius::same(0),
+                                                visuals.panel_fill.gamma_multiply(0.7),
+                                            );
+                                        }
+                                    });
+
+                                    if !panel_focused
+                                        && ui
+                                            .interact(
+                                                panel_rect,
+                                                Id::new(("focus-detect-area", ri, ci)),
+                                                Sense::click(),
+                                            )
+                                            .clicked()
+                                    {
+                                        messages.push(Message::PanelFocus(panel.id));
+                                    }
+                                });
+                            }
+                        });
+                    });
+                }
+            });
+        });
+
+        self.overlays(&ctx, &mut messages);
+        self.windows(&ctx, &mut messages);
+        self.process_messages(messages);
+        self.toasts(main_ui, &ctx);
     }
 }
 
