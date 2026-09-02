@@ -40,6 +40,8 @@
             rustPlatform.bindgenHook
             pkg-config
           ];
+
+          buildInputs = [ ];
         };
 
       inherit (nixpkgs) lib;
@@ -57,7 +59,7 @@
           inherit (self.packages.${system}) buoyant;
         in
         {
-          default = pkgs.mkShell {
+          default = pkgs.mkShell rec {
             packages = builtins.attrValues {
               inherit (pkgs)
                 rustc
@@ -71,24 +73,29 @@
             nativeBuildInputs = with pkgs; [
               rustPlatform.bindgenHook
               pkg-config
-              mold
-              stdenv.cc.cc.lib
-              libX11
-              libXcursor
-              libXrandr
-              libXi
-              libxcb
-              libxkbcommon
-              vulkan-loader
-              wayland
-              clang
             ];
 
+            buildInputs =
+              with pkgs;
+              buoyant.buildInputs
+              ++ [
+                mold
+                stdenv.cc.cc.lib
+                libX11
+                libXcursor
+                libXrandr
+                libXi
+                libxcb
+                libxkbcommon
+                vulkan-loader
+                wayland
+                clang
+              ];
+
             RUST_SRC_PATH = "${pkgs.rustPlatform.rustLibSrc}";
-            buildInputs = buoyant.buildInputs;
-            shellHook = ''
-              export LD_LIBRARY_PATH="$LD_LIBRARY_PATH:${builtins.toString (pkgs.lib.makeLibraryPath buoyant.buildInputs)}";
-            '';
+            env = {
+              LD_LIBRARY_PATH = "$LD_LIBRARY_PATH:${builtins.toString (pkgs.lib.makeLibraryPath buildInputs)}";
+            };
           };
         }
       );
