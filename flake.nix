@@ -81,6 +81,7 @@
               libxkbcommon
               vulkan-loader
               wayland
+              clang
             ];
 
             RUST_SRC_PATH = "${pkgs.rustPlatform.rustLibSrc}";
