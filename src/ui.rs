@@ -113,8 +113,8 @@ impl App {
 
         // explorer area
         let current_index = &panel.entries_manager.current_index;
-        let mut from: Option<Arc<usize>> = None;
-        let mut to = None;
+        let mut from: Option<Arc<(u16, usize)>> = None; // (panel id, entry index)
+        let mut to: Option<(u16, usize)> = None;
 
         let displaying = panel.entries_manager.displaying.clone();
 
@@ -241,7 +241,7 @@ impl App {
                         Id::new(("button", ri, ci, &index)),
                         Sense::click_and_drag(),
                     );
-                    btn_interact.dnd_set_drag_payload(entry_index);
+                    btn_interact.dnd_set_drag_payload((panel.id, entry_index));
 
                     if btn_interact.drag_started() {
                         messages.push(Message::SelectionSwap(index));
@@ -262,8 +262,8 @@ impl App {
                         });
                     }
 
-                    if let Some(hovered_payload) = fr.dnd_hover_payload::<usize>() {
-                        if *hovered_payload != entry_index {
+                    if let Some(hovered_payload) = fr.dnd_hover_payload::<(u16, usize)>() {
+                        if *hovered_payload != (panel.id, entry_index) {
                             h.painter().rect_filled(
                                 fr.rect,
                                 CornerRadius::from(4.0),
@@ -272,7 +272,7 @@ impl App {
                         }
                         if let Some(dragged_payload) = fr.dnd_release_payload() {
                             from = Some(dragged_payload);
-                            to = Some(entry_index)
+                            to = Some((panel.id, entry_index));
                         }
                     }
 
@@ -341,6 +341,14 @@ impl App {
                     if btn_interact.secondary_clicked() {
                         messages.push(Message::SelectionSwap(index));
                     }
+
+                    if btn_interact.hovered() {
+                        h.painter().rect_filled(
+                            btn_interact.rect,
+                            CornerRadius::same(4),
+                            visuals.text_color().gamma_multiply(0.2),
+                        );
+                    }
                 });
             }
         });
@@ -350,6 +358,7 @@ impl App {
             && *from != to
         {
             messages.push(Message::Transfer(to));
+            messages.push(Message::PanelFocus(to.0));
         }
 
         if bg_response.clicked()

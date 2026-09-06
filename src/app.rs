@@ -702,7 +702,7 @@ pub enum Message {
     Create(CreateKind),
     Rename,
     Paste,
-    Transfer(usize),
+    Transfer((u16, usize)),
 
     // overlay
     Overlay(OverlayKind),
@@ -769,7 +769,7 @@ impl App {
         app.panels_manager
             .new_panel(None, &env::home_dir().unwrap());
 
-        app.fetch_entries();
+        app.fetch_entries(None);
         app
     }
 
@@ -785,7 +785,7 @@ impl App {
             Message::SelectionClear => self.clear_selected(),
             Message::HighlightPath(path) => self.highlight_path(&path),
             Message::FetchConfig => self.fetch_config(),
-            Message::FetchEntries => self.fetch_entries(),
+            Message::FetchEntries => self.fetch_entries(None),
 
             Message::NavigateIndex(dir, is_ctrled, is_shifted) => {
                 self.navigate_index(&dir, is_ctrled, is_shifted)
@@ -820,7 +820,10 @@ impl App {
                 }
             }
             Message::PanelNavigate(dir) => self.panels_manager.navigate_panel(dir),
-            Message::PanelFocus(id) => self.panels_manager.focus_panel(id),
+            Message::PanelFocus(id) => {
+                self.panels_manager.focus_panel(id);
+                self.fetch_entries(Some(id));
+            }
 
             Message::Toast(title, content, kind, id_chan) => {
                 self.new_toast(title, content, kind, id_chan)
@@ -852,9 +855,11 @@ impl App {
         });
     }
 
-    pub fn transfer(&mut self, to: usize) {
+    pub fn transfer(&mut self, to: (u16, usize)) {
         let current_panel = self.panels_manager.current_panel();
-        if current_panel.selected.contains(&to) {
+
+        let targetted_panel = self.panels_manager.panel(to.0).unwrap();
+        if targetted_panel.selected.contains(&to.1) {
             return;
         }
 
@@ -883,11 +888,13 @@ impl App {
             id,
         });
 
-        let destination = current_panel.entries_manager.entries[to].path.clone();
+        let destination = targetted_panel.entries_manager.entries[to.1].path.clone();
 
         std::thread::spawn(move || {
             move_dir(selected, destination, &user_tx, &worker_rx);
         });
+
+        self.fetch_entries(Some(targetted_panel.id));
     }
 
     pub fn nav_forward(&mut self) {
@@ -918,7 +925,7 @@ impl App {
         }
 
         current_panel.current_path = to.to_path_buf();
-        self.fetch_entries();
+        self.fetch_entries(None);
     }
 
     pub fn nav_back(&mut self) {
@@ -926,13 +933,17 @@ impl App {
         let old_path = current_panel.current_path.clone();
 
         current_panel.current_path.pop();
-        self.fetch_entries();
+        self.fetch_entries(None);
         self.highlight_path(&old_path);
     }
 
-    fn fetch_entries(&mut self) {
+    fn fetch_entries(&mut self, panel_id: Option<u16>) {
         {
-            let current_panel = self.panels_manager.current_panel_mut();
+            let current_panel = if let Some(id) = panel_id {
+                self.panels_manager.panel_mut(id).unwrap()
+            } else {
+                self.panels_manager.current_panel_mut()
+            };
             current_panel.field.reset();
             // clear entries
             current_panel
@@ -1111,7 +1122,7 @@ impl App {
         })) {
             self.new_toast("Delete", Cow::Owned(e), ToastKind::Danger, None);
         }
-        self.fetch_entries();
+        self.fetch_entries(None);
     }
 
     pub fn new_field(&mut self, kind: &FieldKind) {
@@ -1259,8 +1270,14 @@ impl App {
                 messages.push(Message::Panel(Direction::Up, PathBuf::new()));
                 messages.push(Message::FetchEntries);
             }
-            KeybindAction::ClosePanel => messages.push(Message::ClosePanel),
-            KeybindAction::PanelNavigate(dir) => messages.push(Message::PanelNavigate(*dir)),
+            KeybindAction::ClosePanel => {
+                messages.push(Message::ClosePanel);
+                messages.push(Message::FetchEntries);
+            }
+            KeybindAction::PanelNavigate(dir) => {
+                messages.push(Message::PanelNavigate(*dir));
+                messages.push(Message::FetchEntries);
+            }
             KeybindAction::ToggleVisual => {}
             KeybindAction::Choice(..) => {}
         };
@@ -1286,7 +1303,7 @@ impl App {
         }
 
         self.overlay.reset();
-        self.fetch_entries();
+        self.fetch_entries(None);
         self.highlight_path(&try_create.unwrap());
     }
 
@@ -1316,7 +1333,7 @@ impl App {
         }
 
         self.overlay.reset();
-        self.fetch_entries();
+        self.fetch_entries(None);
         self.highlight_path(&rename_res.unwrap());
     }
 
