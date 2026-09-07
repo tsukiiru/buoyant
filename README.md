@@ -104,8 +104,12 @@ example: `Ctrl + Shift + Q` `Alt + P` `ArrowDown`
 |--|--|--|--|
 |behaviour|`"replace"`|clipboard_behaviour / [`replace` `addition`]|configure the behaviour when copying/cutting entries into the clipboard|
 
-### pr && issues
+### pr & issues (or common questions)
 feel free to open prs or issues, the more the merrier :3  
+
+#### issue with opening files
+buoyant does **not** handle file-opening, it's handled with `xdg-open`, make sure it's installed in `PATH` on your system.  
+about changing `xdg-open` behaviour (more specifically changing default app), consider reading my [gist](https://gist.github.com/tsukiiru/f6e560243667c80470938af9f98ab678).  
 
 ### stuff
 icons from [Phosphor Icons](https://phosphoricons.com/)  
