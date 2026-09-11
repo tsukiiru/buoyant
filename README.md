@@ -58,7 +58,7 @@ add it into your flake overlays
 then add it into system packages...   
 ```nix
 # configuration.nix
-environment.systemPackages = with pkgs [
+environment.systemPackages = with pkgs; [
   buoyant
 ];
 ```
