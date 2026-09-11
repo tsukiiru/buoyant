@@ -563,15 +563,12 @@ impl PanelsManager {
 
         if self.panels[current_pos.r].len() == 1 {
             // last one in the row
+            let old_height = self.height_proportion[current_pos.r];
+
             self.height_proportion.remove(current_pos.r);
             self.width_proportion.remove(current_pos.c);
 
-            let mut remaining_height = 0.0;
-            self.height_proportion
-                .iter()
-                .for_each(|h| remaining_height += h);
-
-            let mul = 1.0 / remaining_height;
+            let mul = 1.0 / (1.0 - old_height);
             self.height_proportion.iter_mut().for_each(|h| *h *= mul);
 
             self.focused = self.id(Position {
@@ -583,14 +580,10 @@ impl PanelsManager {
             return false;
         }
 
+        let old_width = self.width_proportion[current_pos.r][current_pos.c];
         self.width_proportion[current_pos.r].remove(current_pos.c);
 
-        let mut remaining_width = 0.0;
-        self.width_proportion[current_pos.r]
-            .iter()
-            .for_each(|w| remaining_width += w);
-
-        let mul = 1.0 / remaining_width;
+        let mul = 1.0 / (1.0 - old_width);
         self.width_proportion[current_pos.r]
             .iter_mut()
             .for_each(|w| *w *= mul);
@@ -601,7 +594,17 @@ impl PanelsManager {
         });
         self.panels[current_pos.r].remove(current_pos.c);
 
+        self.clamp_sizes();
         false
+    }
+
+    fn clamp_sizes(&mut self) {
+        self.width_proportion
+            .iter_mut()
+            .for_each(|r| r.iter_mut().for_each(|p| *p = p.clamp(0.0, 1.0)));
+        self.height_proportion
+            .iter_mut()
+            .for_each(|c| *c = c.clamp(0.0, 1.0));
     }
 
     fn navigate_panel(&mut self, dir: Direction) {
@@ -643,6 +646,100 @@ impl PanelsManager {
     }
 
     fn focus_panel(&mut self, id: u16) { self.focused = id; }
+
+    fn resize_panel(&mut self, dir: Direction) {
+        let amount = 0.05; // temp resizing amount
+
+        let current_pos = self.position(self.focused);
+
+        // change for the other panels
+        match dir {
+            Direction::Up | Direction::Down => {
+                if self.height_proportion.len() == 1 {
+                    return; // standing alone
+                }
+
+                let (sizing, adj_row) = if dir == Direction::Up {
+                    if current_pos.r == 0 || self.height_proportion.get(current_pos.r - 1).is_none()
+                    {
+                        (-1.0, current_pos.r + 1)
+                    } else {
+                        (1.0, current_pos.r - 1)
+                    }
+                } else {
+                    if current_pos.r == self.height_proportion.len() - 1
+                        || self.height_proportion.get(current_pos.r + 1).is_none()
+                    {
+                        (-1.0, current_pos.r - 1)
+                    } else {
+                        (1.0, current_pos.r + 1)
+                    }
+                };
+
+                // if there's an adjacent row in the direction,
+                // increase the height of the current row and reduce the adjacent one's
+
+                let current_old_height = self.height_proportion[current_pos.r];
+                let current_new_height = (current_old_height + sizing * amount).clamp(0.0, 1.0);
+
+                let adj_old_height = self.height_proportion[adj_row];
+                let adj_new_height = (adj_old_height - sizing * amount).clamp(0.0, 1.0);
+
+                if current_new_height >= 1.0
+                    || current_new_height <= 0.0
+                    || adj_new_height >= 1.0
+                    || adj_new_height <= 0.0
+                {
+                    return;
+                }
+
+                self.height_proportion[current_pos.r] = current_new_height;
+                self.height_proportion[adj_row] = adj_new_height;
+            }
+            Direction::Left | Direction::Right => {
+                if self.width_proportion[current_pos.r].len() == 1 {
+                    return; // standing alone
+                }
+
+                let current_row = self.width_proportion.get_mut(current_pos.r).unwrap();
+
+                let (sizing, adj_col) = if dir == Direction::Left {
+                    if current_pos.c == 0 || current_row.get(current_pos.c - 1).is_none() {
+                        (-1.0, current_pos.c + 1)
+                    } else {
+                        (1.0, current_pos.c - 1)
+                    }
+                } else {
+                    if current_pos.c == current_row.len() - 1
+                        || current_row.get(current_pos.c + 1).is_none()
+                    {
+                        (-1.0, current_pos.c - 1)
+                    } else {
+                        (1.0, current_pos.c + 1)
+                    }
+                };
+
+                let current_old_width = current_row[current_pos.c];
+                let current_new_width = (current_old_width + sizing * amount).clamp(0.0, 1.0);
+
+                let adj_old_width = current_row[adj_col];
+                let adj_new_width = (adj_old_width - sizing * amount).clamp(0.0, 1.0);
+
+                if current_new_width >= 1.0
+                    || current_new_width <= 0.0
+                    || adj_new_width >= 1.0
+                    || adj_new_width <= 0.0
+                {
+                    return;
+                }
+
+                current_row[current_pos.c] = current_new_width;
+                current_row[adj_col] = adj_new_width;
+            }
+        }
+
+        self.clamp_sizes();
+    }
 }
 
 #[derive(Debug)]
@@ -726,6 +823,7 @@ pub enum Message {
     ClosePanel,
     PanelNavigate(Direction),
     PanelFocus(u16),
+    PanelResize(Direction),
 
     // toasts
     Toast(
@@ -824,6 +922,7 @@ impl App {
                 self.panels_manager.focus_panel(id);
                 self.fetch_entries(Some(id));
             }
+            Message::PanelResize(dir) => self.panels_manager.resize_panel(dir),
 
             Message::Toast(title, content, kind, id_chan) => {
                 self.new_toast(title, content, kind, id_chan)
@@ -1278,6 +1377,7 @@ impl App {
                 messages.push(Message::PanelNavigate(*dir));
                 messages.push(Message::FetchEntries);
             }
+            KeybindAction::PanelResize(dir) => messages.push(Message::PanelResize(*dir)),
             KeybindAction::ToggleVisual => {}
             KeybindAction::Choice(..) => {}
         };

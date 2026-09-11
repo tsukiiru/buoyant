@@ -23,7 +23,7 @@ impl Default for Config {
     fn default() -> Self {
         Config {
             keybinds: Keybinds::default(),
-            keybinds_list: Vec::with_capacity(34),
+            keybinds_list: Vec::with_capacity(35),
             // NOTE: update allocation size matching the number of keybinds
             sorting: Sorting::default(),
             view: View::default(),
@@ -59,6 +59,7 @@ pub enum KeybindAction {
     SplitHorizontal,
     ClosePanel,
     PanelNavigate(Direction),
+    PanelResize(Direction),
 }
 
 macro_rules! create_keybinds {
@@ -106,6 +107,10 @@ create_keybinds!(
     panel_navigate_down,
     panel_navigate_left,
     panel_navigate_right,
+    panel_resize_up,
+    panel_resize_down,
+    panel_resize_left,
+    panel_resize_right,
 );
 
 const NONE: Modifiers = Modifiers::NONE;
@@ -114,6 +119,7 @@ const SHIFT: Modifiers = Modifiers::SHIFT;
 const ALT: Modifiers = Modifiers::ALT;
 const CTRL_SHIFT: Modifiers = CTRL.plus(SHIFT);
 const CTRL_ALT: Modifiers = CTRL.plus(ALT);
+const CTRL_SHIFT_ALT: Modifiers = CTRL.plus(SHIFT).plus(ALT);
 
 impl Default for Keybinds {
     fn default() -> Self {
@@ -152,6 +158,10 @@ impl Default for Keybinds {
             panel_navigate_down: bind(CTRL_ALT, Key::ArrowDown),
             panel_navigate_left: bind(CTRL_ALT, Key::ArrowLeft),
             panel_navigate_right: bind(CTRL_ALT, Key::ArrowRight),
+            panel_resize_up: bind(CTRL_SHIFT_ALT, Key::ArrowUp),
+            panel_resize_down: bind(CTRL_SHIFT_ALT, Key::ArrowDown),
+            panel_resize_left: bind(CTRL_SHIFT_ALT, Key::ArrowLeft),
+            panel_resize_right: bind(CTRL_SHIFT_ALT, Key::ArrowRight),
         }
     }
 }
@@ -298,6 +308,10 @@ create_raw_keybinds!(
     panel_navigate_down,
     panel_navigate_left,
     panel_navigate_right,
+    panel_resize_up,
+    panel_resize_down,
+    panel_resize_left,
+    panel_resize_right,
 );
 
 fn process_raw_keybinds(raw_config: &RawKeybinds, config: &mut Keybinds) {
@@ -345,6 +359,10 @@ fn process_raw_keybinds(raw_config: &RawKeybinds, config: &mut Keybinds) {
     process_field!(panel_navigate_left);
     process_field!(panel_navigate_down);
     process_field!(panel_navigate_up);
+    process_field!(panel_resize_up);
+    process_field!(panel_resize_down);
+    process_field!(panel_resize_left);
+    process_field!(panel_resize_right);
 }
 
 fn match_key(raw_key: &str) -> Option<KeyboardShortcut> {
@@ -546,6 +564,22 @@ fn listing_keybinds(keybinds: &Keybinds, list: &mut Vec<Keybind>) {
     list.push((
         KeybindAction::PanelNavigate(Direction::Right),
         keybinds.panel_navigate_right,
+    ));
+    list.push((
+        KeybindAction::PanelResize(Direction::Up),
+        keybinds.panel_resize_up,
+    ));
+    list.push((
+        KeybindAction::PanelResize(Direction::Down),
+        keybinds.panel_resize_down,
+    ));
+    list.push((
+        KeybindAction::PanelResize(Direction::Left),
+        keybinds.panel_resize_left,
+    ));
+    list.push((
+        KeybindAction::PanelResize(Direction::Right),
+        keybinds.panel_resize_right,
     ));
 
     list.par_sort_by(|a, b| {
