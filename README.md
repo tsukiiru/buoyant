@@ -14,15 +14,54 @@ you input `hey/michael/vsauce/here`, then the folder hierarchy will become:
 pretty cool, right?
 
 #### multi-pane  
-it's basically a mini window manager... yeah  
-pane moving and resizing soon!
+it's basically a mini window manager... yeah!  
+with resizing, closing, opening more, etc..  
+pane moving soon! i still haven't quite figured out how to do that at the moment...  
 
 ### installation
 clone the repo via `git clone https://github.com/tsukiiru/buoyant`  
 build with `cargo build --release`  
 the built binary will be in `target/release/`  
 
-aur and nix flake *soon*  
+aur release *soon*  
+
+as for nix flake, maybe it works, idk i haven't tested  
+add it into your flake overlays  
+```nix
+# flake.nix
+{
+  inputs = {
+    buoyant.url = "github:tsukiiru/buoyant";
+  };
+  outputs =
+    inputs@{
+      self,
+      nixpkgs,
+      buoyant,
+      ...
+    }:
+    {
+      nixosConfigurations = {
+        flake = nixpkgs.lib.nixosSystem {
+          modules = [
+            ./configuration.nix
+            {
+              nixpkgs.overlays = [ buoyant.overlays.default ];
+            }
+          ];
+        };
+      };
+    };
+}
+```
+
+then add it into system packages...   
+```nix
+# configuration.nix
+environment.systemPackages = with pkgs [
+  buoyant
+];
+```
 
 ### config
 buoyant uses *toml* as the configuration language, more about toml [***here***](https://toml.io/)  
@@ -78,6 +117,10 @@ example: `Ctrl + Shift + Q` `Alt + P` `ArrowDown`
 |panel_navigate_down|`ctrl + alt + arrowdown`|
 |panel_navigate_right|`ctrl + alt + arrowright`|
 |panel_navigate_left|`ctrl + alt + arrowleft`|
+|panel_resize_up|`ctrl + shift + alt + arrowup`|
+|panel_resize_down|`ctrl + shift + alt + arrowdown`|
+|panel_resize_right|`ctrl + shift + alt + arrowright`|
+|panel_resize_left|`ctrl + shift + alt + arrowleft`|
 
 #### [sorting]
 **table**
