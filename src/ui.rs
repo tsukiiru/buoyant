@@ -278,7 +278,13 @@ impl App {
 
                     if is_current_index && panel.entries_manager.scroll_signal {
                         btn_interact.scroll_to_me(None);
-                        messages.push(Message::ScrollSignalDisable);
+
+                        if range.contains(&(current_index + 1))
+                            || range.contains(&((*current_index as i32 - 1).max(0) as usize))
+                            || range.len() <= 3
+                        {
+                            messages.push(Message::ScrollSignalDisable);
+                        }
                     }
 
                     btn_interact.context_menu(|m| {

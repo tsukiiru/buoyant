@@ -51,6 +51,8 @@ pub fn extension_to_file_type(extension: &str) -> Option<(&'static str, IconKind
         "bat" => ("Batch Script", IconKind::Script),
         "json" => ("JavaScript Object Notation", IconKind::Src),
         "html" => ("HTML", IconKind::HtmlSrc),
+        "pdf" => ("PDF", IconKind::Pdf),
+        "lua" => ("Lua Source File", IconKind::Src),
         // archive
         "7z" => ("7-Zip Archive", IconKind::Archive),
         "zip" => ("ZIP Archive", IconKind::Archive),

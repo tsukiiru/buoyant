@@ -777,6 +777,12 @@ impl Panel {
     }
 }
 
+pub enum Absolute {
+    Start,
+    End,
+    Index(usize),
+}
+
 pub enum Message {
     // clipboard
     ClipboardMode(ClipboardMode),
@@ -791,6 +797,7 @@ pub enum Message {
     FetchEntries,
 
     // navigation
+    NavigateAbsolute(Absolute, bool, bool),
     NavigateIndex(Direction, bool, bool),
     NavigateForward,
     NavigateBackward,
@@ -878,15 +885,18 @@ impl App {
 
             Message::SelectionSwap(i) => self.swap_selected(&i),
             Message::SelectionModify(i, ctrl_pressed, shift_pressed) => {
-                self.modify_selected(i, ctrl_pressed, shift_pressed)
+                self.modify_selected(Absolute::Index(i), ctrl_pressed, shift_pressed);
             }
             Message::SelectionClear => self.clear_selected(),
             Message::HighlightPath(path) => self.highlight_path(&path),
             Message::FetchConfig => self.fetch_config(),
             Message::FetchEntries => self.fetch_entries(None),
 
+            Message::NavigateAbsolute(pos, is_ctrled, is_shifted) => {
+                self.modify_selected(pos, is_ctrled, is_shifted);
+            }
             Message::NavigateIndex(dir, is_ctrled, is_shifted) => {
-                self.navigate_index(&dir, is_ctrled, is_shifted)
+                self.navigate_direction(&dir, is_ctrled, is_shifted)
             }
             Message::NavigateForward => self.nav_forward(),
             Message::NavigateBackward => self.nav_back(),
@@ -1285,6 +1295,16 @@ impl App {
                 Direction::Right => messages.push(Message::NavigateForward),
                 Direction::Left => messages.push(Message::NavigateBackward),
             },
+            KeybindAction::NavigateStart => messages.push(Message::NavigateAbsolute(
+                Absolute::Start,
+                is_shifted,
+                is_shifted,
+            )),
+            KeybindAction::NavigateEnd => messages.push(Message::NavigateAbsolute(
+                Absolute::End,
+                is_shifted,
+                is_shifted,
+            )),
             KeybindAction::Copy => {
                 if current_panel.selected.is_empty() {
                     messages.push(Message::Toast(
@@ -1714,7 +1734,7 @@ impl App {
         };
     }
 
-    fn navigate_index(&mut self, direction: &Direction, is_ctrled: bool, is_shifted: bool) {
+    fn navigate_direction(&mut self, direction: &Direction, is_ctrled: bool, is_shifted: bool) {
         let current_panel = self.panels_manager.current_panel_mut();
         let mut current_index: usize = current_panel.entries_manager.current_index;
 
@@ -1728,15 +1748,14 @@ impl App {
             {
                 current_index += 1;
             }
-            Direction::Up if !(current_index == 0) => {
+            Direction::Up if current_index != 0 => {
                 current_index -= 1;
             }
 
             _ => {}
         }
 
-        current_panel.entries_manager.scroll_signal = true;
-        self.modify_selected(current_index, is_ctrled, is_shifted);
+        self.modify_selected(Absolute::Index(current_index), is_ctrled, is_shifted);
     }
 
     pub fn swap_selected(&mut self, index: &usize) {
@@ -1757,8 +1776,17 @@ impl App {
         current_panel.entries_manager.current_index = *index;
     }
 
-    pub fn modify_selected(&mut self, index: usize, is_ctrled: bool, is_shifted: bool) {
+    pub fn modify_selected(&mut self, abs: Absolute, is_ctrled: bool, is_shifted: bool) {
         let current_panel = self.panels_manager.current_panel_mut();
+        current_panel.entries_manager.scroll_signal = true;
+
+        let index = match abs {
+            Absolute::Start => 0,
+            Absolute::End => {
+                (current_panel.entries_manager.displaying.len() as i32 - 1).max(0) as usize
+            }
+            Absolute::Index(i) => i,
+        };
 
         if !is_shifted && !is_ctrled {
             current_panel.selected.clear();

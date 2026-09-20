@@ -23,7 +23,7 @@ impl Default for Config {
     fn default() -> Self {
         Config {
             keybinds: Keybinds::default(),
-            keybinds_list: Vec::with_capacity(35),
+            keybinds_list: Vec::with_capacity(40),
             // NOTE: update allocation size matching the number of keybinds
             sorting: Sorting::default(),
             view: View::default(),
@@ -41,6 +41,8 @@ impl Config {
 #[derive(Clone, Copy, Debug)]
 pub enum KeybindAction {
     WindowNavigate(Direction),
+    NavigateStart,
+    NavigateEnd,
     Copy,
     Cut,
     Paste,
@@ -77,6 +79,8 @@ create_keybinds!(
     navigate_down,
     navigate_forward,
     navigate_backward,
+    navigate_start,
+    navigate_end,
     copy_to_clipboard,
     cut_to_clipboard,
     paste_from_clipboard,
@@ -128,6 +132,8 @@ impl Default for Keybinds {
             navigate_down: bind(NONE, Key::ArrowDown),
             navigate_forward: bind(NONE, Key::ArrowRight),
             navigate_backward: bind(NONE, Key::ArrowLeft),
+            navigate_start: bind(NONE, Key::Home),
+            navigate_end: bind(NONE, Key::End),
             copy_to_clipboard: bind(CTRL, Key::C),
             cut_to_clipboard: bind(CTRL, Key::X),
             paste_from_clipboard: bind(CTRL, Key::V),
@@ -278,6 +284,8 @@ create_raw_keybinds!(
     navigate_down,
     navigate_forward,
     navigate_backward,
+    navigate_start,
+    navigate_end,
     copy_to_clipboard,
     cut_to_clipboard,
     paste_from_clipboard,
@@ -329,6 +337,8 @@ fn process_raw_keybinds(raw_config: &RawKeybinds, config: &mut Keybinds) {
     process_field!(navigate_down);
     process_field!(navigate_forward);
     process_field!(navigate_backward);
+    process_field!(navigate_start);
+    process_field!(navigate_end);
     process_field!(copy_to_clipboard);
     process_field!(cut_to_clipboard);
     process_field!(paste_from_clipboard);
@@ -519,6 +529,8 @@ fn listing_keybinds(keybinds: &Keybinds, list: &mut Vec<Keybind>) {
         KeybindAction::WindowNavigate(Direction::Left),
         keybinds.navigate_backward,
     ));
+    list.push((KeybindAction::NavigateStart, keybinds.navigate_start));
+    list.push((KeybindAction::NavigateEnd, keybinds.navigate_end));
 
     list.push((KeybindAction::Copy, keybinds.copy_to_clipboard));
     list.push((KeybindAction::Cut, keybinds.cut_to_clipboard));

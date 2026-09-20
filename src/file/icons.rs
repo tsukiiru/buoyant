@@ -34,6 +34,7 @@ pub enum IconKind {
     Folder,
     Scissors,
     Copy,
+    Pdf,
 }
 
 macro_rules! root_include_image {
@@ -62,6 +63,7 @@ pub fn match_icon(kind: &IconKind) -> ImageSource<'_> {
         IconKind::MdSrc => root_include_image!("assets/icons/file-md.svg"),
         IconKind::CssSrc => root_include_image!("assets/icons/file-css.svg"),
         IconKind::HtmlSrc => root_include_image!("assets/icons/file-html.svg"),
+        IconKind::Pdf => root_include_image!("assets/icons/file-pdf.svg"),
         IconKind::Script => root_include_image!("assets/icons/terminal.svg"),
         IconKind::Archive => root_include_image!("assets/icons/archive.svg"),
         IconKind::Database => root_include_image!("assets/icons/database.svg"),
