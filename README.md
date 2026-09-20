@@ -88,6 +88,8 @@ example: `Ctrl + Shift + Q` `Alt + P` `ArrowDown`
 |navigate_down|`arrowdown`|
 |navigate_forward|`arrowright`|
 |navigate_backward|`arrowleft`|
+|navigate_start|`home`|
+|navigate_end|`end`|
 |copy_to_clipboard|`ctrl+c`|
 |cut_to_clipboard|`ctrl+x`|
 |paste_from_clipboard|`ctrl+v`|
