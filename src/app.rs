@@ -794,7 +794,7 @@ pub enum Message {
     SelectionClear,
     HighlightPath(PathBuf),
     FetchConfig,
-    FetchEntries,
+    FetchEntries(Option<u16>),
 
     // navigation
     NavigateAbsolute(Absolute, bool, bool),
@@ -806,7 +806,7 @@ pub enum Message {
     Create(CreateKind),
     Rename,
     Paste,
-    Transfer((u16, usize)),
+    Transfer((u16, Option<usize>)),
 
     // overlay
     Overlay(OverlayKind),
@@ -890,7 +890,7 @@ impl App {
             Message::SelectionClear => self.clear_selected(),
             Message::HighlightPath(path) => self.highlight_path(&path),
             Message::FetchConfig => self.fetch_config(),
-            Message::FetchEntries => self.fetch_entries(None),
+            Message::FetchEntries(id) => self.fetch_entries(id),
 
             Message::NavigateAbsolute(pos, is_ctrled, is_shifted) => {
                 self.modify_selected(pos, is_ctrled, is_shifted);
@@ -964,11 +964,14 @@ impl App {
         });
     }
 
-    pub fn transfer(&mut self, to: (u16, usize)) {
+    pub fn transfer(&mut self, to: (u16, Option<usize>)) {
         let current_panel = self.panels_manager.current_panel();
-
         let targetted_panel = self.panels_manager.panel(to.0).unwrap();
-        if targetted_panel.selected.contains(&to.1) {
+
+        if to
+            .1
+            .is_some_and(|to| !targetted_panel.entries_manager.displaying.contains(&to))
+        {
             return;
         }
 
@@ -997,7 +1000,14 @@ impl App {
             id,
         });
 
-        let destination = targetted_panel.entries_manager.entries[to.1].path.clone();
+        let destination = to.1.map_or(targetted_panel.current_path.clone(), |i| {
+            targetted_panel
+                .entries_manager
+                .entry(&i)
+                .unwrap()
+                .path
+                .clone()
+        });
 
         std::thread::spawn(move || {
             move_dir(selected, destination, &user_tx, &worker_rx);
@@ -1379,23 +1389,23 @@ impl App {
             KeybindAction::Search => messages.push(Message::Field(FieldKind::Search)),
             KeybindAction::Refresh => {
                 messages.push(Message::FetchConfig);
-                messages.push(Message::FetchEntries);
+                messages.push(Message::FetchEntries(None));
             }
             KeybindAction::SplitVertical => {
                 messages.push(Message::Panel(Direction::Right, PathBuf::new()));
-                messages.push(Message::FetchEntries);
+                messages.push(Message::FetchEntries(None));
             }
             KeybindAction::SplitHorizontal => {
                 messages.push(Message::Panel(Direction::Up, PathBuf::new()));
-                messages.push(Message::FetchEntries);
+                messages.push(Message::FetchEntries(None));
             }
             KeybindAction::ClosePanel => {
                 messages.push(Message::ClosePanel);
-                messages.push(Message::FetchEntries);
+                messages.push(Message::FetchEntries(None));
             }
             KeybindAction::PanelNavigate(dir) => {
                 messages.push(Message::PanelNavigate(*dir));
-                messages.push(Message::FetchEntries);
+                messages.push(Message::FetchEntries(None));
             }
             KeybindAction::PanelResize(dir) => messages.push(Message::PanelResize(*dir)),
             KeybindAction::ToggleVisual => {}
@@ -1910,7 +1920,7 @@ impl eframe::App for App {
                         toast.percent = Some(percent);
                     }
                     WorkerRequest::Done { paths } => {
-                        messages.push(Message::FetchEntries);
+                        messages.push(Message::FetchEntries(None));
                         if !paths.is_empty() {
                             messages.push(Message::HighlightPath(paths[0].to_path_buf()));
                         }

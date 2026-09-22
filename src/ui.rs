@@ -83,6 +83,7 @@ impl App {
         }
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn explorer_area(
         &self,
         ui: &mut eframe::egui::Ui,
@@ -91,7 +92,12 @@ impl App {
         ctx: &Context,
         messages: &mut Vec<Message>,
         pos: &Position,
+        from: &mut Option<Arc<(u16, usize)>>,
+        to: &mut Option<(u16, Option<usize>)>,
     ) {
+        ui.visuals_mut().widgets.inactive.bg_fill = Color32::TRANSPARENT;
+        // https://github.com/emilk/egui/issues/5695
+
         let visuals = ctx.theme().default_visuals();
         let ri = pos.r;
         let ci = pos.c;
@@ -113,8 +119,6 @@ impl App {
 
         // explorer area
         let current_index = &panel.entries_manager.current_index;
-        let mut from: Option<Arc<(u16, usize)>> = None; // (panel id, entry index)
-        let mut to: Option<(u16, usize)> = None;
 
         let displaying = panel.entries_manager.displaying.clone();
 
@@ -122,249 +126,263 @@ impl App {
         let bg_response = ui.interact(bg_rect, Id::new(("explorer-area", ri, ci)), Sense::click());
 
         let mut child_ui = ui.new_child(UiBuilder::new().max_rect(bg_rect));
+        let frame = Frame::new();
 
-        ScrollArea::vertical().show_rows(&mut child_ui, 32.0, displaying.len(), |sa, range| {
-            let keybinds = &self.config.keybinds;
-            let view = &self.config.view.explorer;
+        let (_, dropped_payload) = child_ui.dnd_drop_zone::<(u16, usize), ()>(frame, |ui| {
+            ui.set_min_size(bg_rect.size());
+            ScrollArea::vertical().show_rows(ui, 32.0, displaying.len(), |sa, range| {
+                let keybinds = &self.config.keybinds;
+                let view = &self.config.view.explorer;
 
-            for (index, entry_index) in displaying.into_iter().enumerate() {
-                let is_current_index = index == *current_index;
-                let entry_opt = panel.entries_manager.entries.get(entry_index);
-                if entry_opt.is_none() || (!range.contains(&index) && !is_current_index) {
-                    continue;
-                }
-
-                let entry = entry_opt.unwrap();
-
-                sa.horizontal(|h| {
-                    let mut frame = Frame::NONE
-                        .stroke(Stroke::new(1.0, Color32::TRANSPARENT))
-                        .corner_radius(4.0);
-
-                    if panel.selected.contains(&entry_index) {
-                        frame.fill = Color32::LIGHT_GREEN.gamma_multiply(0.3);
+                for (index, entry_index) in displaying.into_iter().enumerate() {
+                    let is_current_index = index == *current_index;
+                    let entry_opt = panel.entries_manager.entries.get(entry_index);
+                    if entry_opt.is_none() || (!range.contains(&index) && !is_current_index) {
+                        continue;
                     }
 
-                    if is_current_index {
-                        frame.stroke.color = visuals.text_color().gamma_multiply(0.3);
-                    }
+                    let entry = entry_opt.unwrap();
 
-                    let mut color = visuals.text_color();
-                    let mut icon = &entry.file_icon;
+                    sa.horizontal(|h| {
+                        let mut frame = Frame::NONE
+                            .stroke(Stroke::new(1.0, Color32::TRANSPARENT))
+                            .corner_radius(4.0);
 
-                    if entry.is_hidden {
-                        color = visuals.text_color().gamma_multiply(0.5);
-                    }
-                    if self.clipboard_manager.entries.contains(&entry.path) {
-                        icon = match self.clipboard_manager.mode.as_ref().unwrap() {
-                            ClipboardMode::Copy => &IconKind::Copy,
-                            ClipboardMode::Cut => &IconKind::Scissors,
-                        };
-                        color = Color32::BLUE.gamma_multiply(0.3);
-                    }
+                        if panel.selected.contains(&entry_index) {
+                            frame.fill = Color32::LIGHT_GREEN.gamma_multiply(0.3);
+                        }
 
-                    let fr = frame
-                        .show(h, |f| {
-                            let another_frame = Frame::NONE.inner_margin(Margin::symmetric(2, 8));
-                            another_frame.show(f, |a| {
-                                a.add(self.resolve_icon(icon, Vec2::new(14.0, 14.0)));
-                            });
+                        if is_current_index {
+                            frame.stroke.color = visuals.text_color().gamma_multiply(0.3);
+                        }
 
-                            let mut grid = Grid::new(Id::new(("explorer-grid", ri, ci, &index)));
+                        let mut color = visuals.text_color();
+                        let mut icon = &entry.file_icon;
 
-                            grid = grid.min_col_width(calc_width);
-                            grid.show(f, |g| {
-                                view.iter().for_each(|p| match p {
-                                    Property::Name => {
-                                        g.add(
-                                            AtomLayout::new(&entry.name)
-                                                .wrap_mode(TextWrapMode::Truncate)
-                                                .max_width(calc_width)
-                                                .fallback_text_color(color),
-                                        );
-                                    }
-                                    Property::Accessed => {
-                                        g.add(
-                                            AtomLayout::new(format_date(entry.accessed))
-                                                .max_width(calc_width)
-                                                .wrap_mode(TextWrapMode::Truncate)
-                                                .fallback_text_color(color),
-                                        );
-                                    }
-                                    Property::Created => {
-                                        g.add(
-                                            AtomLayout::new(format_date(entry.created))
-                                                .max_width(calc_width)
-                                                .wrap_mode(TextWrapMode::Truncate)
-                                                .fallback_text_color(color),
-                                        );
-                                    }
-                                    Property::Size => {
-                                        g.add(
-                                            AtomLayout::new(
-                                                if let Some(size) = &entry.folder_size {
-                                                    format!("{} items", size)
-                                                } else {
-                                                    bytes_to_string(
-                                                        entry.file_size.unwrap_or_default(),
-                                                    )
-                                                },
-                                            )
-                                            .max_width(calc_width)
-                                            .wrap_mode(TextWrapMode::Truncate)
-                                            .fallback_text_color(color),
-                                        );
-                                    }
-                                    Property::Type => {
-                                        g.add(
-                                            AtomLayout::new(entry.file_type)
-                                                .max_width(calc_width)
-                                                .wrap_mode(TextWrapMode::Truncate)
-                                                .fallback_text_color(color),
-                                        );
-                                    }
-                                    Property::Path => {
-                                        g.add(
-                                            AtomLayout::new(format!("{}", entry.path.display()))
-                                                .max_width(calc_width)
-                                                .wrap_mode(TextWrapMode::Truncate)
-                                                .fallback_text_color(color),
-                                        );
-                                    }
+                        if entry.is_hidden {
+                            color = visuals.text_color().gamma_multiply(0.5);
+                        }
+                        if self.clipboard_manager.entries.contains(&entry.path) {
+                            icon = match self.clipboard_manager.mode.as_ref().unwrap() {
+                                ClipboardMode::Copy => &IconKind::Copy,
+                                ClipboardMode::Cut => &IconKind::Scissors,
+                            };
+                            color = Color32::BLUE.gamma_multiply(0.3);
+                        }
+
+                        let fr = frame
+                            .show(h, |f| {
+                                let another_frame =
+                                    Frame::NONE.inner_margin(Margin::symmetric(2, 8));
+                                another_frame.show(f, |a| {
+                                    a.add(self.resolve_icon(icon, Vec2::new(14.0, 14.0)));
                                 });
+
+                                let mut grid =
+                                    Grid::new(Id::new(("explorer-grid", ri, ci, &index)));
+
+                                grid = grid.min_col_width(calc_width);
+                                grid.show(f, |g| {
+                                    view.iter().for_each(|p| match p {
+                                        Property::Name => {
+                                            g.add(
+                                                AtomLayout::new(&entry.name)
+                                                    .wrap_mode(TextWrapMode::Truncate)
+                                                    .max_width(calc_width)
+                                                    .fallback_text_color(color),
+                                            );
+                                        }
+                                        Property::Accessed => {
+                                            g.add(
+                                                AtomLayout::new(format_date(entry.accessed))
+                                                    .max_width(calc_width)
+                                                    .wrap_mode(TextWrapMode::Truncate)
+                                                    .fallback_text_color(color),
+                                            );
+                                        }
+                                        Property::Created => {
+                                            g.add(
+                                                AtomLayout::new(format_date(entry.created))
+                                                    .max_width(calc_width)
+                                                    .wrap_mode(TextWrapMode::Truncate)
+                                                    .fallback_text_color(color),
+                                            );
+                                        }
+                                        Property::Size => {
+                                            g.add(
+                                                AtomLayout::new(
+                                                    if let Some(size) = &entry.folder_size {
+                                                        format!("{} items", size)
+                                                    } else {
+                                                        bytes_to_string(
+                                                            entry.file_size.unwrap_or_default(),
+                                                        )
+                                                    },
+                                                )
+                                                .max_width(calc_width)
+                                                .wrap_mode(TextWrapMode::Truncate)
+                                                .fallback_text_color(color),
+                                            );
+                                        }
+                                        Property::Type => {
+                                            g.add(
+                                                AtomLayout::new(entry.file_type)
+                                                    .max_width(calc_width)
+                                                    .wrap_mode(TextWrapMode::Truncate)
+                                                    .fallback_text_color(color),
+                                            );
+                                        }
+                                        Property::Path => {
+                                            g.add(
+                                                AtomLayout::new(format!(
+                                                    "{}",
+                                                    entry.path.display()
+                                                ))
+                                                .max_width(calc_width)
+                                                .wrap_mode(TextWrapMode::Truncate)
+                                                .fallback_text_color(color),
+                                            );
+                                        }
+                                    });
+                                });
+                            })
+                            .response;
+
+                        let btn_interact = h.interact(
+                            fr.rect,
+                            Id::new(("button", ri, ci, &index)),
+                            Sense::click_and_drag(),
+                        );
+                        btn_interact.dnd_set_drag_payload((panel.id, entry_index));
+
+                        if btn_interact.drag_started() {
+                            messages.push(Message::SelectionSwap(index));
+                        }
+
+                        if btn_interact.dragged() {
+                            let popup = Popup::new(
+                                Id::new(("drag_pop", ri, ci, &index)),
+                                ctx.clone(),
+                                PopupAnchor::Pointer,
+                                LayerId::new(Order::Tooltip, Id::new(("drag", ri, ci, &index))),
+                            )
+                            .align(RectAlign::TOP_START)
+                            .layout(Layout::left_to_right(Align::TOP));
+                            popup.show(|pop| {
+                                pop.add(self.resolve_icon(&IconKind::Files, Vec2::new(14.0, 14.0)));
+                                pop.label(format!("files [{}]", panel.selected.len()));
                             });
-                        })
-                        .response;
+                        }
 
-                    let btn_interact = h.interact(
-                        fr.rect,
-                        Id::new(("button", ri, ci, &index)),
-                        Sense::click_and_drag(),
-                    );
-                    btn_interact.dnd_set_drag_payload((panel.id, entry_index));
+                        if let Some(hovered_payload) = fr.dnd_hover_payload::<(u16, usize)>() {
+                            if *hovered_payload != (panel.id, entry_index) {
+                                h.painter().rect_filled(
+                                    fr.rect,
+                                    CornerRadius::from(4.0),
+                                    visuals.text_color().gamma_multiply(0.1),
+                                );
+                            }
+                            if let Some(dragged_payload) = fr.dnd_release_payload() {
+                                *from = Some(dragged_payload);
+                                *to = Some((panel.id, Some(entry_index)));
+                            }
+                        }
 
-                    if btn_interact.drag_started() {
-                        messages.push(Message::SelectionSwap(index));
-                    }
+                        if is_current_index && panel.entries_manager.scroll_signal {
+                            btn_interact.scroll_to_me(None);
 
-                    if btn_interact.dragged() {
-                        let popup = Popup::new(
-                            Id::new(("drag_pop", ri, ci, &index)),
-                            ctx.clone(),
-                            PopupAnchor::Pointer,
-                            LayerId::new(Order::Tooltip, Id::new(("drag", ri, ci, &index))),
-                        )
-                        .align(RectAlign::TOP_START)
-                        .layout(Layout::left_to_right(Align::TOP));
-                        popup.show(|pop| {
-                            pop.add(self.resolve_icon(&IconKind::Files, Vec2::new(14.0, 14.0)));
-                            pop.label(format!("files [{}]", panel.selected.len()));
+                            if range.len() <= 3
+                                || range.contains(&(current_index + 1))
+                                || range.contains(&((*current_index as i32 - 1).max(0) as usize))
+                            {
+                                messages.push(Message::ScrollSignalDisable);
+                            }
+                        }
+
+                        btn_interact.context_menu(|m| {
+                            m.label(entry.name.clone());
+                            if m.add(
+                                Button::new("rename")
+                                    .shortcut_text(ctx.format_shortcut(&keybinds.rename_file)),
+                            )
+                            .clicked()
+                            {
+                                messages.push(Message::Overlay(OverlayKind::Rename));
+                            }
+                            if m.add(
+                                Button::new("delete").shortcut_text(
+                                    ctx.format_shortcut(&keybinds.delete_selections),
+                                ),
+                            )
+                            .clicked()
+                            {
+                                messages.push(Message::Overlay(OverlayKind::Delete));
+                            }
+                            if m.add(
+                                Button::new("cut")
+                                    .shortcut_text(ctx.format_shortcut(&keybinds.cut_to_clipboard)),
+                            )
+                            .clicked()
+                            {
+                                messages.push(Message::ClipboardMode(ClipboardMode::Cut));
+                            }
+                            if m.add(
+                                Button::new("copy").shortcut_text(
+                                    ctx.format_shortcut(&keybinds.copy_to_clipboard),
+                                ),
+                            )
+                            .clicked()
+                            {
+                                messages.push(Message::ClipboardMode(ClipboardMode::Copy));
+                            }
+                            if m.add(
+                                Button::new("info")
+                                    .shortcut_text(ctx.format_shortcut(&keybinds.view_info)),
+                            )
+                            .clicked()
+                            {
+                                messages.push(Message::Overlay(OverlayKind::Metadata));
+                            }
                         });
-                    }
 
-                    if let Some(hovered_payload) = fr.dnd_hover_payload::<(u16, usize)>() {
-                        if *hovered_payload != (panel.id, entry_index) {
+                        if btn_interact.clicked() {
+                            let ctrl_pressed = h.input(|i| {
+                                i.key_down(Key::ControlLeft) || i.key_down(Key::ControlRight)
+                            });
+                            let shift_pressed = h.input(|i| {
+                                i.key_down(Key::ShiftLeft) || i.key_down(Key::ShiftRight)
+                            });
+                            messages.push(Message::SelectionModify(
+                                index,
+                                ctrl_pressed,
+                                shift_pressed,
+                            ))
+                        }
+
+                        if btn_interact.double_clicked() {
+                            messages.push(Message::NavigateForward);
+                        }
+
+                        if btn_interact.secondary_clicked() {
+                            messages.push(Message::SelectionSwap(index));
+                        }
+
+                        if btn_interact.hovered() {
                             h.painter().rect_filled(
-                                fr.rect,
-                                CornerRadius::from(4.0),
-                                visuals.text_color().gamma_multiply(0.1),
+                                btn_interact.rect,
+                                CornerRadius::same(4),
+                                visuals.text_color().gamma_multiply(0.2),
                             );
                         }
-                        if let Some(dragged_payload) = fr.dnd_release_payload() {
-                            from = Some(dragged_payload);
-                            to = Some((panel.id, entry_index));
-                        }
-                    }
-
-                    if is_current_index && panel.entries_manager.scroll_signal {
-                        btn_interact.scroll_to_me(None);
-
-                        if range.contains(&(current_index + 1))
-                            || range.contains(&((*current_index as i32 - 1).max(0) as usize))
-                            || range.len() <= 3
-                        {
-                            messages.push(Message::ScrollSignalDisable);
-                        }
-                    }
-
-                    btn_interact.context_menu(|m| {
-                        m.label(entry.name.clone());
-                        if m.add(
-                            Button::new("rename")
-                                .shortcut_text(ctx.format_shortcut(&keybinds.rename_file)),
-                        )
-                        .clicked()
-                        {
-                            messages.push(Message::Overlay(OverlayKind::Rename));
-                        }
-                        if m.add(
-                            Button::new("delete")
-                                .shortcut_text(ctx.format_shortcut(&keybinds.delete_selections)),
-                        )
-                        .clicked()
-                        {
-                            messages.push(Message::Overlay(OverlayKind::Delete));
-                        }
-                        if m.add(
-                            Button::new("cut")
-                                .shortcut_text(ctx.format_shortcut(&keybinds.cut_to_clipboard)),
-                        )
-                        .clicked()
-                        {
-                            messages.push(Message::ClipboardMode(ClipboardMode::Cut));
-                        }
-                        if m.add(
-                            Button::new("copy")
-                                .shortcut_text(ctx.format_shortcut(&keybinds.copy_to_clipboard)),
-                        )
-                        .clicked()
-                        {
-                            messages.push(Message::ClipboardMode(ClipboardMode::Copy));
-                        }
-                        if m.add(
-                            Button::new("info")
-                                .shortcut_text(ctx.format_shortcut(&keybinds.view_info)),
-                        )
-                        .clicked()
-                        {
-                            messages.push(Message::Overlay(OverlayKind::Metadata));
-                        }
                     });
-
-                    if btn_interact.clicked() {
-                        let ctrl_pressed = h.input(|i| {
-                            i.key_down(Key::ControlLeft) || i.key_down(Key::ControlRight)
-                        });
-                        let shift_pressed =
-                            h.input(|i| i.key_down(Key::ShiftLeft) || i.key_down(Key::ShiftRight));
-                        messages.push(Message::SelectionModify(index, ctrl_pressed, shift_pressed))
-                    }
-
-                    if btn_interact.double_clicked() {
-                        messages.push(Message::NavigateForward);
-                    }
-
-                    if btn_interact.secondary_clicked() {
-                        messages.push(Message::SelectionSwap(index));
-                    }
-
-                    if btn_interact.hovered() {
-                        h.painter().rect_filled(
-                            btn_interact.rect,
-                            CornerRadius::same(4),
-                            visuals.text_color().gamma_multiply(0.2),
-                        );
-                    }
-                });
-            }
+                }
+            });
         });
 
-        // drag n drop handler
-        if let (Some(from), Some(to)) = (from, to)
-            && *from != to
-        {
-            messages.push(Message::Transfer(to));
-            messages.push(Message::PanelFocus(to.0));
+        if let Some(payload) = dropped_payload {
+            // dropped not into any items but to a panel
+            *from = Some(payload);
+            *to = Some((panel.id, None));
         }
 
         if bg_response.clicked()
@@ -833,6 +851,9 @@ impl App {
                 builder = builder.size(Size::relative(self.panels_manager.height_proportion[ri]));
             }
 
+            let mut from = None; // (panel id, entry index)
+            let mut to = None;
+
             builder.vertical(|mut strip| {
                 for (ri, row) in self.panels_manager.panels.iter().enumerate() {
                     strip.strip(|mut builder| {
@@ -864,6 +885,8 @@ impl App {
                                             &ctx,
                                             &mut messages,
                                             &panel_pos,
+                                            &mut from,
+                                            &mut to,
                                         );
 
                                         if !panel_focused {
@@ -892,6 +915,15 @@ impl App {
                     });
                 }
             });
+
+            // drag n drop handler
+            if let (Some(from), Some(to)) = (from, to)
+                && (from.0 != to.0 || (to.1.is_some() && to.1.unwrap() != from.1))
+            {
+                messages.push(Message::Transfer((to.0, to.1)));
+                messages.push(Message::FetchEntries(Some(from.0)));
+                messages.push(Message::PanelFocus(to.0));
+            }
         });
 
         self.overlays(&ctx, &mut messages);
