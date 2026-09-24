@@ -1,0 +1,24 @@
+[keybinds]
+navigate_up = "k"
+navigate_down = "j"
+navigate_forward = "l"
+navigate_backward = "h"
+
+panel_navigate_up	= "ctrl + alt + k"
+panel_navigate_down	= "ctrl + alt + j"
+panel_navigate_right = "ctrl + alt + l"
+panel_navigate_left = "ctrl + alt + h"
+panel_resize_up = "ctrl + shift + alt + k"
+panel_resize_down	= "ctrl + shift + alt + j"
+panel_resize_right = "ctrl + shift + alt + l"
+panel_resize_left = "ctrl + shift + alt + h"
+
+split_vertical = "ctrl+alt+|"
+split_horizontal = "ctrl+alt+-"
+
+[view]
+dark_mode = true
+format_date = "%I:%M:%S %p"
+
+[clipboard]
+behaviour = "replace"

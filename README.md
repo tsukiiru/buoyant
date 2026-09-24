@@ -67,6 +67,8 @@ environment.systemPackages = with pkgs; [
 buoyant uses *toml* as the configuration language, more about toml [***here***](https://toml.io/)  
 the config file is located in `$HOME/.config/buoyant/buoyant.toml`  
 
+an example config is provided in the repo's `/examples` directory  
+
 #### [keybinds]
 
 **value**  
