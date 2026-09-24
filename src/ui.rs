@@ -6,8 +6,7 @@ use chrono::{DateTime, Datelike, Utc};
 use eframe::egui::{
     Align, Align2, AtomLayout, Button, CentralPanel, Color32, Context, CornerRadius, Frame, Grid,
     Id, Image, Key, Label, LayerId, Layout, Margin, Modal, Order, Popup, PopupAnchor, ProgressBar,
-    Rect, RectAlign, RichText, ScrollArea, Sense, Stroke, TextEdit, TextWrapMode, UiBuilder, Vec2,
-    Window,
+    Rect, RectAlign, RichText, ScrollArea, Sense, Stroke, TextEdit, TextWrapMode, Vec2, Window,
 };
 use egui_extras::{Size, StripBuilder};
 
@@ -57,8 +56,7 @@ impl App {
                     "({}) input search entry :3",
                     ctx.format_shortcut(&self.config.keybinds.search)
                 ))
-                .frame(Frame::NONE)
-                .desired_width(f32::INFINITY),
+                .frame(Frame::NONE),
         );
 
         if input.gained_focus() && !is_searching {
@@ -102,7 +100,8 @@ impl App {
         let ri = pos.r;
         let ci = pos.c;
 
-        let calc_width = (panel_rect.width() - 30.0) / self.config.view.explorer.len() as f32;
+        let calc_width =
+            ((panel_rect.width() - 55.0) / self.config.view.explorer.len() as f32).floor();
         ui.horizontal(|ui| {
             let view = &self.config.view.explorer;
             ui.allocate_space(Vec2::new(2.0 + 16.0, 0.0));
@@ -122,14 +121,16 @@ impl App {
 
         let displaying = panel.entries_manager.displaying.clone();
 
-        let bg_rect = ui.allocate_space(ui.available_size()).1;
-        let bg_response = ui.interact(bg_rect, Id::new(("explorer-area", ri, ci)), Sense::click());
+        let bg_response = ui.interact(
+            ui.available_rect_before_wrap(),
+            Id::new(("explorer-area", ri, ci)),
+            Sense::click(),
+        );
 
-        let mut child_ui = ui.new_child(UiBuilder::new().max_rect(bg_rect));
+        //let mut child_ui = ui.new_child(UiBuilder::new().max_rect(bg_rect));
         let frame = Frame::new();
 
-        let (_, dropped_payload) = child_ui.dnd_drop_zone::<(u16, usize), ()>(frame, |ui| {
-            ui.set_min_size(bg_rect.size());
+        let (_, dropped_payload) = ui.dnd_drop_zone::<(u16, usize), ()>(frame, |ui| {
             ScrollArea::vertical().show_rows(ui, 32.0, displaying.len(), |sa, range| {
                 let keybinds = &self.config.keybinds;
                 let view = &self.config.view.explorer;
@@ -423,7 +424,7 @@ impl App {
             macro_rules! button {
                 ($name:ident, $text:literal, $callback:expr, $condition:expr $(, $kb:ident)?) => {
                     let mut $name = RichText::new($text);
-                    if panel.selected.is_empty() {
+                    if $condition {
                         $name = $name.color(visuals.text_color().gamma_multiply(0.5));
                     }
                     let mut $name = Button::new($name)
