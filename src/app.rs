@@ -864,7 +864,10 @@ impl App {
         let ctx = cc.egui_ctx.clone();
         egui_extras::install_image_loaders(&ctx);
 
-        ctx.options_mut(|opts| opts.quit_shortcuts = Vec::new());
+        ctx.options_mut(|opts| {
+            opts.quit_shortcuts = Vec::new();
+            opts.zoom_with_keyboard = false;
+        });
 
         let mut app = App {
             ctx,
