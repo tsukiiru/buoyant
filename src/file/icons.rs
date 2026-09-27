@@ -32,8 +32,6 @@ pub enum IconKind {
     QuestionMark,
     BrokenLink,
     Folder,
-    Scissors,
-    Copy,
     Pdf,
 }
 
@@ -75,8 +73,6 @@ pub fn match_icon(kind: &IconKind) -> ImageSource<'_> {
         IconKind::Folder => root_include_image!("assets/icons/folder.svg"),
         IconKind::VueSrc => root_include_image!("assets/icons/file-vue.svg"),
         IconKind::Link => root_include_image!("assets/icons/link.svg"),
-        IconKind::Scissors => root_include_image!("assets/icons/scissors.svg"),
-        IconKind::Copy => root_include_image!("assets/icons/copy-simple.svg"),
         IconKind::Files => root_include_image!("assets/icons/files.svg"),
     }
 }
