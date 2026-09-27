@@ -503,6 +503,10 @@ impl App {
             if m.add(Button::new("toggle clipboard")).clicked() {
                 messages.push(Message::WindowToggle(WindowKind::Clipboard));
             }
+
+            if m.add(Button::new("toggle keybinds")).clicked() {
+                messages.push(Message::WindowToggle(WindowKind::Keybinds));
+            }
         });
     }
 
@@ -736,7 +740,7 @@ impl App {
     fn windows(&self, ctx: &Context, messages: &mut Vec<Message>) {
         let visuals = ctx.theme().default_visuals();
 
-        if self.windows_manager.clipboard.is_some() {
+        if self.windows_manager.clipboard {
             let mut window_state = true;
 
             let clipboard = &self.clipboard_manager;
@@ -766,6 +770,31 @@ impl App {
 
             if !window_state {
                 messages.push(Message::WindowClose(WindowKind::Clipboard));
+            }
+        }
+
+        if self.windows_manager.keybinds {
+            let mut window_state = true;
+
+            let keybinds = &self.config.keybinds_list;
+            let window = Window::new("keybinds")
+                .open(&mut window_state)
+                .enabled(true)
+                .movable(true)
+                .title_bar(true);
+
+            window.show(ctx, |win| {
+                win.vertical(|vert| {
+                    keybinds.iter().for_each(|key| {
+                        vert.horizontal(|hor| {
+                            hor.label(format!("{} - {}", key.0, ctx.format_shortcut(&key.1)));
+                        });
+                    });
+                });
+            });
+
+            if !window_state {
+                messages.push(Message::WindowClose(WindowKind::Keybinds));
             }
         }
     }
@@ -841,7 +870,8 @@ impl App {
 
     pub fn ui(&mut self, main_ui: &mut eframe::egui::Ui) {
         let ctx = self.ctx.clone();
-        let visuals = ctx.theme().default_visuals();
+        let mut visuals = ctx.theme().default_visuals();
+        visuals.window_fill = Color32::TRANSPARENT;
 
         let mut messages: Vec<Message> = Vec::with_capacity(2);
 

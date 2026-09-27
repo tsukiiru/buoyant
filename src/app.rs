@@ -62,30 +62,41 @@ pub enum FieldKind {
 
 #[derive(Default)]
 pub struct WindowsManager {
-    pub clipboard: Option<bool>,
+    pub clipboard: bool,
+    pub keybinds: bool,
 }
 
 pub enum WindowKind {
     Clipboard,
+    Keybinds,
 }
 
 impl WindowsManager {
     pub fn close(&mut self, kind: WindowKind) {
         match kind {
-            WindowKind::Clipboard => self.clipboard = None,
+            WindowKind::Clipboard => self.clipboard = false,
+            WindowKind::Keybinds => self.keybinds = false,
         }
     }
 
     fn open(&mut self, kind: WindowKind) {
         match kind {
-            WindowKind::Clipboard => self.clipboard = Some(true),
+            WindowKind::Clipboard => self.clipboard = true,
+            WindowKind::Keybinds => self.keybinds = true,
         }
     }
 
     pub fn toggle(&mut self, kind: WindowKind) {
         match kind {
             WindowKind::Clipboard => {
-                if self.clipboard.is_none() {
+                if !self.clipboard {
+                    self.open(kind);
+                } else {
+                    self.close(kind);
+                }
+            }
+            WindowKind::Keybinds => {
+                if !self.keybinds {
                     self.open(kind);
                 } else {
                     self.close(kind);
@@ -394,6 +405,21 @@ pub enum Direction {
     Down,
     Left,
     Right,
+}
+
+impl Display for Direction {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "{}",
+            match self {
+                Direction::Up => "up",
+                Direction::Down => "down",
+                Direction::Left => "left",
+                Direction::Right => "right",
+            }
+        )
+    }
 }
 
 #[derive(Default)]

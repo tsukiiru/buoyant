@@ -1,4 +1,4 @@
-use std::{env, fs};
+use std::{env, fmt::Display, fs};
 
 use eframe::egui::{Key, KeyboardShortcut, Modifiers};
 use rayon::{
@@ -62,6 +62,42 @@ pub enum KeybindAction {
     ClosePanel,
     PanelNavigate(Direction),
     PanelResize(Direction),
+}
+
+impl Display for KeybindAction {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "{}",
+            match self {
+                KeybindAction::WindowNavigate(Direction::Up) => "navigate_up".to_string(),
+                KeybindAction::WindowNavigate(Direction::Down) => "navigate_down".to_string(),
+                KeybindAction::WindowNavigate(Direction::Left) => "navigate_backward".to_string(),
+                KeybindAction::WindowNavigate(Direction::Right) => "navigate_forward".to_string(),
+                KeybindAction::NavigateStart => "navigate_top".to_string(),
+                KeybindAction::NavigateEnd => "navigate_bottom".to_string(),
+                KeybindAction::Copy => "copy to clipboard".to_string(),
+                KeybindAction::Cut => "cut to clipboard".to_string(),
+                KeybindAction::Paste => "paste from clipboard".to_string(),
+                KeybindAction::ClearClipboard => "clear clipboard".to_string(),
+                KeybindAction::Delete => "delete selected".to_string(),
+                KeybindAction::Rename => "rename".to_string(),
+                KeybindAction::ToggleHidden => "toggle hidden view".to_string(),
+                KeybindAction::CreateFile => "create file".to_string(),
+                KeybindAction::CreateFolder => "create folder".to_string(),
+                KeybindAction::ToggleVisual => "toggle visual mode".to_string(),
+                KeybindAction::Refresh => "refresh settings".to_string(),
+                KeybindAction::Info => "display info".to_string(),
+                KeybindAction::Search => "query search box".to_string(),
+                KeybindAction::Choice(i) => format!("choice {}", i),
+                KeybindAction::SplitVertical => "split vertically".to_string(),
+                KeybindAction::SplitHorizontal => "split horizontally".to_string(),
+                KeybindAction::ClosePanel => "close current panel".to_string(),
+                KeybindAction::PanelNavigate(dir) => format!("navigate panel {}", dir),
+                KeybindAction::PanelResize(dir) => format!("resize panel {}", dir),
+            }
+        )
+    }
 }
 
 macro_rules! create_keybinds {
@@ -494,18 +530,17 @@ fn match_key(raw_key: &str) -> Option<KeyboardShortcut> {
         return Some(result);
     }
 
-    let fresh_modifiers = NONE;
+    let raw_modifiers = raw_modifiers.iter().map(|m| match *m {
+        "ctrl" => CTRL,
+        "shift" => SHIFT,
+        "alt" => ALT,
+        _ => NONE,
+    });
 
-    for raw_mod in raw_modifiers.iter() {
-        fresh_modifiers.plus(match *raw_mod {
-            "ctrl" => CTRL,
-            "shift" => SHIFT,
-            "alt" => ALT,
-            _ => NONE,
-        });
-    }
-
-    result.modifiers = fresh_modifiers;
+    result.modifiers = raw_modifiers
+        .into_iter()
+        .reduce(|a, b| a.plus(b))
+        .unwrap_or(NONE);
 
     Some(result)
 }
