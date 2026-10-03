@@ -14,7 +14,28 @@
           lib,
           pkg-config,
           rustPlatform,
+          makeWrapper,
+          libX11,
+          libXcursor,
+          libXrandr,
+          libXi,
+          libxcb,
+          libxkbcommon,
+          vulkan-loader,
+          wayland,
         }:
+        let
+          runtimeLibs = [
+            libX11
+            libXcursor
+            libXrandr
+            libXi
+            libxcb
+            libxkbcommon
+            vulkan-loader
+            wayland
+          ];
+        in
         rustPlatform.buildRustPackage {
           pname = "buoyant";
           version = revision;
@@ -39,9 +60,15 @@
           nativeBuildInputs = [
             rustPlatform.bindgenHook
             pkg-config
+            makeWrapper
           ];
 
-          buildInputs = [ ];
+          buildInputs = runtimeLibs;
+
+          postFixup = ''
+            wrapProgram $out/bin/buoyant \
+              --prefix LD_LIBRARY_PATH : ${lib.makeLibraryPath runtimeLibs}
+          '';
         };
 
       inherit (nixpkgs) lib;
