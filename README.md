@@ -1,4 +1,4 @@
-<h3 align="center">buoyant</h3>
+<h3 align="center">buoyant [浮力]</h3>
 <h6 align="center">"whatever keeps you afloat"</h6>
 
 a pretty fast linux file explorer with all the features you can ask for (maybe it still lacks some but i'm too lazy to implement them at the time)  
