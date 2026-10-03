@@ -68,6 +68,11 @@ pub fn extension_to_file_type(extension: &str) -> Option<(&'static str, IconKind
         "bin" => ("Binary File", IconKind::File),
         "blend1" => ("Blender Backup Model", IconKind::Cube),
         "dll" => ("Dynamic-Link Library", IconKind::Link),
+        "bbmodel" => ("Blockbench Model", IconKind::Cube),
+        "gltf" => ("3D Scenes and Models", IconKind::Cube),
+        "obj" => ("Wavefront Object", IconKind::Sphere),
+        "mtl" => ("Material Template Library", IconKind::Blueprint),
+        "fbx" => ("Filmbox", IconKind::Sphere),
         _ => ("", IconKind::File),
     };
 
