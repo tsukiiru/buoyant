@@ -35,6 +35,7 @@ pub enum IconKind {
     BrokenLink,
     Folder,
     Pdf,
+    Snowflake,
 }
 
 macro_rules! root_include_image {
@@ -78,5 +79,6 @@ pub fn match_icon(kind: &IconKind) -> ImageSource<'_> {
         IconKind::VueSrc => root_include_image!("assets/icons/file-vue.svg"),
         IconKind::Link => root_include_image!("assets/icons/link.svg"),
         IconKind::Files => root_include_image!("assets/icons/files.svg"),
+        IconKind::Snowflake => root_include_image!("assets/icons/snowflake.svg"),
     }
 }

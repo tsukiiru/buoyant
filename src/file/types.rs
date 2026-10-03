@@ -53,6 +53,8 @@ pub fn extension_to_file_type(extension: &str) -> Option<(&'static str, IconKind
         "html" => ("HTML", IconKind::HtmlSrc),
         "pdf" => ("PDF", IconKind::Pdf),
         "lua" => ("Lua Source File", IconKind::Src),
+        "nix" => ("Nix File", IconKind::Snowflake),
+        "flake" => ("Nix Flake", IconKind::Snowflake),
         // archive
         "7z" => ("7-Zip Archive", IconKind::Archive),
         "zip" => ("ZIP Archive", IconKind::Archive),
