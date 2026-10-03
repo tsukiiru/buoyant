@@ -1596,6 +1596,7 @@ impl App {
             KeybindAction::Search => messages.push(Message::Field(FieldKind::Search)),
             KeybindAction::Refresh => {
                 messages.push(Message::FetchConfig);
+                messages.push(Message::FetchEntries(None));
             }
             KeybindAction::SplitVertical => {
                 let current_path = self.panels_manager.current_panel().current_path.clone();
@@ -1922,6 +1923,7 @@ impl App {
                     });
                 }
             }
+
             return;
         };
 
@@ -2124,6 +2126,7 @@ impl eframe::App for App {
                         toast.percent = Some(percent);
                     }
                     WorkerRequest::Done { paths } => {
+                        messages.push(Message::FetchEntries(None));
                         if !paths.is_empty() {
                             messages.push(Message::HighlightPath(paths[0].to_path_buf()));
                         }
