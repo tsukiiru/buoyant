@@ -161,7 +161,7 @@ pub fn file_size(path: &Path, should_fetch: &bool) -> Option<u64> {
 
     let read_metadata = path.metadata();
 
-    if !read_metadata.is_ok() {
+    if read_metadata.is_err() {
         println!(
             "problem encountered when trying to read metadata of {}",
             path.display()

@@ -10,6 +10,7 @@ use std::{
 };
 
 use eframe::egui::{Context, Event, Key, Theme, ViewportCommand, WidgetText, mutex::RwLock};
+use notify::Watcher;
 use rayon::{
     iter::{
         IndexedParallelIterator, IntoParallelRefIterator, IntoParallelRefMutIterator,
@@ -473,7 +474,7 @@ impl PanelsManager {
         self.panels.get_mut(pos.r)?.get_mut(pos.c)
     }
 
-    fn new_panel(&mut self, dir: Option<Direction>, path: &Path) {
+    fn new_panel(&mut self, dir: Option<Direction>, path: &Path) -> u16 {
         let path = if !path.exists() {
             &home_dir().unwrap()
         } else {
@@ -493,7 +494,7 @@ impl PanelsManager {
             self.height_proportion.insert(0, 1.0);
             self.width_proportion.insert(0, vec![1.0]);
 
-            return;
+            return new_id;
         }
 
         let mut new_pos = self.position(current_panel);
@@ -534,6 +535,8 @@ impl PanelsManager {
                 self.width_proportion.insert(new_pos.r, vec![1.0]);
             }
         };
+
+        new_id
     }
 
     fn adjacent_cols(&self) -> Vec<usize> {
@@ -576,15 +579,16 @@ impl PanelsManager {
         adj_rows
     }
 
-    fn close_panel(&mut self) -> bool {
-        let current_pos = self.position(self.focused);
+    fn close_panel(&mut self) -> (u16, bool) {
+        let focused_id = self.focused;
+        let current_pos = self.position(focused_id);
 
         let adj_cols = self.adjacent_cols();
         let adj_rows = self.adjacent_rows();
 
         if self.panels.len() == 1 && self.panels[current_pos.r].len() == 1 {
             // last one in the program (last in row, last row)
-            return true;
+            return (focused_id, true);
         }
 
         if self.panels[current_pos.r].len() == 1 {
@@ -603,7 +607,7 @@ impl PanelsManager {
             });
             self.panels.remove(current_pos.r);
 
-            return false;
+            return (focused_id, false);
         }
 
         let old_width = self.width_proportion[current_pos.r][current_pos.c];
@@ -621,7 +625,7 @@ impl PanelsManager {
         self.panels[current_pos.r].remove(current_pos.c);
 
         self.clamp_sizes();
-        false
+        (focused_id, false)
     }
 
     fn clamp_sizes(&mut self) {
@@ -857,6 +861,7 @@ pub enum Message {
     PanelNavigate(Direction),
     PanelFocus(u16),
     PanelResize(Direction),
+    FetchMultiplePanes(Vec<u16>),
 
     // toasts
     Toast(
@@ -883,6 +888,128 @@ pub struct App {
     pub windows_manager: WindowsManager,
     pub panels_manager: PanelsManager,
     pub channels_manager: ChannelsManager,
+    pub watchers_manager: PathWatcherManager,
+}
+
+pub struct PathWatcherManager {
+    pub watchers: Vec<PathWatcher>,
+}
+
+impl Default for PathWatcherManager {
+    fn default() -> Self {
+        Self {
+            watchers: Vec::with_capacity(1),
+        }
+    }
+}
+
+impl PathWatcherManager {
+    fn id_find_watcher(&self, id: &u16) -> Option<usize> {
+        for (i, watcher) in self.watchers.iter().enumerate() {
+            if watcher.panes_ids.contains(id) {
+                return Some(i);
+            }
+        }
+
+        None
+    }
+
+    fn path_find_watcher(&self, path: &Path) -> Option<usize> {
+        for (i, watcher) in self.watchers.iter().enumerate() {
+            if watcher.path == path {
+                return Some(i);
+            }
+        }
+
+        None
+    }
+
+    fn modify_open_watchers(&mut self, pane_id: u16, path: &Path) {
+        // watcher initialization
+        use notify::{self, EventKind, RecursiveMode};
+
+        let existed_watcher = self.path_find_watcher(path);
+
+        if let Some(i) = existed_watcher {
+            //println!("added id to an existing watcher with path {:#?}", path);
+
+            self.watchers.get_mut(i).unwrap().panes_ids.push(pane_id);
+        } else {
+            let (e_tx, e_rx) = mpsc::channel::<notify::Result<notify::Event>>();
+            let (watcher_tx, client_rx) = mpsc::channel::<bool>();
+            let (client_tx, watcher_rx) = mpsc::channel::<bool>(); // used only for stopping watcher
+
+            let owned_path = path.to_owned();
+            std::thread::spawn(move || {
+                let mut watcher = notify::recommended_watcher(e_tx).unwrap();
+                let _ = watcher.watch(&owned_path, RecursiveMode::NonRecursive);
+
+                std::thread::spawn(move || {
+                    while let Some(_event) = watcher_rx.iter().next() {
+                        let _ = watcher.unwatch(&owned_path);
+                        //println!("unwatching for watcher with path {:#?}", owned_path);
+                    }
+                });
+
+                while let Some(event) = e_rx.iter().next() {
+                    match event {
+                        Ok(e) => match e.kind {
+                            EventKind::Modify(..)
+                            | EventKind::Create(..)
+                            | EventKind::Remove(..) => {
+                                let _ = watcher_tx.send(true);
+                            }
+                            _ => {}
+                        },
+                        Err(_e) => {}
+                    }
+                }
+            });
+
+            let path_watcher = PathWatcher {
+                event_chan_recv: client_rx,
+                watcher_chan_send: client_tx,
+                panes_ids: vec![pane_id],
+                path: path.to_path_buf(),
+            };
+
+            //println!("new path watcher! {:#?}", path_watcher);
+
+            self.watchers.push(path_watcher);
+        }
+    }
+
+    fn modify_close_watchers(&mut self, pane_id: u16) {
+        let existed_watcher = self.id_find_watcher(&pane_id);
+
+        if let Some(i) = existed_watcher {
+            let watcher = self.watchers.get_mut(i).unwrap();
+
+            /*println!(
+                "removing id {} from watcher path {:#?}",
+                pane_id, watcher.path
+            );
+            */
+            watcher.panes_ids.retain(|id| *id != pane_id);
+
+            if watcher.panes_ids.is_empty() {
+                let _ = watcher.watcher_chan_send.send(true);
+            }
+        }
+    }
+
+    fn modify_watchers(&mut self, pane_id: u16, path: &Path) {
+        self.modify_close_watchers(pane_id);
+        self.modify_open_watchers(pane_id, path);
+    }
+}
+
+#[derive(Debug)]
+pub struct PathWatcher {
+    pub event_chan_recv: mpsc::Receiver<bool>,
+    pub watcher_chan_send: mpsc::Sender<bool>,
+    pub panes_ids: Vec<u16>,
+    pub path: PathBuf,
 }
 
 impl App {
@@ -900,8 +1027,8 @@ impl App {
             ..Default::default()
         };
         app.fetch_config();
-        app.panels_manager
-            .new_panel(None, &env::home_dir().unwrap());
+
+        app.new_panel(None, &env::home_dir().unwrap());
 
         app.fetch_entries(None);
         app
@@ -927,8 +1054,8 @@ impl App {
             Message::NavigateIndex(dir, is_ctrled, is_shifted) => {
                 self.navigate_direction(&dir, is_ctrled, is_shifted)
             }
-            Message::NavigateForward => self.nav_forward(),
-            Message::NavigateBackward => self.nav_back(),
+            Message::NavigateForward => self.navigate_forward(),
+            Message::NavigateBackward => self.navigate_back(),
 
             Message::Create(kind) => self.create(kind),
             Message::Rename => self.rename(),
@@ -949,19 +1076,19 @@ impl App {
             Message::WindowToggle(kind) => self.windows_manager.toggle(kind),
             Message::WindowClose(kind) => self.windows_manager.close(kind),
 
-            Message::Panel(dir, path) => self.panels_manager.new_panel(Some(dir), &path),
-            Message::ClosePanel => {
-                let close_program = self.panels_manager.close_panel();
-                if close_program {
-                    self.ctx.send_viewport_cmd(ViewportCommand::Close);
-                }
-            }
+            Message::Panel(dir, path) => self.new_panel(Some(dir), &path),
+            Message::ClosePanel => self.close_panel(),
+
             Message::PanelNavigate(dir) => self.panels_manager.navigate_panel(dir),
             Message::PanelFocus(id) => {
                 self.panels_manager.focus_panel(id);
-                self.fetch_entries(Some(id));
             }
             Message::PanelResize(dir) => self.panels_manager.resize_panel(dir),
+            Message::FetchMultiplePanes(ids) => {
+                ids.iter().for_each(|id| {
+                    self.fetch_entries(Some(*id));
+                });
+            }
 
             Message::Toast(title, content, kind, id_chan) => {
                 self.new_toast(title, content, kind, id_chan)
@@ -1045,7 +1172,7 @@ impl App {
         self.fetch_entries(Some(targetted_panel.id));
     }
 
-    pub fn nav_forward(&mut self) {
+    pub fn navigate_forward(&mut self) {
         let current_panel = self.panels_manager.current_panel_mut();
 
         let to = &current_panel
@@ -1073,43 +1200,87 @@ impl App {
         }
 
         current_panel.current_path = to.to_path_buf();
+        self.watchers_manager
+            .modify_watchers(current_panel.id, &current_panel.current_path);
+
         self.fetch_entries(None);
     }
 
-    pub fn nav_back(&mut self) {
+    pub fn navigate_back(&mut self) {
         let current_panel = self.panels_manager.current_panel_mut();
         let old_path = current_panel.current_path.clone();
 
         current_panel.current_path.pop();
+
+        self.watchers_manager
+            .modify_watchers(current_panel.id, &current_panel.current_path);
+
         self.fetch_entries(None);
         self.highlight_path(&old_path);
     }
 
-    fn fetch_entries(&mut self, panel_id: Option<u16>) {
-        {
-            let current_panel = if let Some(id) = panel_id {
-                self.panels_manager.panel_mut(id).unwrap()
-            } else {
-                self.panels_manager.current_panel_mut()
-            };
-            current_panel.field.reset();
-            // clear entries
-            current_panel
-                .entries_manager
-                .entries
-                .iter_mut()
-                .for_each(|e| {
-                    e.name.clear();
-                    e.file_type = "";
-                    e.path = PathBuf::new();
-                    e.using = false;
-                    e.accessed = None;
-                    e.created = None;
-                    e.folder_size = None;
-                });
+    fn close_panel(&mut self) {
+        let (pane_id, close_program) = self.panels_manager.close_panel();
+
+        if close_program {
+            self.ctx.send_viewport_cmd(ViewportCommand::Close);
         }
 
-        let fetch_current_path = read_dir(&self.panels_manager.current_panel().current_path);
+        self.watchers_manager.modify_close_watchers(pane_id);
+    }
+
+    fn new_panel(&mut self, dir: Option<Direction>, path: &Path) {
+        let id = self.panels_manager.new_panel(dir, path);
+
+        self.watchers_manager.modify_open_watchers(id, path);
+        self.fetch_entries(None);
+    }
+
+    fn fetch_entries(&mut self, panel_id: Option<u16>) {
+        let targetted_panel = if let Some(id) = panel_id {
+            //println!("fetching entries for panel id {}! :3", id);
+            self.panels_manager.panel_mut(id).unwrap()
+        } else {
+            self.panels_manager.current_panel_mut()
+        };
+        targetted_panel.field.reset();
+        // clear entries
+        targetted_panel
+            .entries_manager
+            .entries
+            .iter_mut()
+            .for_each(|e| {
+                e.name.clear();
+                e.file_type = "";
+                e.path = PathBuf::new();
+                e.using = false;
+                e.accessed = None;
+                e.created = None;
+                e.folder_size = None;
+            });
+
+        let fetch_current_path = read_dir(&if !targetted_panel.current_path.exists() {
+            self.new_toast(
+                "Error",
+                Cow::Borrowed("Panel's path no longer exists! Redirecting to HOME path..."),
+                ToastKind::Danger,
+                None,
+            );
+
+            if let Some(path) = env::home_dir() {
+                path
+            } else {
+                self.new_toast(
+                    "Info",
+                    Cow::Borrowed("$HOME env is not set. Redirecting to root..."),
+                    ToastKind::Info,
+                    None,
+                );
+                PathBuf::from("/")
+            }
+        } else {
+            targetted_panel.current_path.to_path_buf()
+        });
 
         if let Err(err) = &fetch_current_path {
             self.new_toast(
@@ -1121,7 +1292,11 @@ impl App {
         }
 
         let mut index: usize = 0;
-        let current_panel = self.panels_manager.current_panel_mut();
+        let targetted_panel = if let Some(id) = panel_id {
+            self.panels_manager.panel_mut(id).unwrap()
+        } else {
+            self.panels_manager.current_panel_mut()
+        };
 
         for path in fetch_current_path.unwrap() {
             let (fetch_accessed, fetch_created) = (
@@ -1132,7 +1307,7 @@ impl App {
             let (accessed, created) = accessed_and_created(&path, &fetch_accessed, &fetch_created);
             let (file_type, file_icon) = file_type(&path);
 
-            current_panel.entries_manager.push(
+            targetted_panel.entries_manager.push(
                 &TempEntry {
                     name: path.file_name().unwrap().to_str().unwrap(),
                     path: &path,
@@ -1149,7 +1324,7 @@ impl App {
             index += 1;
         }
 
-        current_panel.entries_manager.entries.truncate(index);
+        targetted_panel.entries_manager.entries.truncate(index);
 
         // freed some mem from the greedy alloc
         unsafe {
@@ -1159,7 +1334,7 @@ impl App {
             malloc_trim(0);
         }
 
-        self.filter_and_sort();
+        self.filter_and_sort(panel_id);
     }
 
     fn toggle_view_hidden(&mut self) {
@@ -1173,7 +1348,7 @@ impl App {
         };
 
         self.config.view.view_hidden_files = !self.config.view.view_hidden_files;
-        self.filter_and_sort();
+        self.filter_and_sort(None);
 
         {
             let current_panel = self.panels_manager.current_panel();
@@ -1224,33 +1399,37 @@ impl App {
             });
     }
 
-    pub fn filter_and_sort(&mut self) {
-        let current_panel = self.panels_manager.current_panel_mut();
+    pub fn filter_and_sort(&mut self, panel_id: Option<u16>) {
+        let targetted_panel = if let Some(id) = panel_id {
+            self.panels_manager.panel_mut(id).unwrap()
+        } else {
+            self.panels_manager.current_panel_mut()
+        };
 
-        current_panel.entries_manager.current_index = 0;
-        current_panel.entries_manager.displaying.clear();
-        current_panel.selected.clear();
+        targetted_panel.entries_manager.current_index = 0;
+        targetted_panel.entries_manager.displaying.clear();
+        targetted_panel.selected.clear();
 
         let mut filter = "";
         let view_hidden = self.config.view.view_hidden_files;
 
-        if current_panel
+        if targetted_panel
             .field
             .kind
             .is_some_and(|kind| kind == FieldKind::Search)
         {
-            filter = current_panel.field.buffer.trim();
+            filter = targetted_panel.field.buffer.trim();
         }
 
-        for (i, entry) in current_panel.entries_manager.entries.iter().enumerate() {
+        for (i, entry) in targetted_panel.entries_manager.entries.iter().enumerate() {
             if !entry.using || (!view_hidden && entry.is_hidden) || !entry.name.contains(filter) {
                 continue;
             }
 
-            current_panel.entries_manager.displaying.push(i);
+            targetted_panel.entries_manager.displaying.push(i);
         }
 
-        current_panel.entries_manager.sort(
+        targetted_panel.entries_manager.sort(
             &self.config.sorting.sorting_by,
             self.config.sorting.reversed,
         );
@@ -1270,7 +1449,6 @@ impl App {
         })) {
             self.new_toast("Delete", Cow::Owned(e), ToastKind::Danger, None);
         }
-        self.fetch_entries(None);
     }
 
     pub fn new_field(&mut self, kind: &FieldKind) {
@@ -1281,7 +1459,7 @@ impl App {
 
         if field.kind.is_some() {
             field.buffer = String::new();
-            self.filter_and_sort();
+            self.filter_and_sort(None);
             return;
         }
 
@@ -1290,7 +1468,7 @@ impl App {
 
     pub fn close_field(&mut self) {
         self.panels_manager.current_panel_mut().field.reset();
-        self.filter_and_sort();
+        self.filter_and_sort(None);
     }
 
     pub fn unfocus_field(&mut self) { self.panels_manager.current_panel_mut().field.unfocus(); }
@@ -1301,7 +1479,7 @@ impl App {
 
     pub fn logic_field(&mut self, kind: &FieldKind) {
         match kind {
-            FieldKind::Search => self.filter_and_sort(),
+            FieldKind::Search => self.filter_and_sort(None),
         }
     }
 
@@ -1418,23 +1596,20 @@ impl App {
             KeybindAction::Search => messages.push(Message::Field(FieldKind::Search)),
             KeybindAction::Refresh => {
                 messages.push(Message::FetchConfig);
-                messages.push(Message::FetchEntries(None));
             }
             KeybindAction::SplitVertical => {
-                messages.push(Message::Panel(Direction::Right, PathBuf::new()));
-                messages.push(Message::FetchEntries(None));
+                let current_path = self.panels_manager.current_panel().current_path.clone();
+                messages.push(Message::Panel(Direction::Right, current_path));
             }
             KeybindAction::SplitHorizontal => {
-                messages.push(Message::Panel(Direction::Up, PathBuf::new()));
-                messages.push(Message::FetchEntries(None));
+                let current_path = self.panels_manager.current_panel().current_path.clone();
+                messages.push(Message::Panel(Direction::Up, current_path));
             }
             KeybindAction::ClosePanel => {
                 messages.push(Message::ClosePanel);
-                messages.push(Message::FetchEntries(None));
             }
             KeybindAction::PanelNavigate(dir) => {
                 messages.push(Message::PanelNavigate(*dir));
-                messages.push(Message::FetchEntries(None));
             }
             KeybindAction::PanelResize(dir) => messages.push(Message::PanelResize(*dir)),
             KeybindAction::ToggleVisual => {}
@@ -1949,7 +2124,6 @@ impl eframe::App for App {
                         toast.percent = Some(percent);
                     }
                     WorkerRequest::Done { paths } => {
-                        messages.push(Message::FetchEntries(None));
                         if !paths.is_empty() {
                             messages.push(Message::HighlightPath(paths[0].to_path_buf()));
                         }
@@ -1986,6 +2160,13 @@ impl eframe::App for App {
                 }
             }
         }
+
+        self.watchers_manager.watchers.iter().for_each(|w| {
+            if w.event_chan_recv.try_recv().is_ok() {
+                //println!("found changes for ids: {:?}! ><", w.panes_ids);
+                messages.push(Message::FetchMultiplePanes(w.panes_ids.clone()));
+            }
+        });
 
         self.process_messages(messages);
     }

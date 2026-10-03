@@ -25,6 +25,8 @@ use crate::{
 impl App {
     fn address_bar(&self, ui: &mut eframe::egui::Ui, messages: &mut Vec<Message>, panel: &Panel) {
         ui.horizontal(|ui| {
+            ui.add(Label::new(format!("[{}]", panel.id)));
+
             let mut button =
                 ui.add(Button::new(RichText::new("<").size(14.0)).fill(Color32::TRANSPARENT));
             button.set_intrinsic_size(Vec2::new(400.0, 20.0));
